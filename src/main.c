@@ -1442,7 +1442,7 @@ size_t Chess_legal_moves(Chess *chess, Move *moves) {
     return n_moves;
 }
 
-#define SCORE_VICTIM_MULTIPLIER 3
+#define SCORE_VICTIM_MULTIPLIER 1
 
 void Chess_score_move(Chess *chess, Move *move) {
     // Give very high scores to promotions
@@ -1490,16 +1490,6 @@ size_t Chess_legal_moves_sorted(Chess *chess, Move *moves) {
         Move *move = &moves[i];
         Chess_score_move(chess, move);
     }
-
-    // Insertion sort
-    // for (int i = 1; i < n_moves; i++) {
-    //     Move x = moves[i];
-    //     int j;
-    //     for (j = i; j > 0 && moves[j - 1].score < x.score; j--) {
-    //         moves[j] = moves[j - 1];
-    //     }
-    //     moves[j] = x;
-    // }
 
     // C lib sort
     qsort(moves, n_moves, sizeof(Move), compare_moves);
@@ -1660,9 +1650,20 @@ int minimax_captures_only(Chess *chess, clock_t endtime, int a, int b) {
         return eval(chess);
     }
 
-    // Check for 3 fold repetition
-    if (Chess_3fold_repetition(chess) >= 3) {
-        return 0;
+    // Stand pat (basically, stop looking at dumb moves)
+    int stand_pat = eval(chess);
+    if (chess->turn == TURN_WHITE) {
+        if (stand_pat >= b) {
+            nodes_total++;
+            return stand_pat;
+        }
+        if (stand_pat > a) a = stand_pat;
+    } else {
+        if (stand_pat <= a) {
+            nodes_total++;
+            return stand_pat;
+        }
+        if (stand_pat < b) b = stand_pat;
     }
 
     // Only generate capture moves
