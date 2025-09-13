@@ -4,7 +4,7 @@ import chess
 
 # TODO: bot checks for threefolds repetitions and 50-move rule
 TIME = 100  # milliseconds per move
-OLD_BOT = "V2.2"
+OLD_BOT = "V2.0"
 FENS = []
 
 with open("data.txt", "r") as f:
@@ -88,14 +88,14 @@ def tournament():
             print(f"Avg Depth SigmaZero: {result['avg_depth_new']:.2f}, Old: {result['avg_depth_old']:.2f}")
             if result["score"] == 1:
                 results["wins"] += 1
-                print("Result: Win")
+                print("Result: Win", end=" ")
             elif result["score"] == -1:
                 results["losses"] += 1
-                print("Result: Loss")
+                print("Result: Loss", end=" ")
             else:
                 results["draws"] += 1
-                print("Result: Draw")
-            print()
+                print("Result: Draw", end=" ")
+            print(f"({results['wins']}W/{results['losses']}L/{results['draws']}D)\n")
         except KeyboardInterrupt:
             print("Tournament interrupted.")
             break

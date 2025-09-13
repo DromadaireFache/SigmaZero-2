@@ -1179,6 +1179,13 @@ bool Chess_friendly_check(Chess *chess) {
     return false;
 }
 
+bool captures_only = false;
+
+bool Chess_square_available(Chess *chess, int index) {
+    return captures_only ? Chess_enemy_piece_at(chess, index)
+                         : !Chess_friendly_piece_at(chess, index);
+}
+
 // This will check if the king is in check after the move
 bool Chess_is_move_legal(Chess *chess, Move *move) {
     // Make the move
@@ -1196,16 +1203,16 @@ bool Chess_is_move_legal(Chess *chess, Move *move) {
 }
 
 // Move *move, size_t n_moves NEED to be defined within scope
-#define ADD_MOVE_IF(condition, offset)                   \
-    if (condition) {                                     \
-        move->from = from;                               \
-        move->to = from + (offset);                      \
-        move->promotion = NO_PROMOTION;                  \
-        if (!Chess_friendly_piece_at(chess, move->to) && \
-            Chess_is_move_legal(chess, move)) {          \
-            move++;                                      \
-            n_moves++;                                   \
-        }                                                \
+#define ADD_MOVE_IF(condition, offset)                 \
+    if (condition) {                                   \
+        move->from = from;                             \
+        move->to = from + (offset);                    \
+        move->promotion = NO_PROMOTION;                \
+        if (Chess_square_available(chess, move->to) && \
+            Chess_is_move_legal(chess, move)) {        \
+            move++;                                    \
+            n_moves++;                                 \
+        }                                              \
     }
 
 size_t Chess_knight_moves(Chess *chess, Move *move, int from) {
@@ -1229,7 +1236,7 @@ size_t Chess_knight_moves(Chess *chess, Move *move, int from) {
         move->from = from;                                 \
         move->to = from + (offset);                        \
         move->promotion = NO_PROMOTION;                    \
-        if (!Chess_friendly_piece_at(chess, move->to) &&   \
+        if (Chess_square_available(chess, move->to) &&     \
             Chess_is_move_legal(chess, move)) {            \
             move++;                                        \
             n_moves++;                                     \
@@ -1288,7 +1295,7 @@ size_t Chess_pawn_moves(Chess *chess, Move *move, int from) {
 
 #define PAWN_ADD_MOVE(offset) PAWN_ADD_MOVE_PROMOTE(offset, NO_PROMOTION)
     // 1 row up
-    if (chess->board[from + 8 * direction] == EMPTY) {
+    if (chess->board[from + 8 * direction] == EMPTY && !captures_only) {
         if (at_last_rank) {
             PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_BISHOP)
             PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_KNIGHT)
@@ -1351,6 +1358,7 @@ size_t Chess_king_moves(Chess *chess, Move *move, int from) {
     ADD_MOVE_IF(pos.col > 0, -1)
     ADD_MOVE_IF(pos.row < 7, 8)
     ADD_MOVE_IF(pos.col < 7, 1)
+    if (captures_only) return n_moves;
 
 #define ADD_KING_MOVE_IF(offset)                \
     if (Chess_is_move_legal(chess, move)) {     \
@@ -1434,7 +1442,7 @@ size_t Chess_legal_moves(Chess *chess, Move *moves) {
     return n_moves;
 }
 
-#define SCORE_VICTIM_MULTIPLIER 2
+#define SCORE_VICTIM_MULTIPLIER 3
 
 void Chess_score_move(Chess *chess, Move *move) {
     // Give very high scores to promotions
@@ -1646,15 +1654,79 @@ int eval(Chess *chess) {
     return e;
 }
 
+int minimax_captures_only(Chess *chess, clock_t endtime, int a, int b) {
+    if (clock() > endtime) {
+        nodes_total++;
+        return eval(chess);
+    }
+
+    // Check for 3 fold repetition
+    if (Chess_3fold_repetition(chess) >= 3) {
+        return 0;
+    }
+
+    // Only generate capture moves
+    Move moves[MAX_LEGAL_MOVES];
+    captures_only = true;
+    size_t n_moves = Chess_legal_moves_sorted(chess, moves);
+    captures_only = false;
+
+    // If no captures found, return current eval
+    if (n_moves == 0) {
+        nodes_total++;
+        return eval(chess);
+    }
+
+    if (chess->turn == TURN_WHITE) {
+        int max_score = INT_MIN;
+        for (int i = 0; i < n_moves; i++) {
+            Move *move = &moves[i];
+            gamestate_t gamestate = chess->gamestate;
+            Piece capture = Chess_make_move(chess, move);
+
+            int score = minimax_captures_only(chess, endtime, a, b);
+
+            Chess_unmake_move(chess, move, capture);
+            chess->gamestate = gamestate;
+
+            if (score > max_score) max_score = score;
+            if (score >= b) break;
+            if (score > a) a = score;
+        }
+        return max_score;
+
+    } else {
+        int min_score = INT_MAX;
+        for (int i = 0; i < n_moves; i++) {
+            Move *move = &moves[i];
+            gamestate_t gamestate = chess->gamestate;
+            Piece capture = Chess_make_move(chess, move);
+
+            int score = minimax_captures_only(chess, endtime, a, b);
+
+            Chess_unmake_move(chess, move, capture);
+            chess->gamestate = gamestate;
+
+            if (score < min_score) min_score = score;
+            if (score <= a) break;
+            if (score < b) b = score;
+        }
+        return min_score;
+    }
+}
+
 int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
             Piece last_capture) {
-    // if (depth == 0 && last_capture != EMPTY) depth++;
+    if (depth == 0 && last_capture != EMPTY)
+        return minimax_captures_only(chess, endtime, a, b);
+
     if (depth == 0 || clock() > endtime) {
         nodes_total++;
         return eval(chess);
-    } else if (Chess_3fold_repetition(chess) >= 3) {
-        // Check for 3 fold repetition
-        // TODO: make this >= 3 when the engine gets good enough
+    }
+
+    // Check for 3 fold repetition
+    if (Chess_3fold_repetition(chess) >= 3) {
         return 0;
     }
 
