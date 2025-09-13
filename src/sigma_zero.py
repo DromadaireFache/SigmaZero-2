@@ -9,8 +9,8 @@ from itertools import permutations
 DEPTH = 5
 _COMPILED = set()
 if sys.platform == "linux":
-    EXE_FILE = "sigma-zero"
-    OLD_EXE_FILE = "old"
+    EXE_FILE = "./sigma-zero"
+    OLD_EXE_FILE = "./old"
 else:
     EXE_FILE = "sigma-zero.exe"
     OLD_EXE_FILE = "old.exe"

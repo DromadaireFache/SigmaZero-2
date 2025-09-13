@@ -8,8 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
 
-#include "consts.c"
+#include "../consts.c"
 
 #define class typedef struct
 
