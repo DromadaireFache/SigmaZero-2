@@ -1434,9 +1434,15 @@ size_t Chess_legal_moves(Chess *chess, Move *moves) {
     return n_moves;
 }
 
-#define SCORE_VICTIM_MULTIPLIER 10
+#define SCORE_VICTIM_MULTIPLIER 2
 
 void Chess_score_move(Chess *chess, Move *move) {
+    // Give very high scores to promotions
+    if (move->promotion == PROMOTE_QUEEN) {
+        move->score = 100;
+        return;
+    }
+
     move->score = 0;
     Position pos = Position_from_index(move->to);
     Piece aggressor = chess->board[move->from];
@@ -1444,7 +1450,8 @@ void Chess_score_move(Chess *chess, Move *move) {
 
     // MVV - LVA
     if (victim != EMPTY) {
-        move->score += abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) - Piece_value(aggressor));
+        move->score += abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) -
+                           Piece_value(aggressor));
     } else {
         // Deduct points if attacked by enemy pawns
 #define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
@@ -1459,21 +1466,12 @@ void Chess_score_move(Chess *chess, Move *move) {
             ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col > 0, -9, WHITE_PAWN)
         }
     }
+}
 
-    switch (move->promotion) {
-        case PROMOTE_BISHOP:
-        case PROMOTE_KNIGHT:
-            move->score += 3;
-            break;
-        case PROMOTE_ROOK:
-            move->score += 5;
-            break;
-        case PROMOTE_QUEEN:
-            move->score += 9;
-            break;
-        default:
-            break;
-    }
+int compare_moves(const void *a, const void *b) {
+    const Move *ma = (const Move *)a;
+    const Move *mb = (const Move *)b;
+    return mb->score - ma->score;
 }
 
 size_t Chess_legal_moves_sorted(Chess *chess, Move *moves) {
@@ -1486,14 +1484,17 @@ size_t Chess_legal_moves_sorted(Chess *chess, Move *moves) {
     }
 
     // Insertion sort
-    for (int i = 1; i < n_moves; i++) {
-        Move x = moves[i];
-        int j;
-        for (j = i; j > 0 && moves[j - 1].score < x.score; j--) {
-            moves[j] = moves[j - 1];
-        }
-        moves[j] = x;
-    }
+    // for (int i = 1; i < n_moves; i++) {
+    //     Move x = moves[i];
+    //     int j;
+    //     for (j = i; j > 0 && moves[j - 1].score < x.score; j--) {
+    //         moves[j] = moves[j - 1];
+    //     }
+    //     moves[j] = x;
+    // }
+
+    // C lib sort
+    qsort(moves, n_moves, sizeof(Move), compare_moves);
 
     return n_moves;
 }
