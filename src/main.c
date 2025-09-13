@@ -11,7 +11,7 @@
 #include <time.h>
 #include <limits.h>
 
-#include "consts.c"
+#include "consts copy.c"
 
 #define class typedef struct
 
@@ -1581,11 +1581,12 @@ int eval(Chess *chess) {
     return e;
 }
 
-int minimax(Chess *chess, clock_t endtime, int depth, int a, int b) {
-    if (clock() > endtime || depth == 0) {
+int minimax(Chess *chess, clock_t endtime, int depth, int a, int b, Piece last_capture) {
+    if (depth == 0 && last_capture != EMPTY) depth++;
+    if (depth == 0 || clock() > endtime) {
         nodes_total++;
         return eval(chess);
-    } else if (Chess_3fold_repetition(chess) >= 2) {
+    } else if (Chess_3fold_repetition(chess) >= 3) {
         // Check for 3 fold repetition
         // TODO: make this >= 3 when the engine gets good enough
         return 0;
@@ -1609,7 +1610,7 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b) {
             gamestate_t gamestate = chess->gamestate;
             Piece capture = Chess_make_move(chess, move);
 
-            int score = minimax(chess, endtime, depth - 1, a, b);
+            int score = minimax(chess, endtime, depth - 1, a, b, capture);
 
             Chess_unmake_move(chess, move, capture);
             chess->gamestate = gamestate;
@@ -1627,7 +1628,7 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b) {
             gamestate_t gamestate = chess->gamestate;
             Piece capture = Chess_make_move(chess, move);
 
-            int score = minimax(chess, endtime, depth - 1, a, b);
+            int score = minimax(chess, endtime, depth - 1, a, b, capture);
 
             Chess_unmake_move(chess, move, capture);
             chess->gamestate = gamestate;
@@ -1689,7 +1690,7 @@ int play(char *fen, int millis) {
             gamestate_t gamestate = chess->gamestate;
             Piece capture = Chess_make_move(chess, move);
 
-            int score = minimax(chess, endtime, depth, INT_MIN, INT_MAX);
+            int score = minimax(chess, endtime, depth, INT_MIN, INT_MAX, capture);
             scores[i] = score;
 
             Chess_unmake_move(chess, move, capture);

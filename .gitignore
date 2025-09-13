@@ -7,3 +7,4 @@ collect_data.py
 __pycache__/
 ~$versions.xlsx
 *.exe
+tournament.txt

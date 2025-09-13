@@ -1,9 +1,10 @@
+import time
 from src import sigma_zero
 import chess
 
 # TODO: bot checks for threefolds repetitions and 50-move rule
 TIME = 100  # milliseconds per move
-OLD_BOT = "V2.0"
+OLD_BOT = "V2.2"
 FENS = []
 
 with open("data.txt", "r") as f:
@@ -76,6 +77,7 @@ def play_game(fen: str, is_white: bool) -> dict:
 
 
 def tournament():
+    start = time.perf_counter()
     results = {"wins": 0, "losses": 0, "draws": 0}
     for i, fen in enumerate(FENS):
         try:
@@ -97,6 +99,7 @@ def tournament():
         except KeyboardInterrupt:
             print("Tournament interrupted.")
             break
+    print(f"Tournament completed in {time.perf_counter() - start:.2f} seconds.")
     print("Tournament Results:")
     print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}")
 
