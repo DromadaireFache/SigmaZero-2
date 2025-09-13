@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <limits.h>
 
 #include "consts copy.c"
 
@@ -298,6 +297,7 @@ class {
     uint8_t from;
     uint8_t to;
     Promotion promotion;  // 'q', 'r', 'b', 'n' or 0 for no promotion
+    int score;
 }
 Move;
 
@@ -1434,6 +1434,52 @@ size_t Chess_legal_moves(Chess *chess, Move *moves) {
     return n_moves;
 }
 
+void Chess_score_move(Chess *chess, Move *move) {
+    move->score = 0;
+    Position pos = Position_from_index(move->to);
+    Piece aggressor = chess->board[move->from];
+    Piece victim = chess->board[move->to];
+
+    // MVV - LVA
+    if (victim != EMPTY) {
+        move->score += abs(Piece_value(victim) - Piece_value(aggressor));
+    } else {
+        // Deduct points if attacked by enemy pawns
+    #define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
+        if ((condition) && chess->board[move->to + (offset)] == (pawn)) \
+            move->score -= 3;
+        if (chess->turn == TURN_WHITE && aggressor != WHITE_PAWN) {
+            ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col < 7, 9, BLACK_PAWN)
+            ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col > 0, 7, BLACK_PAWN)
+        } else if (chess->turn == TURN_BLACK && aggressor != BLACK_PAWN) {
+            ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col < 7, -7, WHITE_PAWN)
+            ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col > 0, -9, WHITE_PAWN)
+        }
+    }
+}
+
+size_t Chess_legal_moves_sorted(Chess *chess, Move *moves) {
+    size_t n_moves = Chess_legal_moves(chess, moves);
+
+    // Give a score to each move
+    for (int i = 0; i < n_moves; i++) {
+        Move *move = &moves[i];
+        Chess_score_move(chess, move);
+    }
+
+    // Insertion sort
+    for (int i = 1; i < n_moves; i++) {
+        Move x = moves[i];
+        int j;
+        for (j = i; j > 0 && moves[j - 1].score < x.score; j--) {
+            moves[j] = moves[j - 1];
+        }
+        moves[j] = x;
+    }
+
+    return n_moves;
+}
+
 size_t Chess_count_moves(Chess *chess, int depth) {
     if (depth == 0) return 1;
 
@@ -1581,8 +1627,9 @@ int eval(Chess *chess) {
     return e;
 }
 
-int minimax(Chess *chess, clock_t endtime, int depth, int a, int b, Piece last_capture) {
-    if (depth == 0 && last_capture != EMPTY) depth++;
+int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
+            Piece last_capture) {
+    // if (depth == 0 && last_capture != EMPTY) depth++;
     if (depth == 0 || clock() > endtime) {
         nodes_total++;
         return eval(chess);
@@ -1593,14 +1640,16 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b, Piece last_c
     }
 
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves(chess, moves);
+    size_t n_moves = Chess_legal_moves_sorted(chess, moves);
 
-    if (n_moves == 0 && Chess_friendly_check(chess)) {
-        // Checkmate
-        return 1000 * (1000 - depth) * (chess->turn == TURN_WHITE ? -1 : 1);
-    } else if (n_moves == 0) {
-        // draw by stalemate
-        return 0;
+    if (n_moves == 0) {
+        if (Chess_friendly_check(chess)) {
+            // Checkmate
+            return 1000 * (1000 - depth) * (chess->turn == TURN_WHITE ? -1 : 1);
+        } else {
+            // draw by stalemate
+            return 0;
+        }
     }
 
     if (chess->turn == TURN_WHITE) {
@@ -1673,7 +1722,7 @@ int play(char *fen, int millis) {
 
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves(chess, moves);
+    size_t n_moves = Chess_legal_moves_sorted(chess, moves);
     if (n_moves < 1) return 1;
 
     Move *best_move = NULL;
@@ -1690,7 +1739,8 @@ int play(char *fen, int millis) {
             gamestate_t gamestate = chess->gamestate;
             Piece capture = Chess_make_move(chess, move);
 
-            int score = minimax(chess, endtime, depth, INT_MIN, INT_MAX, capture);
+            int score =
+                minimax(chess, endtime, depth, INT_MIN, INT_MAX, capture);
             scores[i] = score;
 
             Chess_unmake_move(chess, move, capture);

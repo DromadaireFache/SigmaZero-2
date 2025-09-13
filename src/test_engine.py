@@ -1,3 +1,4 @@
+from pprint import pprint
 import sys
 import chess
 import pytest
@@ -40,6 +41,11 @@ def test_move_generation(fen: str):
     mybot = sigma_zero.moves(fen, DEPTH).get("nodes", -1)
     chesslib = count_moves(chess.Board(fen), DEPTH)
     assert mybot == chesslib
+
+
+if __name__ == "__main__":
+    pprint(sigma_zero.old_play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 10000))
+    pprint(sigma_zero.play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 2000))
 
 
 # print("----- Chess lib -----")
