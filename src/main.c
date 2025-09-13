@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -1638,6 +1639,26 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b) {
     }
 }
 
+// if is_white sort in descending order, otherwise ascending
+void bubble_sort(Move *moves, int *scores, size_t n_moves, bool is_white) {
+    bool swapped;
+    do {
+        swapped = false;
+        for (int i = 1; i < n_moves; i++) {
+            if ((is_white && scores[i - 1] < scores[i]) ||
+                (!is_white && scores[i - 1] > scores[i])) {
+                Move tmp_move = moves[i - 1];
+                moves[i - 1] = moves[i];
+                moves[i] = tmp_move;
+                int tmp_score = scores[i - 1];
+                scores[i - 1] = scores[i];
+                scores[i] = tmp_score;
+                swapped = true;
+            }
+        }
+    } while (swapped);
+}
+
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
 int play(char *fen, int millis) {
@@ -1649,6 +1670,7 @@ int play(char *fen, int millis) {
     clock_t endtime = start + CLOCKS_PER_SEC * (millis) / 1000;
 
     Move moves[MAX_LEGAL_MOVES];
+    int scores[MAX_LEGAL_MOVES];
     size_t n_moves = Chess_legal_moves(chess, moves);
     if (n_moves < 1) return 1;
 
@@ -1667,6 +1689,7 @@ int play(char *fen, int millis) {
             Piece capture = Chess_make_move(chess, move);
 
             int score = minimax(chess, endtime, depth, INT_MIN, INT_MAX);
+            scores[i] = score;
 
             Chess_unmake_move(chess, move, capture);
             chess->gamestate = gamestate;
@@ -1684,6 +1707,7 @@ int play(char *fen, int millis) {
             best_move = current_best_move;
         }
 
+        bubble_sort(moves, scores, n_moves, chess->turn == TURN_WHITE);
         depth++;
     }
 

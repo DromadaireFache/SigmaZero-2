@@ -1,7 +1,9 @@
 .vscode/
 .clang-format
-old.exe
 versions.xlsx
 tmp.py
 .pytest_cache
 collect_data.py
+__pycache__/
+~$versions.xlsx
+*.exe

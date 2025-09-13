@@ -8,7 +8,12 @@ from itertools import permutations
 
 DEPTH = 5
 _COMPILED = set()
-EXE_FILE = "sigma-zero.exe"
+if sys.platform == "linux":
+    EXE_FILE = "sigma-zero"
+    OLD_EXE_FILE = "old"
+else:
+    EXE_FILE = "sigma-zero.exe"
+    OLD_EXE_FILE = "old.exe"
 FENS = [
     "r1bq1rk1/p5pp/1p3b2/2pp4/1n1Pp3/1P2P1P1/1B1Q1PBP/2R1NRK1 b - - 1 17",
     "8/6k1/5q1p/1p6/8/7P/6P1/Q6K w - - 11 62",
@@ -61,7 +66,7 @@ def play(fen: str, millis: int) -> dict:
 
 
 def old_play(fen: str, millis: int) -> dict:
-    result = dict(command(f'play "{fen}" "{millis}"', JSON=True, exe="old.exe"))
+    result = dict(command(f'play "{fen}" "{millis}"', JSON=True, exe=OLD_EXE_FILE))
     return result
 
 
