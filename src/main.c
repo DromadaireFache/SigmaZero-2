@@ -1456,6 +1456,21 @@ void Chess_score_move(Chess *chess, Move *move) {
             ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col > 0, -9, WHITE_PAWN)
         }
     }
+
+    switch (move->promotion) {
+        case PROMOTE_BISHOP:
+        case PROMOTE_KNIGHT:
+            move->score += 3;
+            break;
+        case PROMOTE_ROOK:
+            move->score += 5;
+            break;
+        case PROMOTE_QUEEN:
+            move->score += 9;
+            break;
+        default:
+            break;
+    }
 }
 
 size_t Chess_legal_moves_sorted(Chess *chess, Move *moves) {
@@ -1591,13 +1606,14 @@ int moves(char *fen, int depth) {
         size_t n_moves = Chess_count_moves_multi(chess, depth);
         clock_t end = clock();
         double cpu_time = ((double)end - start) / CLOCKS_PER_SEC;
-        double nps = cpu_time > 0.0 ? n_moves / cpu_time : -0.0;
-        puts("{");
-        printf("  \"depth\": %d,\n", depth);
-        printf("  \"nodes\": %lu,\n", (unsigned long)n_moves);
-        printf("  \"time\": %.3lf,\n", cpu_time);
-        printf("  \"nps\": %.3lf\n", nps);
-        puts("}");
+        double nps = cpu_time > 0.0 ? n_moves / cpu_time :
+            -0.0;
+            puts("{");
+            printf("  \"depth\": %d,\n", depth);
+            printf("  \"nodes\": %lu,\n", (unsigned long)n_moves);
+            printf("  \"time\": %.3lf,\n", cpu_time);
+            printf("  \"nps\": %.3lf\n", nps);
+            puts("}");
     } else {
         Move moves[MAX_LEGAL_MOVES];
         size_t n_moves = Chess_legal_moves(chess, moves);
