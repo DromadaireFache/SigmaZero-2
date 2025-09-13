@@ -1434,6 +1434,8 @@ size_t Chess_legal_moves(Chess *chess, Move *moves) {
     return n_moves;
 }
 
+#define SCORE_VICTIM_MULTIPLIER 10
+
 void Chess_score_move(Chess *chess, Move *move) {
     move->score = 0;
     Position pos = Position_from_index(move->to);
@@ -1442,12 +1444,13 @@ void Chess_score_move(Chess *chess, Move *move) {
 
     // MVV - LVA
     if (victim != EMPTY) {
-        move->score += abs(Piece_value(victim) - Piece_value(aggressor));
+        move->score += abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) - Piece_value(aggressor));
     } else {
         // Deduct points if attacked by enemy pawns
-    #define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
-        if ((condition) && chess->board[move->to + (offset)] == (pawn)) \
-            move->score -= 3;
+#define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
+    if ((condition) && chess->board[move->to + (offset)] == (pawn)) \
+        move->score -= abs(Piece_value(aggressor));
+
         if (chess->turn == TURN_WHITE && aggressor != WHITE_PAWN) {
             ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col < 7, 9, BLACK_PAWN)
             ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col > 0, 7, BLACK_PAWN)
@@ -1606,14 +1609,13 @@ int moves(char *fen, int depth) {
         size_t n_moves = Chess_count_moves_multi(chess, depth);
         clock_t end = clock();
         double cpu_time = ((double)end - start) / CLOCKS_PER_SEC;
-        double nps = cpu_time > 0.0 ? n_moves / cpu_time :
-            -0.0;
-            puts("{");
-            printf("  \"depth\": %d,\n", depth);
-            printf("  \"nodes\": %lu,\n", (unsigned long)n_moves);
-            printf("  \"time\": %.3lf,\n", cpu_time);
-            printf("  \"nps\": %.3lf\n", nps);
-            puts("}");
+        double nps = cpu_time > 0.0 ? n_moves / cpu_time : -0.0;
+        puts("{");
+        printf("  \"depth\": %d,\n", depth);
+        printf("  \"nodes\": %lu,\n", (unsigned long)n_moves);
+        printf("  \"time\": %.3lf,\n", cpu_time);
+        printf("  \"nps\": %.3lf\n", nps);
+        puts("}");
     } else {
         Move moves[MAX_LEGAL_MOVES];
         size_t n_moves = Chess_legal_moves(chess, moves);
