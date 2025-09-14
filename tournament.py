@@ -3,12 +3,11 @@ import time
 from src import sigma_zero
 import chess
 
-# TODO: bot checks for threefolds repetitions and 50-move rule
 TIME = 100  # milliseconds per move
 OLD_BOT = "V2.0"
 FENS = []
 
-with open("data.txt", "r") as f:
+with open("data/FENs.txt", "r") as f:
     for line in f:
         fen = line.strip()
         if fen:  # append twice for both colors
