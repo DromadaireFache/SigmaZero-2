@@ -1637,18 +1637,6 @@ TTItem *TT_get(uint64_t key, int depth) {
     return NULL;
 }
 
-void TT_dump() {
-    puts("Transposition table {");
-    for (int i = 0; i < TT_LENGTH; i++) {
-        TTItem *item = &tt[i];
-        if (item->key % TT_LENGTH == i && item->depth > 0) {
-            printf("    TTItem(key=%016I64X, depth=%d, eval=%d),\n", item->key,
-                   item->depth, item->eval);
-        }
-    }
-    puts("}");
-}
-
 int moves(char *fen, int depth) {
     Chess *chess = Chess_from_fen(fen);
     if (!chess) return 1;
@@ -1736,17 +1724,16 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
 
     // Look for existing eval in transposition table
     uint64_t hash = ZHashStack_peek(&chess->zhstack);
-    int absolute_depth = global_depth - depth + 1;
-    TTItem *tt_item = TT_get(hash, absolute_depth);
+    TTItem *tt_item = TT_get(hash, depth);
     if (tt_item != NULL) {
         nodes_total++;
         return tt_item->eval;
     }
 
-#define RETURN_AND_STORE_TT(e)                  \
-    nodes_total++;                              \
-    int evaluation = (e);                       \
-    TT_store(hash, evaluation, absolute_depth); \
+#define RETURN_AND_STORE_TT(e)         \
+    nodes_total++;                     \
+    int evaluation = (e);              \
+    TT_store(hash, evaluation, depth); \
     return evaluation;
 
     if (depth == 0 || clock() > endtime) {
@@ -1913,7 +1900,6 @@ void help(void) {
 int test() {
     TT_store(0x55, -50, 3);
     TT_store(0x7532, -30, 2);
-    TT_dump();
     TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2);
     if (tt_item == NULL) {
         printf("NULL pointer\n");
