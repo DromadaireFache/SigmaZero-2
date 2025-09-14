@@ -1645,11 +1645,14 @@ int eval(Chess *chess) {
     return e;
 }
 
-int minimax_captures_only(Chess *chess, clock_t endtime, int a, int b) {
+int minimax_captures_only(Chess *chess, clock_t endtime, int depth, int a, int b) {
     int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
-    if (best_score >= b || clock() > endtime) return best_score;
+    if (depth == 0 || best_score >= b || clock() > endtime) {
+        nodes_total++;
+        return best_score;
+    }
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
@@ -1662,7 +1665,7 @@ int minimax_captures_only(Chess *chess, clock_t endtime, int a, int b) {
         gamestate_t gamestate = chess->gamestate;
         Piece capture = Chess_make_move(chess, move);
 
-        int score = -minimax_captures_only(chess, endtime, -b, -a);
+        int score = -minimax_captures_only(chess, endtime, depth - 1, -b, -a);
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
@@ -1674,10 +1677,12 @@ int minimax_captures_only(Chess *chess, clock_t endtime, int a, int b) {
     return best_score;
 }
 
+#define QUIES_DEPTH 5
+
 int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
             Piece last_capture) {
     if (depth == 0 && last_capture != EMPTY)
-        return minimax_captures_only(chess, endtime, a, b);
+        return minimax_captures_only(chess, endtime, QUIES_DEPTH, a, b);
 
     if (depth == 0 || clock() > endtime) {
         nodes_total++;
@@ -1686,6 +1691,7 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
 
     // Check for 3 fold repetition
     if (Chess_3fold_repetition(chess) >= 3) {
+        nodes_total++;
         return 0;
     }
 
@@ -1693,6 +1699,7 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
     size_t n_moves = Chess_legal_moves_sorted(chess, moves);
 
     if (n_moves == 0) {
+        nodes_total++;
         if (Chess_friendly_check(chess)) {
             // Checkmate
             return -1000000 - depth;
