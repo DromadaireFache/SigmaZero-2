@@ -85,7 +85,7 @@ int Piece_value(Piece piece) {
     }
 }
 
-int Piece_value_at(Piece piece, int i) {
+int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
     switch (piece) {
         case WHITE_PAWN:
             return 100 + PS_WHITE_PAWN[i];
@@ -108,9 +108,15 @@ int Piece_value_at(Piece piece, int i) {
         case BLACK_QUEEN:
             return -900 + PS_BLACK_QUEEN[i];
         case WHITE_KING:
-            return 20000 + PS_WHITE_KING[i];
+            int a = PS_WHITE_KING[i] * (50 - fullmoves);
+            int b = PS_WHITE_KING_ENDGAME[i] * fullmoves;
+            int c = (a + b) / 50;
+            return 20000 + c;
         case BLACK_KING:
-            return -20000 + PS_BLACK_KING[i];
+            int a = PS_BLACK_KING[i] * (50 - fullmoves);
+            int b = PS_BLACK_KING_ENDGAME[i] * fullmoves;
+            int c = (a + b) / 50;
+            return -20000 + c;
         default:
             return 0;
     }
@@ -1677,9 +1683,10 @@ int moves(char *fen, int depth) {
 
 int eval(Chess *chess) {
     int e = 0;
+    uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
 
     for (int i = 0; i < 64; i++) {
-        e += Piece_value_at(chess->board[i], i);
+        e += Piece_value_at(chess->board[i], i, fullmoves);
     }
 
     return e;
