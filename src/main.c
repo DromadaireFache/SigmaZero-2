@@ -1646,81 +1646,38 @@ int eval(Chess *chess) {
 }
 
 int minimax_captures_only(Chess *chess, clock_t endtime, int a, int b) {
-    if (clock() > endtime) {
-        nodes_total++;
-        return eval(chess);
-    }
+    int best_score = eval(chess);
 
-    // Stand pat (basically, stop looking at dumb moves)
-    int stand_pat = eval(chess);
-    if (chess->turn == TURN_WHITE) {
-        if (stand_pat >= b) {
-            nodes_total++;
-            return stand_pat;
-        }
-        if (stand_pat > a) a = stand_pat;
-    } else {
-        if (stand_pat <= a) {
-            nodes_total++;
-            return stand_pat;
-        }
-        if (stand_pat < b) b = stand_pat;
-    }
+    // Stand Pat
+    if (best_score >= b || clock() > endtime) return best_score;
+    if (best_score > a) a = best_score;
 
-    // Only generate capture moves
     Move moves[MAX_LEGAL_MOVES];
     captures_only = true;
     size_t n_moves = Chess_legal_moves_sorted(chess, moves);
     captures_only = false;
 
-    // If no captures found, return current eval
-    if (n_moves == 0) {
-        nodes_total++;
-        return eval(chess);
+    for (int i = 0; i < n_moves; i++) {
+        Move *move = &moves[i];
+        gamestate_t gamestate = chess->gamestate;
+        Piece capture = Chess_make_move(chess, move);
+
+        int score = -minimax_captures_only(chess, endtime, -b, -a);
+
+        Chess_unmake_move(chess, move, capture);
+        chess->gamestate = gamestate;
+
+        if (score >= b) return score;
+        if (score > best_score) best_score = score;
+        if (score > a) a = score;
     }
-
-    if (chess->turn == TURN_WHITE) {
-        int max_score = INT_MIN;
-        for (int i = 0; i < n_moves; i++) {
-            Move *move = &moves[i];
-            gamestate_t gamestate = chess->gamestate;
-            Piece capture = Chess_make_move(chess, move);
-
-            int score = minimax_captures_only(chess, endtime, a, b);
-
-            Chess_unmake_move(chess, move, capture);
-            chess->gamestate = gamestate;
-
-            if (score > max_score) max_score = score;
-            if (score >= b) break;
-            if (score > a) a = score;
-        }
-        return max_score;
-
-    } else {
-        int min_score = INT_MAX;
-        for (int i = 0; i < n_moves; i++) {
-            Move *move = &moves[i];
-            gamestate_t gamestate = chess->gamestate;
-            Piece capture = Chess_make_move(chess, move);
-
-            int score = minimax_captures_only(chess, endtime, a, b);
-
-            Chess_unmake_move(chess, move, capture);
-            chess->gamestate = gamestate;
-
-            if (score < min_score) min_score = score;
-            if (score <= a) break;
-            if (score < b) b = score;
-        }
-        return min_score;
-    }
+    return best_score;
 }
 
 int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
             Piece last_capture) {
-    // if (depth == 0 && last_capture != EMPTY)
-    //     return minimax_captures_only(chess, endtime, a, b);
+    if (depth == 0 && last_capture != EMPTY)
+        return minimax_captures_only(chess, endtime, a, b);
 
     if (depth == 0 || clock() > endtime) {
         nodes_total++;
@@ -1745,7 +1702,6 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
         }
     }
 
-    // int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
         Move *move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
@@ -1805,7 +1761,7 @@ int play(char *fen, int millis) {
         Move *current_best_move = NULL;
         nodes_total = 0;
 
-        for (int i = 0; i < n_moves; i++) {
+        for (int i = 0; i < n_moves && clock() < endtime; i++) {
             Move *move = &moves[i];
             gamestate_t gamestate = chess->gamestate;
             Piece capture = Chess_make_move(chess, move);
