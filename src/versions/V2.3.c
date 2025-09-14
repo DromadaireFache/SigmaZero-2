@@ -10,7 +10,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "consts.c"
+#include "../consts.c"
 
 #define class typedef struct
 #define INF 1000000000
@@ -1601,54 +1601,6 @@ size_t Chess_count_moves_multi(Chess *chess, int depth) {
     return nodes_total;
 }
 
-// Transposition table
-class {
-    uint64_t key;
-    int eval;
-    int depth;
-}
-TTItem;
-
-// Will give ~67MB array
-#define TT_LENGTH (1 << 24)
-
-// Transposition table array
-TTItem tt[TT_LENGTH] = {0};
-int global_depth = 0;
-
-void TT_store(uint64_t key, int eval, int depth) {
-    size_t i = key % TT_LENGTH;
-    TTItem *item = &tt[i];
-
-    if (depth > item->depth) {
-        item->key = key;
-        item->eval = eval;
-        item->depth = depth;
-    }
-}
-
-TTItem *TT_get(uint64_t key, int depth) {
-    size_t i = key % TT_LENGTH;
-    TTItem *item = &tt[i];
-
-    if (item->key == key && depth <= item->depth) {
-        return item;
-    }
-    return NULL;
-}
-
-void TT_dump() {
-    puts("Transposition table {");
-    for (int i = 0; i < TT_LENGTH; i++) {
-        TTItem *item = &tt[i];
-        if (item->key % TT_LENGTH == i && item->depth > 0) {
-            printf("    TTItem(key=%016I64X, depth=%d, eval=%d),\n", item->key,
-                   item->depth, item->eval);
-        }
-    }
-    puts("}");
-}
-
 int moves(char *fen, int depth) {
     Chess *chess = Chess_from_fen(fen);
     if (!chess) return 1;
@@ -1693,8 +1645,7 @@ int eval(Chess *chess) {
     return e;
 }
 
-int minimax_captures_only(Chess *chess, clock_t endtime, int depth, int a,
-                          int b) {
+int minimax_captures_only(Chess *chess, clock_t endtime, int depth, int a, int b) {
     int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
@@ -1730,28 +1681,12 @@ int minimax_captures_only(Chess *chess, clock_t endtime, int depth, int a,
 
 int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
             Piece last_capture) {
-    if (depth == 0 && last_capture != EMPTY) {
+    if (depth == 0 && last_capture != EMPTY)
         return minimax_captures_only(chess, endtime, QUIES_DEPTH, a, b);
-    }
-
-    // Look for existing eval in transposition table
-    uint64_t hash = ZHashStack_peek(&chess->zhstack);
-    int absolute_depth = global_depth - depth + 1;
-    TTItem *tt_item = TT_get(hash, absolute_depth);
-    if (tt_item != NULL) {
-        nodes_total++;
-        return tt_item->eval;
-    }
-
-#define RETURN_AND_STORE_TT(e)                  \
-    nodes_total++;                              \
-    int evaluation = (e);                       \
-    TT_store(hash, evaluation, absolute_depth); \
-    return evaluation;
 
     if (depth == 0 || clock() > endtime) {
-        RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess)
-                                                      : -eval(chess))
+        nodes_total++;
+        return chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
     }
 
     // Check for 3 fold repetition
@@ -1764,16 +1699,16 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
     size_t n_moves = Chess_legal_moves_sorted(chess, moves);
 
     if (n_moves == 0) {
+        nodes_total++;
         if (Chess_friendly_check(chess)) {
             // Checkmate
-            RETURN_AND_STORE_TT(-1000000 - depth)
+            return -1000000 - depth;
         } else {
             // draw by stalemate
-            RETURN_AND_STORE_TT(0)
+            return 0;
         }
     }
 
-    int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
         Move *move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
@@ -1784,13 +1719,10 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
 
-        if (score > best_score) {
-            best_score = score;
-            if (score > a) a = score;
-        }
-        if (score >= b) break;
+        if (score >= b) return b;
+        if (score > a) a = score;
     }
-    RETURN_AND_STORE_TT(best_score)
+    return a;
 }
 
 // if is_white sort in descending order, otherwise ascending
@@ -1835,7 +1767,6 @@ int play(char *fen, int millis) {
         int current_best_score = -INF;
         Move *current_best_move = NULL;
         nodes_total = 0;
-        global_depth = depth;
 
         for (int i = 0; i < n_moves && clock() < endtime; i++) {
             Move *move = &moves[i];
@@ -1911,15 +1842,22 @@ void help(void) {
 }
 
 int test() {
-    TT_store(0x55, -50, 3);
-    TT_store(0x7532, -30, 2);
-    TT_dump();
-    TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2);
-    if (tt_item == NULL) {
-        printf("NULL pointer\n");
-    } else {
-        printf("eval: %d\n", tt_item->eval);
-    }
+    Chess *chess = Chess_from_fen(
+        "rnbqk2r/ppppnpp1/4P2p/8/1P6/b6N/P1P1PPPP/RNBQKB1R b KQkq - 1 2");
+    Position h8 = Position_from_string("h8");
+    Position g8 = Position_from_string("g8");
+    Move move = (Move){.from = Position_to_index(&h8),
+                       .to = Position_to_index(&g8),
+                       .promotion = NO_PROMOTION};
+    gamestate_t gamestate = chess->gamestate;
+    Piece capture = Chess_make_move(chess, &move);
+    Chess_dump(chess);
+    Chess_print(chess);
+    puts("-------------------");
+    Chess_unmake_move(chess, &move, capture);
+    chess->gamestate = gamestate;
+    Chess_dump(chess);
+    Chess_print(chess);
     return 0;
 }
 
