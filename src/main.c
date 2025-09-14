@@ -86,6 +86,7 @@ int Piece_value(Piece piece) {
 }
 
 int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
+    int a, b, c;
     switch (piece) {
         case WHITE_PAWN:
             return 100 + PS_WHITE_PAWN[i];
@@ -108,14 +109,14 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
         case BLACK_QUEEN:
             return -900 + PS_BLACK_QUEEN[i];
         case WHITE_KING:
-            int a = PS_WHITE_KING[i] * (50 - fullmoves);
-            int b = PS_WHITE_KING_ENDGAME[i] * fullmoves;
-            int c = (a + b) / 50;
+            a = PS_WHITE_KING[i] * (50 - fullmoves);
+            b = PS_WHITE_KING_ENDGAME[i] * fullmoves;
+            c = (a + b) / 50;
             return 20000 + c;
         case BLACK_KING:
-            int a = PS_BLACK_KING[i] * (50 - fullmoves);
-            int b = PS_BLACK_KING_ENDGAME[i] * fullmoves;
-            int c = (a + b) / 50;
+            a = PS_BLACK_KING[i] * (50 - fullmoves);
+            b = PS_BLACK_KING_ENDGAME[i] * fullmoves;
+            c = (a + b) / 50;
             return -20000 + c;
         default:
             return 0;
