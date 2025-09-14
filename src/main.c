@@ -1646,7 +1646,7 @@ int eval(Chess *chess) {
 }
 
 int minimax_captures_only(Chess *chess, clock_t endtime, int a, int b) {
-    int best_score = eval(chess);
+    int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
     if (best_score >= b || clock() > endtime) return best_score;
