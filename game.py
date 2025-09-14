@@ -94,9 +94,9 @@ def print_board(board: chess.Board):
     print("   a b c d e f g h")
 
 
-def main():
+def main(fen: str = chess.STARTING_FEN):
     bot = Bot()
-    board = chess.Board()
+    board = chess.Board(fen)
     while not board.is_game_over():
         print_board(board)
         move = bot.get_move(board)
@@ -107,4 +107,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1:
+        main(sys.argv[1])
+    else:
+        main()

@@ -1605,22 +1605,23 @@ size_t Chess_count_moves_multi(Chess *chess, int depth) {
 class {
     uint64_t key;
     int eval;
-    int depth;
+    uint8_t depth;
 }
 TTItem;
 
 // Will give ~67MB array
-#define TT_LENGTH (1 << 24)
+#define TT_LENGTH (1 << 26)
 
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
-int global_depth = 0;
+size_t n_transposition = 0;
 
 void TT_store(uint64_t key, int eval, int depth) {
     size_t i = key % TT_LENGTH;
     TTItem *item = &tt[i];
 
     if (depth > item->depth) {
+        // if ((item->key % TT_LENGTH) != i) n_transposition++;
         item->key = key;
         item->eval = eval;
         item->depth = depth;
@@ -1632,9 +1633,22 @@ TTItem *TT_get(uint64_t key, int depth) {
     TTItem *item = &tt[i];
 
     if (item->key == key && depth <= item->depth) {
+        n_transposition++;
         return item;
     }
     return NULL;
+}
+
+void TT_dump() {
+    puts("Transposition table {");
+    for (int i = 0; i < TT_LENGTH; i++) {
+        TTItem *item = &tt[i];
+        if (item->key % TT_LENGTH == i && item->depth > 0) {
+            printf("    TTItem(key=%016I64X, depth=%d, eval=%d),\n", item->key,
+                   item->depth, item->eval);
+        }
+    }
+    puts("}");
 }
 
 int moves(char *fen, int depth) {
@@ -1822,7 +1836,6 @@ int play(char *fen, int millis) {
         int current_best_score = -INF;
         Move *current_best_move = NULL;
         nodes_total = 0;
-        global_depth = depth;
 
         for (int i = 0; i < n_moves && clock() < endtime; i++) {
             Move *move = &moves[i];
@@ -1871,6 +1884,7 @@ int play(char *fen, int millis) {
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
     printf("  \"nodes\": %lu,\n", (unsigned long)nodes_total);
+    printf("  \"transpositions\": %lu,\n", (unsigned long)n_transposition);
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
     printf("  \"move\": \"%s\"\n", Move_string(best_move));
     puts("}");
@@ -1898,6 +1912,7 @@ void help(void) {
 }
 
 int test() {
+    printf("Size of TT: %luMB", (unsigned long)sizeof(tt) / 1000000);
     TT_store(0x55, -50, 3);
     TT_store(0x7532, -30, 2);
     TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2);
