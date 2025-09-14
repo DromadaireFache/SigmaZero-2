@@ -1601,6 +1601,7 @@ size_t Chess_count_moves_multi(Chess *chess, int depth) {
     return nodes_total;
 }
 
+/* REMOVE FOR NOW BECAUSE I CAN'T GET IT TO WORK :(
 // Transposition table
 class {
     uint64_t key;
@@ -1638,18 +1639,7 @@ TTItem *TT_get(uint64_t key, int depth) {
     }
     return NULL;
 }
-
-void TT_dump() {
-    puts("Transposition table {");
-    for (int i = 0; i < TT_LENGTH; i++) {
-        TTItem *item = &tt[i];
-        if (item->key % TT_LENGTH == i && item->depth > 0) {
-            printf("    TTItem(key=%016I64X, depth=%d, eval=%d),\n", item->key,
-                   item->depth, item->eval);
-        }
-    }
-    puts("}");
-}
+*/
 
 int moves(char *fen, int depth) {
     Chess *chess = Chess_from_fen(fen);
@@ -1738,19 +1728,19 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
     }
 
     // Look for existing eval in transposition table
-    uint64_t hash = ZHashStack_peek(&chess->zhstack);
-    if (is_endgame) {
-        TTItem *tt_item = TT_get(hash, depth);
-        if (tt_item != NULL) {
-            nodes_total++;
-            return tt_item->eval;
-        }
-    }
+    // uint64_t hash = ZHashStack_peek(&chess->zhstack);
+    // if (is_endgame) {
+    //     TTItem *tt_item = TT_get(hash, depth);
+    //     if (tt_item != NULL) {
+    //         nodes_total++;
+    //         return tt_item->eval;
+    //     }
+    // }
 
-#define RETURN_AND_STORE_TT(e)                         \
-    nodes_total++;                                     \
-    int evaluation = (e);                              \
-    if (is_endgame) TT_store(hash, evaluation, depth); \
+#define RETURN_AND_STORE_TT(e)                             \
+    nodes_total++;                                         \
+    int evaluation = (e);                                  \
+    /*if (is_endgame) TT_store(hash, evaluation, depth);*/ \
     return evaluation;
 
     if (depth == 0 || clock() > endtime) {
@@ -1901,7 +1891,6 @@ int play(char *fen, int millis) {
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
     printf("  \"nodes\": %lu,\n", (unsigned long)nodes_total);
-    printf("  \"transpositions\": %lu,\n", (unsigned long)n_transposition);
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
     printf("  \"move\": \"%s\"\n", Move_string(best_move));
     puts("}");
@@ -1929,15 +1918,15 @@ void help(void) {
 }
 
 int test() {
-    printf("Size of TT: %luMB", (unsigned long)sizeof(tt) / 1000000);
-    TT_store(0x55, -50, 3);
-    TT_store(0x7532, -30, 2);
-    TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2);
-    if (tt_item == NULL) {
-        printf("NULL pointer\n");
-    } else {
-        printf("eval: %d\n", tt_item->eval);
-    }
+    // printf("Size of TT: %luMB", (unsigned long)sizeof(tt) / 1000000);
+    // TT_store(0x55, -50, 3);
+    // TT_store(0x7532, -30, 2);
+    // TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2);
+    // if (tt_item == NULL) {
+    //     printf("NULL pointer\n");
+    // } else {
+    //     printf("eval: %d\n", tt_item->eval);
+    // }
     return 0;
 }
 
