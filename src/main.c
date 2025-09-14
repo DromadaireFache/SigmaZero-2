@@ -1601,23 +1601,27 @@ size_t Chess_count_moves_multi(Chess *chess, int depth) {
     return nodes_total;
 }
 
+typedef uint8_t TTFlag;
+enum { EXACT, UPPERBOUND, LOWERBOUND };
+
 // Transposition table
 class {
     uint64_t key;
     int eval;
     uint8_t depth;
+    TTFlag flag;
 }
 TTItem;
 
-// Will give ~67MB array
+// Will give ~1073MB array
 #define TT_LENGTH (1 << 26)
 
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
 size_t n_transposition = 0;
 
-void TT_store(uint64_t key, int eval, int depth) {
-    size_t i = key % TT_LENGTH;
+void TT_store(uint64_t key, int eval, int depth, int a, int b) {
+    size_t i = key & (TT_LENGTH - 1);
     TTItem *item = &tt[i];
 
     if (depth > item->depth) {
@@ -1625,30 +1629,42 @@ void TT_store(uint64_t key, int eval, int depth) {
         item->key = key;
         item->eval = eval;
         item->depth = depth;
+
+        if (eval <= a)
+            item->flag = LOWERBOUND;
+        else if (eval >= b)
+            item->flag = UPPERBOUND;
+        else
+            item->flag = EXACT;
     }
 }
 
-TTItem *TT_get(uint64_t key, int depth) {
-    size_t i = key % TT_LENGTH;
+TTItem *TT_get(uint64_t key, int depth, int a, int b) {
+    size_t i = key & (TT_LENGTH - 1);
     TTItem *item = &tt[i];
 
-    if (item->key == key && depth <= item->depth) {
-        n_transposition++;
-        return item;
-    }
-    return NULL;
-}
+#define RETURN_EVAL    \
+    n_transposition++; \
+    return item;
 
-void TT_dump() {
-    puts("Transposition table {");
-    for (int i = 0; i < TT_LENGTH; i++) {
-        TTItem *item = &tt[i];
-        if (item->key % TT_LENGTH == i && item->depth > 0) {
-            printf("    TTItem(key=%016I64X, depth=%d, eval=%d),\n", item->key,
-                   item->depth, item->eval);
+    if (item->key == key && item->depth >= depth) {
+        n_transposition++;
+        switch (item->flag) {
+            case EXACT:
+                RETURN_EVAL;
+            case LOWERBOUND:
+                if (item->eval >= b) {
+                    RETURN_EVAL;
+                } else
+                    return NULL;
+            case UPPERBOUND:
+                if (item->eval <= a) {
+                    RETURN_EVAL;
+                } else
+                    return NULL;
         }
     }
-    puts("}");
+    return NULL;
 }
 
 int moves(char *fen, int depth) {
@@ -1738,16 +1754,17 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
 
     // Look for existing eval in transposition table
     uint64_t hash = ZHashStack_peek(&chess->zhstack);
-    TTItem *tt_item = TT_get(hash, depth);
+    TTItem *tt_item = TT_get(hash, depth, a, b);
     if (tt_item != NULL) {
-        nodes_total++;
         return tt_item->eval;
     }
 
-#define RETURN_AND_STORE_TT(e)         \
-    nodes_total++;                     \
-    int evaluation = (e);              \
-    TT_store(hash, evaluation, depth); \
+    int a_orig = a;
+    int b_orig = b;
+#define RETURN_AND_STORE_TT(e)                         \
+    nodes_total++;                                     \
+    int evaluation = (e);                              \
+    TT_store(hash, evaluation, depth, a_orig, b_orig); \
     return evaluation;
 
     if (depth == 0 || clock() > endtime) {
@@ -1912,15 +1929,15 @@ void help(void) {
 }
 
 int test() {
-    printf("Size of TT: %luMB", (unsigned long)sizeof(tt) / 1000000);
-    TT_store(0x55, -50, 3);
-    TT_store(0x7532, -30, 2);
-    TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2);
-    if (tt_item == NULL) {
-        printf("NULL pointer\n");
-    } else {
-        printf("eval: %d\n", tt_item->eval);
-    }
+    printf("Size of TT: %luMB\n", (unsigned long)sizeof(tt) / 1000000);
+    // TT_store(0x55, -50, 3);
+    // TT_store(0x7532, -30, 2);
+    // TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2, 0, -1000);
+    // if (tt_item == NULL) {
+    //     printf("NULL pointer\n");
+    // } else {
+    //     printf("eval: %d\n", tt_item->eval);
+    // }
     return 0;
 }
 
