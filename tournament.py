@@ -1,3 +1,4 @@
+import sys
 import time
 from src import sigma_zero
 import chess
@@ -35,6 +36,14 @@ def what_draw(board: chess.Board) -> str:
         print("Draw by agreement or unknown reason")
 
 
+def illegal_move(board: chess.Board, move_uci: str, result: dict):
+    print("Bot suggested an illegal move. Exiting.")
+    print(f"{result=}")
+    print(f"Board FEN:\n{board.fen()}")
+    print(f"Illegal move UCI: {move_uci}")
+    sys.exit(1)
+
+
 def play_game(fen: str, is_white: bool) -> dict:
     results = {"score": 0, "time_old": 0, "time_new": 0, "avg_depth_new": 0, "avg_depth_old": 0}
     board = chess.Board(fen)
@@ -48,20 +57,16 @@ def play_game(fen: str, is_white: bool) -> dict:
             result = sigma_zero.old_play(board.fen(), TIME)
             results["time_old"] += result.get("time", 0)
             results["avg_depth_old"] += result.get("depth", 0)
-        move_uci = result.get("move", "")
+        move_uci = result.get("move", "<unknown>")
         try:
             move = chess.Move.from_uci(move_uci)
             if move in board.legal_moves:
                 board.push(move)
                 number_of_moves += 1
             else:
-                print("Bot suggested an illegal move. Exiting.")
-                print(result)
-                return results
+                illegal_move(board, move_uci, result)
         except Exception:
-            print("Bot suggested an invalid move. Exiting.")
-            print(result)
-            return results
+            illegal_move(board, move_uci, result)
 
     if board.result(claim_draw=True) == "1-0":
         results["score"] = 1 if is_white else -1
