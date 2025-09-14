@@ -1762,14 +1762,13 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
     int a_orig = a;
     int b_orig = b;
 #define RETURN_AND_STORE_TT(e)                         \
-    nodes_total++;                                     \
     int evaluation = (e);                              \
     TT_store(hash, evaluation, depth, a_orig, b_orig); \
     return evaluation;
 
     if (depth == 0 || clock() > endtime) {
-        RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess)
-                                                      : -eval(chess))
+        nodes_total++;
+        return chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
     }
 
     // Check for 3 fold repetition
@@ -1782,12 +1781,13 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
     size_t n_moves = Chess_legal_moves_sorted(chess, moves);
 
     if (n_moves == 0) {
+        nodes_total++;
         if (Chess_friendly_check(chess)) {
             // Checkmate
-            RETURN_AND_STORE_TT(-1000000 - depth)
+            return -1000000 - depth;
         } else {
             // draw by stalemate
-            RETURN_AND_STORE_TT(0)
+            return 0;
         }
     }
 
