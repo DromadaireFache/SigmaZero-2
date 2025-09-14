@@ -10,9 +10,10 @@
 #include <string.h>
 #include <time.h>
 
-#include "consts copy.c"
+#include "consts.c"
 
 #define class typedef struct
+#define INF 1000000000
 
 // A bitboard is a 64-bit integer where each bit represents a square on the
 // chessboard (from a1 to h8). The least significant bit (LSB) represents a1,
@@ -1718,12 +1719,12 @@ int minimax_captures_only(Chess *chess, clock_t endtime, int a, int b) {
 
 int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
             Piece last_capture) {
-    if (depth == 0 && last_capture != EMPTY)
-        return minimax_captures_only(chess, endtime, a, b);
+    // if (depth == 0 && last_capture != EMPTY)
+    //     return minimax_captures_only(chess, endtime, a, b);
 
     if (depth == 0 || clock() > endtime) {
         nodes_total++;
-        return eval(chess);
+        return chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
     }
 
     // Check for 3 fold repetition
@@ -1737,59 +1738,37 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
     if (n_moves == 0) {
         if (Chess_friendly_check(chess)) {
             // Checkmate
-            return 1000 * (1000 - depth) * (chess->turn == TURN_WHITE ? -1 : 1);
+            return -1000000 - depth;
         } else {
             // draw by stalemate
             return 0;
         }
     }
 
-    if (chess->turn == TURN_WHITE) {
-        int max_score = INT_MIN;
-        for (int i = 0; i < n_moves; i++) {
-            Move *move = &moves[i];
-            gamestate_t gamestate = chess->gamestate;
-            Piece capture = Chess_make_move(chess, move);
+    // int best_score = -INF;
+    for (int i = 0; i < n_moves; i++) {
+        Move *move = &moves[i];
+        gamestate_t gamestate = chess->gamestate;
+        Piece capture = Chess_make_move(chess, move);
 
-            int score = minimax(chess, endtime, depth - 1, a, b, capture);
+        int score = -minimax(chess, endtime, depth - 1, -b, -a, capture);
 
-            Chess_unmake_move(chess, move, capture);
-            chess->gamestate = gamestate;
+        Chess_unmake_move(chess, move, capture);
+        chess->gamestate = gamestate;
 
-            if (score > max_score) max_score = score;
-            if (score >= b) break;
-            if (score > a) a = score;
-        }
-        return max_score;
-
-    } else {
-        int min_score = INT_MAX;
-        for (int i = 0; i < n_moves; i++) {
-            Move *move = &moves[i];
-            gamestate_t gamestate = chess->gamestate;
-            Piece capture = Chess_make_move(chess, move);
-
-            int score = minimax(chess, endtime, depth - 1, a, b, capture);
-
-            Chess_unmake_move(chess, move, capture);
-            chess->gamestate = gamestate;
-
-            if (score < min_score) min_score = score;
-            if (score <= a) break;
-            if (score < b) b = score;
-        }
-        return min_score;
+        if (score >= b) return b;
+        if (score > a) a = score;
     }
+    return a;
 }
 
 // if is_white sort in descending order, otherwise ascending
-void bubble_sort(Move *moves, int *scores, size_t n_moves, bool is_white) {
+void bubble_sort(Move *moves, int *scores, size_t n_moves) {
     bool swapped;
     do {
         swapped = false;
         for (int i = 1; i < n_moves; i++) {
-            if ((is_white && scores[i - 1] < scores[i]) ||
-                (!is_white && scores[i - 1] > scores[i])) {
+            if (scores[i - 1] < scores[i]) {
                 Move tmp_move = moves[i - 1];
                 moves[i - 1] = moves[i];
                 moves[i] = tmp_move;
@@ -1818,11 +1797,11 @@ int play(char *fen, int millis) {
     if (n_moves < 1) return 1;
 
     Move *best_move = NULL;
-    int best_score = chess->turn == TURN_WHITE ? INT_MIN : INT_MAX;
+    int best_score = -INF;
     int depth = 1;
 
     while (clock() < endtime) {
-        int current_best_score = chess->turn == TURN_WHITE ? INT_MIN : INT_MAX;
+        int current_best_score = -INF;
         Move *current_best_move = NULL;
         nodes_total = 0;
 
@@ -1831,36 +1810,46 @@ int play(char *fen, int millis) {
             gamestate_t gamestate = chess->gamestate;
             Piece capture = Chess_make_move(chess, move);
 
-            int score =
-                minimax(chess, endtime, depth, INT_MIN, INT_MAX, capture);
+            int score = -minimax(chess, endtime, depth, -INF, INF, capture);
             scores[i] = score;
 
             Chess_unmake_move(chess, move, capture);
             chess->gamestate = gamestate;
 
-            if ((chess->turn == TURN_WHITE && score > current_best_score) ||
-                (chess->turn == TURN_BLACK && score < current_best_score)) {
+            if (score > current_best_score) {
                 current_best_score = score;
                 current_best_move = move;
             }
         }
 
         // If we finished this depth, update best move
-        if (current_best_move) {
+        if (clock() < endtime && current_best_move) {
+            bubble_sort(moves, scores, n_moves);
             best_score = current_best_score;
             best_move = current_best_move;
+            depth++;
         }
-
-        bubble_sort(moves, scores, n_moves, chess->turn == TURN_WHITE);
-        depth++;
     }
 
     clock_t end = clock();
     double cpu_time = ((double)end - start) / CLOCKS_PER_SEC;
+    best_score *= chess->turn == TURN_WHITE ? 1 : -1;
 
     puts("{");
+    printf("  \"scores\": {\n");
+    int show_n_scores = (n_moves > 5 ? n_moves : n_moves);
+    for (int i = 0; i < show_n_scores; i++) {
+        if (i >= show_n_scores - 1) {
+            printf("    \"%s\": %.2f\n", Move_string(moves + i),
+                   (double)scores[i] / 100);
+        } else {
+            printf("    \"%s\": %.2f,\n", Move_string(moves + i),
+                   (double)scores[i] / 100);
+        }
+    }
+    printf("  },\n");
     printf("  \"millis\": %d,\n", millis);
-    printf("  \"depth\": %d,\n", depth - 1);
+    printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
     printf("  \"nodes\": %lu,\n", (unsigned long)nodes_total);
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
@@ -1883,6 +1872,8 @@ void help(void) {
     printf(HELP_WIDTH "Show version information\n", "version");
     printf(HELP_WIDTH "Show legal moves for the given position\n",
            "moves <FEN> <depth>");
+    printf(HELP_WIDTH "Get the evaluation of the given position\n",
+           "eval <FEN>");
     printf(HELP_WIDTH "Bot plays a move based on the given position\n",
            "play <FEN> <millis>");
 }
@@ -1924,6 +1915,11 @@ int main(int argc, char **argv) {
     } else if (argc == 4 && strcmp(argv[1], "moves") == 0) {
         int depth = atoi(argv[3]);
         return moves(argv[2], depth);
+    } else if (argc == 3 && strcmp(argv[1], "eval") == 0) {
+        Chess *chess = Chess_from_fen(argv[2]);
+        if (!chess) return 1;
+        printf("%f\n", (double)eval(chess) / 100);
+        return 0;
     } else {
         help();
         return 1;
