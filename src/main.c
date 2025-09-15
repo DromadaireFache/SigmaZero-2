@@ -1187,9 +1187,7 @@ bool Chess_friendly_check(Chess *chess) {
     return false;
 }
 
-bool captures_only = false;
-
-bool Chess_square_available(Chess *chess, int index) {
+bool Chess_square_available(Chess *chess, int index, bool captures_only) {
     return captures_only ? Chess_enemy_piece_at(chess, index)
                          : !Chess_friendly_piece_at(chess, index);
 }
@@ -1211,19 +1209,20 @@ bool Chess_is_move_legal(Chess *chess, Move *move) {
 }
 
 // Move *move, size_t n_moves NEED to be defined within scope
-#define ADD_MOVE_IF(condition, offset)                 \
-    if (condition) {                                   \
-        move->from = from;                             \
-        move->to = from + (offset);                    \
-        move->promotion = NO_PROMOTION;                \
-        if (Chess_square_available(chess, move->to) && \
-            Chess_is_move_legal(chess, move)) {        \
-            move++;                                    \
-            n_moves++;                                 \
-        }                                              \
+#define ADD_MOVE_IF(condition, offset)                                \
+    if (condition) {                                                  \
+        move->from = from;                                            \
+        move->to = from + (offset);                                   \
+        move->promotion = NO_PROMOTION;                               \
+        if (Chess_square_available(chess, move->to, captures_only) && \
+            Chess_is_move_legal(chess, move)) {                       \
+            move++;                                                   \
+            n_moves++;                                                \
+        }                                                             \
     }
 
-size_t Chess_knight_moves(Chess *chess, Move *move, int from) {
+size_t Chess_knight_moves(Chess *chess, Move *move, int from,
+                          bool captures_only) {
     size_t n_moves = 0;
     Position pos = Position_from_index(from);
 
@@ -1239,20 +1238,21 @@ size_t Chess_knight_moves(Chess *chess, Move *move, int from) {
     return n_moves;
 }
 
-#define SLIDING_PIECE_ADD_MOVE(condition, offset)          \
-    for (i = 0; (condition); i++) {                        \
-        move->from = from;                                 \
-        move->to = from + (offset);                        \
-        move->promotion = NO_PROMOTION;                    \
-        if (Chess_square_available(chess, move->to) &&     \
-            Chess_is_move_legal(chess, move)) {            \
-            move++;                                        \
-            n_moves++;                                     \
-        }                                                  \
-        if (chess->board[from + (offset)] != EMPTY) break; \
+#define SLIDING_PIECE_ADD_MOVE(condition, offset)                     \
+    for (i = 0; (condition); i++) {                                   \
+        move->from = from;                                            \
+        move->to = from + (offset);                                   \
+        move->promotion = NO_PROMOTION;                               \
+        if (Chess_square_available(chess, move->to, captures_only) && \
+            Chess_is_move_legal(chess, move)) {                       \
+            move++;                                                   \
+            n_moves++;                                                \
+        }                                                             \
+        if (chess->board[from + (offset)] != EMPTY) break;            \
     }
 
-size_t Chess_bishop_moves(Chess *chess, Move *move, int from) {
+size_t Chess_bishop_moves(Chess *chess, Move *move, int from,
+                          bool captures_only) {
     size_t n_moves = 0;
     Position pos = Position_from_index(from);
     int i;
@@ -1265,7 +1265,8 @@ size_t Chess_bishop_moves(Chess *chess, Move *move, int from) {
     return n_moves;
 }
 
-size_t Chess_rook_moves(Chess *chess, Move *move, int from) {
+size_t Chess_rook_moves(Chess *chess, Move *move, int from,
+                        bool captures_only) {
     size_t n_moves = 0;
     Position pos = Position_from_index(from);
     int i;
@@ -1278,12 +1279,15 @@ size_t Chess_rook_moves(Chess *chess, Move *move, int from) {
     return n_moves;
 }
 
-size_t Chess_queen_moves(Chess *chess, Move *move, int from) {
-    size_t n_moves = Chess_rook_moves(chess, move, from);
-    return n_moves + Chess_bishop_moves(chess, move + n_moves, from);
+size_t Chess_queen_moves(Chess *chess, Move *move, int from,
+                         bool captures_only) {
+    size_t n_moves = Chess_rook_moves(chess, move, from, captures_only);
+    return n_moves +
+           Chess_bishop_moves(chess, move + n_moves, from, captures_only);
 }
 
-size_t Chess_pawn_moves(Chess *chess, Move *move, int from) {
+size_t Chess_pawn_moves(Chess *chess, Move *move, int from,
+                        bool captures_only) {
     Position pos = Position_from_index(from);
     size_t n_moves = 0;
     int direction = chess->turn == TURN_WHITE ? 1 : -1;
@@ -1354,7 +1358,8 @@ size_t Chess_pawn_moves(Chess *chess, Move *move, int from) {
     return n_moves;
 }
 
-size_t Chess_king_moves(Chess *chess, Move *move, int from) {
+size_t Chess_king_moves(Chess *chess, Move *move, int from,
+                        bool captures_only) {
     Position pos = Position_from_index(from);
     size_t n_moves = 0;
 
@@ -1407,45 +1412,26 @@ size_t Chess_king_moves(Chess *chess, Move *move, int from) {
     return n_moves;
 }
 
-size_t Chess_legal_moves(Chess *chess, Move *moves) {
+size_t Chess_legal_moves(Chess *chess, Move *moves, bool captures_only) {
     size_t n_moves = 0;
     for (int i = 0; i < 64; i++) {
         if (!Chess_friendly_piece_at(chess, i)) continue;
         Piece piece = chess->board[i];
         Move *move_p = &moves[n_moves];
 
-#define PIECE_PAWN                                     \
-    if (Piece_is_pawn(piece)) {                        \
-        n_moves += Chess_pawn_moves(chess, move_p, i); \
-    }
-#define PIECE_KNIGHT                                     \
-    if (Piece_is_knight(piece)) {                        \
-        n_moves += Chess_knight_moves(chess, move_p, i); \
-    }
-#define PIECE_BISHOP                                     \
-    if (Piece_is_bishop(piece)) {                        \
-        n_moves += Chess_bishop_moves(chess, move_p, i); \
-    }
-#define PIECE_ROOK                                     \
-    if (Piece_is_rook(piece)) {                        \
-        n_moves += Chess_rook_moves(chess, move_p, i); \
-    }
-#define PIECE_KING                                     \
-    if (Piece_is_king(piece)) {                        \
-        n_moves += Chess_king_moves(chess, move_p, i); \
-    }
-#define PIECE_QUEEN                                     \
-    if (Piece_is_queen(piece)) {                        \
-        n_moves += Chess_queen_moves(chess, move_p, i); \
-    }
-
-        // TEST PIECES HERE
-        PIECE_PAWN
-        PIECE_KNIGHT
-        PIECE_BISHOP
-        PIECE_ROOK
-        PIECE_KING
-        PIECE_QUEEN
+        if (Piece_is_pawn(piece)) {
+            n_moves += Chess_pawn_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_knight(piece)) {
+            n_moves += Chess_knight_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_bishop(piece)) {
+            n_moves += Chess_bishop_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_rook(piece)) {
+            n_moves += Chess_rook_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_king(piece)) {
+            n_moves += Chess_king_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_queen(piece)) {
+            n_moves += Chess_queen_moves(chess, move_p, i, captures_only);
+        }
     }
     return n_moves;
 }
@@ -1490,8 +1476,8 @@ int compare_moves(const void *a, const void *b) {
     return mb->score - ma->score;
 }
 
-size_t Chess_legal_moves_sorted(Chess *chess, Move *moves) {
-    size_t n_moves = Chess_legal_moves(chess, moves);
+size_t Chess_legal_moves_sorted(Chess *chess, Move *moves, bool captures_only) {
+    size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
 
     // Give a score to each move
     for (int i = 0; i < n_moves; i++) {
@@ -1509,7 +1495,7 @@ size_t Chess_count_moves(Chess *chess, int depth) {
     if (depth == 0) return 1;
 
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves(chess, moves);
+    size_t n_moves = Chess_legal_moves(chess, moves, false);
     if (depth == 1) return n_moves;
 
     size_t nodes = 0;
@@ -1545,6 +1531,8 @@ class {
     Chess chess;
     int depth;
     Move move;
+    clock_t endtime;
+    int *score;
 }
 ChessThread;
 
@@ -1554,11 +1542,8 @@ void *Chess_count_moves_thread(void *arg_void) {
     int depth = arg->depth;
     Move *move = &arg->move;
 
-    gamestate_t gamestate = chess->gamestate;
-    Piece capture = Chess_make_move(chess, move);
+    Chess_make_move(chess, move);
     size_t nodes = Chess_count_moves(chess, depth - 1);
-    Chess_unmake_move(chess, move, capture);
-    chess->gamestate = gamestate;
 
     pthread_mutex_lock(&lock);    // enter critical section
     nodes_total += nodes;         // update shared variable
@@ -1569,7 +1554,7 @@ void *Chess_count_moves_thread(void *arg_void) {
 
 size_t Chess_count_moves_multi(Chess *chess, int depth) {
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves(chess, moves);
+    size_t n_moves = Chess_legal_moves(chess, moves, false);
     nodes_total = 0;
 
     pthread_t *threads = calloc(n_moves, sizeof(pthread_t));
@@ -1665,7 +1650,7 @@ int moves(char *fen, int depth) {
         puts("}");
     } else {
         Move moves[MAX_LEGAL_MOVES];
-        size_t n_moves = Chess_legal_moves(chess, moves);
+        size_t n_moves = Chess_legal_moves(chess, moves, false);
         puts("{");
         printf("  \"nodes\": %lu,\n", (unsigned long)n_moves);
         puts("  \"moves\": [");
@@ -1699,15 +1684,13 @@ int minimax_captures_only(Chess *chess, clock_t endtime, int depth, int a,
 
     // Stand Pat
     if (depth == 0 || best_score >= b || clock() > endtime) {
-        nodes_total++;
+        // nodes_total++;
         return best_score;
     }
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
-    captures_only = true;
-    size_t n_moves = Chess_legal_moves_sorted(chess, moves);
-    captures_only = false;
+    size_t n_moves = Chess_legal_moves_sorted(chess, moves, true);
 
     for (int i = 0; i < n_moves; i++) {
         Move *move = &moves[i];
@@ -1727,7 +1710,7 @@ int minimax_captures_only(Chess *chess, clock_t endtime, int depth, int a,
 }
 
 #define QUIES_DEPTH 5
-bool is_endgame = false;
+// bool is_endgame = false;
 
 int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
             Piece last_capture) {
@@ -1746,7 +1729,7 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
     // }
 
 #define RETURN_AND_STORE_TT(e)                             \
-    nodes_total++;                                         \
+    /*nodes_total++;*/                                     \
     int evaluation = (e);                                  \
     /*if (is_endgame) TT_store(hash, evaluation, depth);*/ \
     return evaluation;
@@ -1758,12 +1741,12 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
 
     // Check for 3 fold repetition
     if (Chess_3fold_repetition(chess) >= 3) {
-        nodes_total++;
+        // nodes_total++;
         return 0;
     }
 
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_sorted(chess, moves);
+    size_t n_moves = Chess_legal_moves_sorted(chess, moves, false);
 
     if (n_moves == 0) {
         if (Chess_friendly_check(chess)) {
@@ -1827,6 +1810,20 @@ void bubble_sort(Move *moves, int *scores, size_t n_moves) {
     } while (swapped);
 }
 
+void *play_thread(void *arg_void) {
+    ChessThread *arg = (ChessThread *)arg_void;
+    Chess *chess = &arg->chess;
+    clock_t endtime = arg->endtime;
+    Move *move = &arg->move;
+    int depth = arg->depth;
+    Piece capture = Chess_make_move(chess, move);
+
+    int score = -minimax(chess, endtime, depth, -INF, INF, capture);
+    *arg->score = score;
+
+    return NULL;
+}
+
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
 int play(char *fen, int millis) {
@@ -1839,44 +1836,53 @@ int play(char *fen, int millis) {
 
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_sorted(chess, moves);
+    size_t n_moves = Chess_legal_moves_sorted(chess, moves, false);
     if (n_moves < 1) return 1;
 
     Move *best_move = NULL;
     int best_score = -INF;
     int depth = 1;
 
+    pthread_t *threads = calloc(n_moves, sizeof(pthread_t));
+    ChessThread *args = calloc(n_moves, sizeof(ChessThread));
+
     while (clock() < endtime) {
-        int current_best_score = -INF;
-        Move *current_best_move = NULL;
-        nodes_total = 0;
-        is_endgame = Chess_is_endgame(chess);
+        // nodes_total = 0;
+        // is_endgame = Chess_is_endgame(chess);
 
-        for (int i = 0; i < n_moves && clock() < endtime; i++) {
-            Move *move = &moves[i];
-            gamestate_t gamestate = chess->gamestate;
-            Piece capture = Chess_make_move(chess, move);
+        for (int i = 0; i < n_moves; i++) {
+            ChessThread *arg = &args[i];
+            arg->endtime = endtime;
+            arg->score = &scores[i];
+            arg->depth = depth;
+            memcpy(&arg->chess, chess, sizeof(Chess));
+            memcpy(&arg->move, &moves[i], sizeof(Move));
 
-            int score = -minimax(chess, endtime, depth, -INF, INF, capture);
-            scores[i] = score;
+            // Copy ZHashStack
+            memcpy(&arg->chess.zhstack, &chess->zhstack, sizeof(ZHashStack));
 
-            Chess_unmake_move(chess, move, capture);
-            chess->gamestate = gamestate;
-
-            if (score > current_best_score) {
-                current_best_score = score;
-                current_best_move = move;
+            if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
+                perror("pthread_create failed");
+                return 1;
             }
         }
 
+        // Wait for threads to finish
+        for (int i = 0; i < n_moves; i++) {
+            pthread_join(threads[i], NULL);
+        }
+
         // If we finished this depth, update best move
-        if (clock() < endtime && current_best_move) {
+        if (clock() < endtime) {
             bubble_sort(moves, scores, n_moves);
-            best_score = current_best_score;
-            best_move = current_best_move;
+            best_score = scores[0];
+            best_move = &moves[0];
             depth++;
         }
     }
+
+    free(threads);
+    free(args);
 
     clock_t end = clock();
     double cpu_time = ((double)end - start) / CLOCKS_PER_SEC;
@@ -1898,7 +1904,7 @@ int play(char *fen, int millis) {
     printf("  \"millis\": %d,\n", millis);
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
-    printf("  \"nodes\": %lu,\n", (unsigned long)nodes_total);
+    // printf("  \"nodes\": %lu,\n", (unsigned long)nodes_total);
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
     printf("  \"move\": \"%s\"\n", Move_string(best_move));
     puts("}");
