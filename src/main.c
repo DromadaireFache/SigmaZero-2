@@ -15,6 +15,24 @@
 #define class typedef struct
 #define INF 1000000000
 
+#ifdef _WIN32
+#define TIME_TYPE clock_t
+#define TIME_NOW() clock()
+#define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
+#define TIME_PLUS_OFFSET_MS(start, millis) \
+    ((start) + CLOCKS_PER_SEC * (millis) / 1000)
+#else
+uint64_t now_nanos() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
+#define TIME_TYPE uint64_t
+#define TIME_NOW() now_nanos()
+#define TIME_DIFF_S(end, start) ((double)((end) - (start)) / 1000000000.0)
+#define TIME_PLUS_OFFSET_MS(start, millis) ((start) + ((uint64_t)millis) * 1000000)
+#endif
+
 // A bitboard is a 64-bit integer where each bit represents a square on the
 // chessboard (from a1 to h8). The least significant bit (LSB) represents a1,
 // and the most significant bit (MSB) represents h8.
@@ -1534,7 +1552,7 @@ class {
     Chess chess;
     int depth;
     Move move;
-    clock_t endtime;
+    TIME_TYPE endtime;
     int *score;
 }
 ChessThread;
@@ -1640,10 +1658,10 @@ int moves(char *fen, int depth) {
     Chess *chess = Chess_from_fen(fen);
     if (!chess) return 1;
     if (depth > 1) {
-        clock_t start = clock();
+        TIME_TYPE start = TIME_NOW();
         size_t n_moves = Chess_count_moves_multi(chess, depth);
-        clock_t end = clock();
-        double cpu_time = ((double)end - start) / CLOCKS_PER_SEC;
+        TIME_TYPE end = TIME_NOW();
+        double cpu_time = TIME_DIFF_S(end, start);
         double nps = cpu_time > 0.0 ? n_moves / cpu_time : -0.0;
         puts("{");
         printf("  \"depth\": %d,\n", depth);
@@ -1681,12 +1699,12 @@ int eval(Chess *chess) {
     return e;
 }
 
-int minimax_captures_only(Chess *chess, clock_t endtime, int depth, int a,
+int minimax_captures_only(Chess *chess, TIME_TYPE endtime, int depth, int a,
                           int b) {
     int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
-    if (depth == 0 || best_score >= b || clock() > endtime) {
+    if (depth == 0 || best_score >= b || TIME_NOW() > endtime) {
         // nodes_total++;
         return best_score;
     }
@@ -1715,7 +1733,7 @@ int minimax_captures_only(Chess *chess, clock_t endtime, int depth, int a,
 #define QUIES_DEPTH 5
 // bool is_endgame = false;
 
-int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
+int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
             Piece last_capture) {
     if (depth == 0 && last_capture != EMPTY) {
         return minimax_captures_only(chess, endtime, QUIES_DEPTH, a, b);
@@ -1737,7 +1755,7 @@ int minimax(Chess *chess, clock_t endtime, int depth, int a, int b,
     /*if (is_endgame) TT_store(hash, evaluation, depth);*/ \
     return evaluation;
 
-    if (depth == 0 || clock() > endtime) {
+    if (depth == 0 || TIME_NOW() > endtime) {
         RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess)
                                                       : -eval(chess))
     }
@@ -1816,7 +1834,7 @@ void bubble_sort(Move *moves, int *scores, size_t n_moves) {
 void *play_thread(void *arg_void) {
     ChessThread *arg = (ChessThread *)arg_void;
     Chess *chess = &arg->chess;
-    clock_t endtime = arg->endtime;
+    TIME_TYPE endtime = arg->endtime;
     Move *move = &arg->move;
     int depth = arg->depth;
     Piece capture = Chess_make_move(chess, move);
@@ -1834,8 +1852,8 @@ int play(char *fen, int millis) {
     if (!chess) return 1;
     if (millis < 1) return 1;
 
-    clock_t start = clock();
-    clock_t endtime = start + CLOCKS_PER_SEC * (millis) / 1000;
+    TIME_TYPE start = TIME_NOW();
+    TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
 
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
@@ -1849,7 +1867,7 @@ int play(char *fen, int millis) {
     pthread_t *threads = calloc(n_moves, sizeof(pthread_t));
     ChessThread *args = calloc(n_moves, sizeof(ChessThread));
 
-    while (clock() < endtime) {
+    while (TIME_NOW() < endtime) {
         // nodes_total = 0;
         // is_endgame = Chess_is_endgame(chess);
 
@@ -1873,7 +1891,7 @@ int play(char *fen, int millis) {
         }
 
         // If we finished this depth, update best move
-        if (clock() < endtime) {
+        if (TIME_NOW() < endtime) {
             bubble_sort(moves, scores, n_moves);
             best_score = scores[0];
             best_move = &moves[0];
@@ -1884,8 +1902,8 @@ int play(char *fen, int millis) {
     free(threads);
     free(args);
 
-    clock_t end = clock();
-    double cpu_time = ((double)end - start) / CLOCKS_PER_SEC;
+    TIME_TYPE end = TIME_NOW();
+    double cpu_time = TIME_DIFF_S(end, start);
     best_score *= chess->turn == TURN_WHITE ? 1 : -1;
 
     puts("{");
