@@ -1,6 +1,9 @@
 CC=gcc
 CFLAGS=-Wall -Werror -Ofast
 
+# CFLAGS += -fsanitize=address -pthread -fno-omit-frame-pointer
+# LDFLAGS += -fsanitize=thread -pthread
+
 # Default target
 all: sigma-zero
 

@@ -866,6 +866,7 @@ void Chess_unmake_move(Chess *chess, Move *move, Piece capture) {
             moving_piece = chess->board[move->to];
             break;
     }
+
     chess->board[move->from] = moving_piece;
     chess->board[move->to] = capture;
 
@@ -1391,6 +1392,7 @@ size_t Chess_king_moves(Chess *chess, Move *move, int from,
          chess->board[k2] == EMPTY)) {                                  \
         move->from = from;                                              \
         move->to = k1;                                                  \
+        move->promotion = NO_PROMOTION;                                 \
         ADD_KING_MOVE_IF(2)                                             \
     }                                                                   \
     /* Queen side castling */                                           \
@@ -1398,6 +1400,7 @@ size_t Chess_king_moves(Chess *chess, Move *move, int from,
          chess->board[q2] == EMPTY && chess->board[q3] == EMPTY)) {     \
         move->from = from;                                              \
         move->to = q3;                                                  \
+        move->promotion = NO_PROMOTION;                                 \
         ADD_KING_MOVE_IF(-2)                                            \
     }
 
@@ -1852,14 +1855,11 @@ int play(char *fen, int millis) {
 
         for (int i = 0; i < n_moves; i++) {
             ChessThread *arg = &args[i];
-            arg->endtime = endtime;
-            arg->score = &scores[i];
-            arg->depth = depth;
             memcpy(&arg->chess, chess, sizeof(Chess));
             memcpy(&arg->move, &moves[i], sizeof(Move));
-
-            // Copy ZHashStack
-            memcpy(&arg->chess.zhstack, &chess->zhstack, sizeof(ZHashStack));
+            arg->endtime = endtime;
+            arg->depth = depth;
+            arg->score = &scores[i];
 
             if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
                 perror("pthread_create failed");
@@ -1908,7 +1908,6 @@ int play(char *fen, int millis) {
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
     printf("  \"move\": \"%s\"\n", Move_string(best_move));
     puts("}");
-
     return 0;
 }
 
