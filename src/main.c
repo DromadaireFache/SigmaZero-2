@@ -30,7 +30,8 @@ uint64_t now_nanos() {
 #define TIME_TYPE uint64_t
 #define TIME_NOW() now_nanos()
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / 1000000000.0)
-#define TIME_PLUS_OFFSET_MS(start, millis) ((start) + ((uint64_t)millis) * 1000000)
+#define TIME_PLUS_OFFSET_MS(start, millis) \
+    ((start) + ((uint64_t)millis) * 1000000)
 #endif
 
 // A bitboard is a 64-bit integer where each bit represents a square on the
@@ -107,9 +108,14 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
     int a, b, c;
     switch (piece) {
         case WHITE_PAWN:
-            return 100 + PS_WHITE_PAWN[i];
+            // give a bonus for higher rank in the endgame
+            a = index_row(i);
+            b = ((a - 1) * (int)fullmoves) / 8;
+            return 100 + PS_WHITE_PAWN[i] + b;
         case BLACK_PAWN:
-            return -100 + PS_BLACK_PAWN[i];
+            a = index_row(i);
+            b = ((a - 6) * (int)fullmoves) / 8;
+            return -100 + PS_BLACK_PAWN[i] + b;
         case WHITE_KNIGHT:
             return 320 + PS_WHITE_KNIGHT[i];
         case BLACK_KNIGHT:

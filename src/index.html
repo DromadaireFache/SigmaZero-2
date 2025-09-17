@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+            :root {
+                --bg-color: rgb(48, 46, 43);
+                --light-bg-color: rgb(88, 86, 82);
+                --lighter-bg-color: rgb(114, 112, 109);
+                --text-color: white;
+                --board-light-color: rgb(238, 238, 210);
+                --board-dark-color: rgb(118, 150, 86);
+                --board-light-highlight: rgb(245, 245, 153);
+                --board-dark-highlight: rgb(189, 201, 93);
+            }
+            body {
+                background: var(--bg-color);
+                color: var(--text-color);
+                font-family: Arial, sans-serif;
+                display: flex;
+                flex-direction: row;
+            }
+            #board-container {
+                position: relative;
+                width: 600px;
+                height: 600px;
+            }
+            #chess-board {
+                display: grid;
+                grid-template-columns: repeat(8, 75px);
+                grid-template-rows: repeat(8, 75px);
+                gap: 0;
+                width: 600px;
+                pointer-events: none;
+                height: 600px;
+            }
+            #pieces-layer {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 600px;
+                height: 600px;
+                z-index: 1;
+                display: grid;
+                grid-template-columns: repeat(8, 75px);
+                grid-template-rows: repeat(8, 75px);
+            }
+            #highlight-layer {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 600px;
+                height: 600px;
+                z-index: 2;
+                display: grid;
+                pointer-events: none;
+                grid-template-columns: repeat(8, 75px);
+                grid-template-rows: repeat(8, 75px);
+            }
+            #gameover-layer {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 600px;
+                height: 600px;
+                z-index: 3;
+                display: hidden;
+                justify-content: center;
+                align-items: center;
+                font-weight: bold;
+                background-color: rgba(0, 0, 0, 0.5);
+                font-size: 3rem;
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+                flex-direction: column;
+                gap: 20px;
+            }
+            #menu {
+                margin: 0 10px;
+                width: 300px;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                gap: 10px;
+            }
+            .like-h2 {
+                font-size: 1.5em;
+                font-weight: bold;
+            }
+            .light-with-shadow {
+                background-color: var(--light-bg-color);
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                border-radius: 5px;
+            }
+            #captures {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                margin: 5px 0px;
+                padding: 5px;
+            }
+            input[type="text"] {
+                width: 100%;
+                padding: 8px;
+                box-sizing: border-box;
+                border: none;
+                color: var(--text-color);
+            }
+            .capture-field {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 2px;
+                min-height: 1.5rem;
+                padding: 0;
+            }
+            .highlight {
+                border-radius: 15px;
+                background-color: transparent;
+                box-sizing: border-box;
+                border: none;
+            }
+            button {
+                padding: 10px 20px;
+                font-size: 1rem;
+                background-color: var(--light-bg-color);
+                color: var(--text-color);
+                border: none;
+                cursor: pointer;
+                border-radius: 5px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            }
+            button:hover {
+                background-color: var(--lighter-bg-color);
+            }
+            button.small {
+                padding: 0 10px;
+                font-size: 1.2rem;
+            }
+            .side-by-side {
+                display: flex;
+                flex-direction: row;
+                gap: 5px;
+                margin: 5px 0px;
+            }
+            #lower-menu {
+                padding: 10px;
+            }
+            select {
+                width: 100%;
+                padding: 8px;
+                box-sizing: border-box;
+                border: none;
+                color: var(--text-color);
+                background-color: var(--lighter-bg-color);
+                border-radius: 5px;
+                margin: 5px 0px;
+            }
+            .spinner {
+                display: inline-block;
+                width: 24px;
+                height: 24px;
+                border: 4px solid #ccc;
+                border-top: 4px solid #fff;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin-right: 10px;
+                vertical-align: middle;
+                margin: auto;
+            }
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+            #bot-output {
+                display: flex;
+                min-height: 60px;
+                padding: 5px;
+            }
+            #bot-stats {
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+                font-size: 0.9rem;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="board-container">
+            <div id="chess-board"></div>
+            <div id="pieces-layer"></div>
+            <div id="highlight-layer"></div>
+            <div id="gameover-layer">
+                <div id="gameover-text"></div>
+                <button class="restart-button">Restart</button>
+            </div>
+        </div>
+        <div id="menu">
+            <div id="upper-menu">
+                <div id="turn" class="like-h2"></div>
+                <div
+                    id="captures"
+                    class="light-with-shadow"
+                    style="flex-direction: column"
+                >
+                    <div id="white-captures" class="capture-field"></div>
+                    <div id="black-captures" class="capture-field"></div>
+                </div>
+                <input type="text" id="fen-input" class="light-with-shadow" />
+                <div class="side-by-side">
+                    <button id="flip-button" class="small">&#8645;</button>
+                    <button id="back-button" class="small">&#129032;</button>
+                    <button id="forth-button" class="small">&#129034;</button>
+                    <button class="restart-button" style="width: 100%">
+                        Restart
+                    </button>
+                </div>
+            </div>
+            <div id="lower-menu" class="light-with-shadow">
+                <div class="like-h2">SigmaZero-2</div>
+                <div>by Charles Benoit</div>
+                <hr />
+                <div style="margin: 5px 0">
+                    <input type="checkbox" id="bot-plays-white" />
+                    <label for="bot-plays-white">Bot plays White</label>
+                </div>
+                <div style="margin: 5px 0">
+                    <input type="checkbox" id="bot-plays-black" />
+                    <label for="bot-plays-black">Bot plays Black</label>
+                </div>
+                <div>
+                    <select id="difficulty-select">
+                        <option value="10000">Beast (10s)</option>
+                        <option value="1000" selected>Standard (1s)</option>
+                        <option value="100">Fast (100ms)</option>
+                        <option value="30">Blitz (30ms)</option>
+                        <option value="random">Human-like (random)</option>
+                    </select>
+                </div>
+                <div>
+                    <select id="version-select">
+                        <option value="latest">Latest</option>
+                    </select>
+                </div>
+                <div id="bot-output" style="display: none">
+                    <div
+                        id="bot-thinking"
+                        style="display: none"
+                        class="spinner"
+                    ></div>
+                    <div id="bot-stats" style="display: flex"></div>
+                </div>
+            </div>
+        </div>
+    </body>
+    <script>
+        // State variables
+        let selectedPiece = null;
+        let currentTurn = "White";
+        let legalMoves = [];
+
+        // Menu elements
+        const turn = document.getElementById("turn");
+        const captures = document.getElementById("captures");
+        const whiteCaptures = document.getElementById("white-captures");
+        const blackCaptures = document.getElementById("black-captures");
+        const fenInput = document.getElementById("fen-input");
+        const gameoverText = document.getElementById("gameover-text");
+        const restartButtons = document.querySelectorAll(".restart-button");
+        const backButton = document.getElementById("back-button");
+        const forthButton = document.getElementById("forth-button");
+        const botPlaysWhiteCheck = document.getElementById("bot-plays-white");
+        const botPlaysBlackCheck = document.getElementById("bot-plays-black");
+        const flipButton = document.getElementById("flip-button");
+        const difficultySelect = document.getElementById("difficulty-select");
+        const versionSelect = document.getElementById("version-select");
+        const botOutput = document.getElementById("bot-output");
+        const botThinking = document.getElementById("bot-thinking");
+        const botStats = document.getElementById("bot-stats");
+
+        // Create chess board
+        const board = document.getElementById("chess-board");
+        const pieces = document.getElementById("pieces-layer");
+        const highlights = document.getElementById("highlight-layer");
+        const gameoverLayer = document.getElementById("gameover-layer");
+
+        // Button event listeners
+        function flipBoard() {
+            board.style.transform =
+                board.style.transform === "rotate(180deg)"
+                    ? "rotate(0deg)"
+                    : "rotate(180deg)";
+            pieces.style.transform = board.style.transform;
+            highlights.style.transform = board.style.transform;
+
+            // Rotate the pieces in-place to stay upright
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const pieceDiv = document.getElementById(
+                        `piece-${row}-${col}`
+                    );
+                    pieceDiv.style.transform =
+                        pieceDiv.style.transform === "rotate(180deg)"
+                            ? "rotate(0deg)"
+                            : "rotate(180deg)";
+                }
+            }
+
+            // Rotate the captures
+            captures.style.flexDirection =
+                captures.style.flexDirection === "column"
+                    ? "column-reverse"
+                    : "column";
+        }
+        flipButton.addEventListener("click", flipBoard);
+        document.addEventListener("keyup", (event) => {
+            if (event.key === "f" || event.key === "F") {
+                flipBoard();
+            }
+        });
+
+        async function botMove() {
+            if (gameoverLayer.style.display === "flex") {
+                return;
+            }
+
+            const version = versionSelect.value;
+            let millis;
+            if (difficultySelect.value === "random") {
+                // Generate a random delay between 1 and 5 seconds
+                millis = Math.floor(Math.random() * 4000) + 1000;
+            } else {
+                millis = parseInt(difficultySelect.value);
+            }
+
+            botOutput.style.display = "flex";
+            botThinking.style.display = "flex";
+            botStats.style.display = "none";
+            let result = await window.pywebview.api.bot_move(millis, version);
+
+            if (result) {
+                fetchGame();
+                botStats.innerHTML = `
+                    <div>Depth: <span style="min-width: 40px">${result.depth}</span></div>
+                    <div>Eval: <span style="min-width: 40px">${result.eval}</span></div>
+                    <div>Move: <span style="min-width: 40px">${result.move}</span></div>
+                `;
+            }
+            botThinking.style.display = "none";
+            botStats.style.display = "flex";
+        }
+
+        botPlaysWhiteCheck.addEventListener("change", async () => {
+            if (botPlaysWhiteCheck.checked && currentTurn === "White") {
+                await botMove();
+            }
+        });
+
+        botPlaysBlackCheck.addEventListener("change", async () => {
+            if (botPlaysBlackCheck.checked && currentTurn === "Black") {
+                await botMove();
+            }
+        });
+
+        async function resetAction() {
+            let success = await window.pywebview.api.reset_game();
+            if (success) {
+                resetBoard();
+                fetchGame();
+            }
+        }
+        restartButtons.forEach((button) => {
+            button.addEventListener("click", resetAction);
+        });
+        document.addEventListener("keyup", (event) => {
+            if (event.key === "r" || event.key === "R") {
+                resetAction();
+            }
+        });
+
+        async function goBack() {
+            let success = await window.pywebview.api.go_back();
+            if (success) {
+                pieces.style.pointerEvents = "auto";
+                fetchGame();
+            }
+        }
+        backButton.addEventListener("click", goBack);
+        document.addEventListener("keyup", (event) => {
+            if (event.key === "ArrowLeft") {
+                goBack();
+            }
+        });
+
+        async function goForth() {
+            let success = await window.pywebview.api.go_forth();
+            if (success) {
+                fetchGame();
+            }
+        }
+        forthButton.addEventListener("click", goForth);
+        document.addEventListener("keyup", (event) => {
+            if (event.key === "ArrowRight") {
+                goForth();
+            }
+        });
+
+        function resetBoard() {
+            pieces.style.pointerEvents = "auto";
+            gameoverLayer.style.display = "none";
+            board.innerHTML = "";
+            pieces.innerHTML = "";
+            highlights.innerHTML = "";
+            board.style.transform = "rotate(0deg)";
+            pieces.style.transform = "rotate(0deg)";
+            highlights.style.transform = "rotate(0deg)";
+            captures.style.flexDirection = "column";
+            selectedPiece = null;
+
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    // Create square
+                    const square = document.createElement("div");
+                    square.style.width = "75px";
+                    square.style.height = "75px";
+                    if ((row + col) % 2 === 0) {
+                        square.style.backgroundColor =
+                            "var(--board-light-color)";
+                    } else {
+                        square.style.backgroundColor =
+                            "var(--board-dark-color)";
+                    }
+                    board.appendChild(square);
+
+                    // Create piece layer
+                    const piece = document.createElement("div");
+                    piece.style.width = "75px";
+                    piece.style.height = "75px";
+                    piece.id = `piece-${row}-${col}`;
+                    piece.color = null; // Custom property to track piece color
+                    piece.draggable = false;
+                    piece.addEventListener("click", selectPiece);
+                    pieces.appendChild(piece);
+
+                    // Create a highlight layer
+                    const highlight = document.createElement("div");
+                    highlight.style.width = "75px";
+                    highlight.style.height = "75px";
+                    highlight.id = `highlight-${row}-${col}`;
+                    highlight.style.pointerEvents = "none";
+                    highlight.classList.add("highlight");
+                    highlights.appendChild(highlight);
+                }
+            }
+        }
+        resetBoard();
+
+        const pieceImages = {
+            P: "images/pawnW.png",
+            R: "images/rookW.png",
+            N: "images/knightW.png",
+            B: "images/bishopW.png",
+            Q: "images/queenW.png",
+            K: "images/kingW.png",
+            p: "images/pawnB.png",
+            r: "images/rookB.png",
+            n: "images/knightB.png",
+            b: "images/bishopB.png",
+            q: "images/queenB.png",
+            k: "images/kingB.png",
+        };
+
+        function addPiece(row, col, pieceSymbol) {
+            const pieceDiv = document.getElementById(`piece-${row}-${col}`);
+            pieceImg = document.createElement("img");
+            pieceImg.src = pieceImages[pieceSymbol];
+            pieceImg.style.width = "75px";
+            pieceImg.style.height = "75px";
+            if (pieceSymbol === pieceSymbol.toUpperCase()) {
+                pieceDiv.color = "White";
+            } else {
+                pieceDiv.color = "Black";
+            }
+            pieceDiv.appendChild(pieceImg);
+        }
+
+        // Get game state from backend
+        async function fetchGame() {
+            let game = await window.pywebview.api.get_game_state();
+
+            // Remove all images from piece cells
+            // Change the background color of squares where the last move happened
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const pieceDiv = document.getElementById(
+                        `piece-${row}-${col}`
+                    );
+                    pieceDiv.innerHTML = "";
+                    pieceDiv.color = null;
+
+                    const square = board.children[row * 8 + col];
+                    if (
+                        game.lastMove &&
+                        ((game.lastMove.from.row === row &&
+                            game.lastMove.from.col === col) ||
+                            (game.lastMove.to.row === row &&
+                                game.lastMove.to.col === col))
+                    ) {
+                        if ((row + col) % 2 === 0) {
+                            square.style.backgroundColor =
+                                "var(--board-light-highlight)";
+                        } else {
+                            square.style.backgroundColor =
+                                "var(--board-dark-highlight)";
+                        }
+                    } else {
+                        if ((row + col) % 2 === 0) {
+                            square.style.backgroundColor =
+                                "var(--board-light-color)";
+                        } else {
+                            square.style.backgroundColor =
+                                "var(--board-dark-color)";
+                        }
+                    }
+                }
+            }
+
+            // Update the board with the fetched position
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    let piece = game.position[row][col];
+                    if (piece) {
+                        addPiece(row, col, piece);
+                    }
+                }
+            }
+
+            turn.innerText = `${game.turn} to move`;
+            currentTurn = game.turn;
+            whiteCaptures.innerHTML = "";
+            blackCaptures.innerHTML = "";
+
+            game.whiteCaptures.forEach((element) => {
+                const img = document.createElement("img");
+                img.src = pieceImages[element];
+                img.style.width = "1.2rem";
+                img.style.height = "1.2rem";
+                whiteCaptures.appendChild(img);
+            });
+
+            game.blackCaptures.forEach((element) => {
+                const img = document.createElement("img");
+                img.src = pieceImages[element];
+                img.style.width = "1.2rem";
+                img.style.height = "1.2rem";
+                blackCaptures.appendChild(img);
+            });
+
+            if (game.captureDiff > 0) {
+                const span = document.createElement("span");
+                span.innerText = `+${game.captureDiff}`;
+                whiteCaptures.appendChild(span);
+            } else if (game.captureDiff < 0) {
+                const span = document.createElement("span");
+                span.innerText = `+${-game.captureDiff}`;
+                blackCaptures.appendChild(span);
+            }
+
+            fenInput.value = game.fen;
+
+            if (game.gameOver) {
+                pieces.style.pointerEvents = "none";
+                gameoverLayer.style.display = "flex";
+                if (game.result === "1-0") {
+                    gameoverText.innerText = "White wins!";
+                } else if (game.result === "0-1") {
+                    gameoverText.innerText = "Black wins!";
+                } else {
+                    gameoverText.innerText = "Draw!";
+                }
+            } else {
+                gameoverLayer.style.display = "none";
+                gameoverText.innerText = "";
+
+                // If it's the bot's turn, make a move
+                if (
+                    (botPlaysWhiteCheck.checked && game.turn === "White") ||
+                    (botPlaysBlackCheck.checked && game.turn === "Black")
+                ) {
+                    await botMove();
+                }
+            }
+        }
+
+        // Update FEN string on input change
+        fenInput.addEventListener("change", async () => {
+            let fen = fenInput.value;
+            let success = await window.pywebview.api.set_fen(fen);
+            if (success) {
+                fetchGame();
+            }
+        });
+
+        function clearHighlights() {
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const highlightDiv = document.getElementById(
+                        `highlight-${row}-${col}`
+                    );
+                    highlightDiv.style.border = "none";
+                }
+            }
+        }
+
+        function piecePosition(piece) {
+            const row = piece.id.split("-")[1];
+            const col = piece.id.split("-")[2];
+            return {
+                row: parseInt(row),
+                col: parseInt(col),
+                str: `${row}-${col}`,
+            };
+        }
+
+        async function highlightPiece(highlightDiv) {
+            const pos = piecePosition(highlightDiv);
+            highlightDiv.style.border = "8px solid rgba(255, 255, 0, 0.6)";
+            const [row, col] = [pos.row, pos.col];
+            const moves = await window.pywebview.api.get_legal_moves(row, col);
+            legalMoves = moves;
+
+            moves.forEach((move) => {
+                const moveHighlight = document.getElementById(
+                    `highlight-${move.row}-${move.col}`
+                );
+                moveHighlight.style.border =
+                    "8px solid rgba(175, 175, 175, 0.6)";
+            });
+        }
+
+        // Select a piece when clicked
+        async function selectPiece(event) {
+            const pieceDiv = event.currentTarget;
+            const pieceHighlight = document.getElementById(
+                `highlight-${piecePosition(pieceDiv).str}`
+            );
+            const allowedToSelect =
+                pieceDiv.color == currentTurn &&
+                ((currentTurn === "White" && !botPlaysWhiteCheck.checked) ||
+                    (currentTurn === "Black" && !botPlaysBlackCheck.checked));
+            if (selectedPiece !== pieceDiv && allowedToSelect) {
+                // Select another piece
+                clearHighlights();
+                await highlightPiece(pieceHighlight);
+                selectedPiece = pieceDiv;
+            } else if (selectedPiece !== pieceDiv) {
+                // Make a move
+                const from = piecePosition(selectedPiece);
+                const to = piecePosition(pieceDiv);
+
+                const isLegal = legalMoves.some(
+                    (move) => move.row === to.row && move.col === to.col
+                );
+
+                if (!isLegal) {
+                    // Deselect the piece
+                    clearHighlights();
+                    selectedPiece = null;
+                    return;
+                }
+
+                const moveSuccess = await window.pywebview.api.make_move(
+                    from.row,
+                    from.col,
+                    to.row,
+                    to.col
+                );
+
+                if (moveSuccess) {
+                    clearHighlights();
+                    selectedPiece = null;
+                    await fetchGame();
+                }
+            } else if (selectedPiece === pieceDiv) {
+                // Deselect the piece
+                clearHighlights();
+                selectedPiece = null;
+            }
+        }
+
+        // Fetch game state initially after document load
+        window.addEventListener("pywebviewready", () => {
+            fetchGame();
+            window.pywebview.api.get_bot_versions().then((versions) => {
+                versions.forEach((version) => {
+                    const option = document.createElement("option");
+                    option.value = version;
+                    option.innerText = version;
+                    versionSelect.appendChild(option);
+                });
+            });
+        });
+    </script>
+</html>
