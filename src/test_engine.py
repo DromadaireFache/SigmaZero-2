@@ -43,22 +43,44 @@ def test_move_generation(fen: str):
     assert mybot == chesslib
 
 
+def find_wrong_move_generation(board: chess.Board, depth: int, search_depth: int = 1):
+    chesslib_moves = count_moves(board, search_depth)
+    n_moves = sigma_zero.moves(board.fen(), search_depth).get("nodes", -1)
+    if chesslib_moves != n_moves:
+        print(f"Mismatch found at depth {depth} for FEN:\n{board.fen()}")
+        print(f"Chess lib moves: {chesslib_moves}, SigmaZero moves: {n_moves}")
+        sys.exit(1)
+
+    if depth == 0:
+        return
+
+    for move in board.legal_moves:
+        board.push(move)
+        find_wrong_move_generation(board, depth - 1, search_depth)
+        board.pop()
+
+
 if __name__ == "__main__":
-    pprint(sigma_zero.old_play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 10000))
-    pprint(sigma_zero.play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 2000))
+    #     pprint(sigma_zero.old_play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 10000))
+    #     pprint(sigma_zero.play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 2000))
 
+    FEN = "rnbqk2r/ppppnpp1/4P2p/8/1P6/b7/P1P1PPPP/RNBQKBNR w KQkq - 1 2"
+    DEPTH = 4
 
-# print("----- Chess lib -----")
-# print("total =", count_moves(chess.Board(FEN), DEPTH))
-# print("\n----- SigmaZero 2 -----")
-# sigma_zero.moves(FEN, DEPTH)
+    print("----- Chess lib -----")
+    print("total =", count_moves(chess.Board(FEN), DEPTH))
+    print("\n----- SigmaZero 2 -----")
+    print("mybot = ", sigma_zero.moves(FEN, DEPTH).get("nodes", -1))
 
-# board = chess.Board(FEN)
-# for move in board.legal_moves:
-#     board.push(move)
-#     fen = board.fen()
-#     mybot = sigma_zero.moves(fen, DEPTH - 1)
-#     if not mybot:
-#         print(fen)
-#         print(move)
-#     board.pop()
+    # find_wrong_move_generation(chess.Board(FEN), 1, DEPTH - 1)
+    # print("No mismatches found")
+
+    # board = chess.Board(FEN)
+    # for move in board.legal_moves:
+    #     board.push(move)
+    #     fen = board.fen()
+    #     mybot = sigma_zero.moves(fen, DEPTH - 1)
+    #     if not mybot:
+    #         print(fen)
+    #         print(move)
+    #     board.pop()

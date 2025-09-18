@@ -218,6 +218,6 @@ api = Api()
 
 if __name__ == "__main__":
     window = webview.create_window(
-        "SigmaZero V2 Chess Engine", "index.html", js_api=api, width=900, height=660, resizable=False
+        "SigmaZero V2 Chess Engine", "index.html", js_api=api, width=900, height=690, resizable=False
     )
     webview.start()
