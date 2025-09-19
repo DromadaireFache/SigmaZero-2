@@ -64,8 +64,8 @@ if __name__ == "__main__":
     #     pprint(sigma_zero.old_play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 10000))
     #     pprint(sigma_zero.play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 2000))
 
-    FEN = "rnbqk2r/ppppnpp1/4P2p/8/1P6/b7/P1P1PPPP/RNBQKBNR w KQkq - 1 2"
-    DEPTH = 4
+    FEN = "r1bq1rk1/p5pp/1p3b2/2pp4/1n1Pp3/1P2P1P1/1B1Q1PBP/2R1NRK1 b - - 1 17"
+    DEPTH = 5
 
     print("----- Chess lib -----")
     print("total =", count_moves(chess.Board(FEN), DEPTH))
