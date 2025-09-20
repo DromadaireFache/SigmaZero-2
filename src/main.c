@@ -21,7 +21,19 @@
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
 #define TIME_PLUS_OFFSET_MS(start, millis) \
     ((start) + CLOCKS_PER_SEC * (millis) / 1000)
+#include <windows.h>
+int get_num_cores(void) {
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    return sysinfo.dwNumberOfProcessors;
+}
+
 #else
+#include <unistd.h>
+int get_num_cores(void) {
+    long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+    return (nprocs > 0) ? nprocs : 1;
+}
 uint64_t now_nanos() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -2003,15 +2015,9 @@ int moves(char *fen, int depth) {
 int eval(Chess *chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
-    Position white_king_pos = Position_from_index(chess->king_white);
-    Position black_king_pos = Position_from_index(chess->king_black);
 
     for (int i = 0; i < 64; i++) {
         e += Piece_value_at(chess->board[i], i, fullmoves);
-    }
-
-    if (Chess_friendly_check(chess)) {
-        e -= chess->turn == TURN_WHITE ? 50 : -50;
     }
 
     return e;
@@ -2185,29 +2191,35 @@ int play(char *fen, int millis) {
 
     pthread_t *threads = calloc(n_moves, sizeof(pthread_t));
     ChessThread *args = calloc(n_moves, sizeof(ChessThread));
+    const int n_cores = get_num_cores();
 
     while (TIME_NOW() < endtime) {
         // nodes_total = 0;
         // is_endgame = Chess_is_endgame(chess);
+        int i = 0;
 
-        for (int i = 0; i < n_moves; i++) {
-            ChessThread *arg = &args[i];
-            memcpy(&arg->chess, chess, sizeof(Chess));
-            memcpy(&arg->move, &moves[i], sizeof(Move));
-            arg->endtime = endtime;
-            arg->depth = depth;
-            arg->score = &scores[i];
+        while (i < n_moves) {
+            for (int core = 0; core < n_cores && i < n_moves; core++) {
+                ChessThread *arg = &args[i];
+                memcpy(&arg->chess, chess, sizeof(Chess));
+                memcpy(&arg->move, &moves[i], sizeof(Move));
+                arg->endtime = endtime;
+                arg->depth = depth;
+                arg->score = &scores[i];
+    
+                if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
+                    perror("pthread_create failed");
+                    return 1;
+                }
+                i++;
+            }
 
-            if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
-                perror("pthread_create failed");
-                return 1;
+            // Wait for threads to finish
+            for (int i = 0; i < n_moves; i++) {
+                pthread_join(threads[i], NULL);
             }
         }
 
-        // Wait for threads to finish
-        for (int i = 0; i < n_moves; i++) {
-            pthread_join(threads[i], NULL);
-        }
 
         // If we finished this depth, update best move
         if (TIME_NOW() < endtime) {
@@ -2268,15 +2280,8 @@ void help(void) {
 }
 
 int test() {
-    // printf("Size of TT: %luMB", (unsigned long)sizeof(tt) / 1000000);
-    // TT_store(0x55, -50, 3);
-    // TT_store(0x7532, -30, 2);
-    // TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2);
-    // if (tt_item == NULL) {
-    //     printf("NULL pointer\n");
-    // } else {
-    //     printf("eval: %d\n", tt_item->eval);
-    // }
+    int n_cores = get_num_cores();
+    printf("cores: %d\n", n_cores);
     return 0;
 }
 
