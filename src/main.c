@@ -2056,25 +2056,25 @@ int eval(Chess *chess) {
         . . . . x x x x
     */
 
-#define WHITE_KINGSIDE 0x0000000707070707
-#define WHITE_QUEENSIDE 0x000000e0e0e0e0e0
-#define BLACK_KINGSIDE 0x0707070707000000
-#define BLACK_QUEENSIDE 0xe0e0e0e0e0000000
+#define WHITE_KINGSIDE 0x00000f0f0f0f0f0f
+#define WHITE_QUEENSIDE 0x0000f0f0f0f0f0f0
+#define BLACK_KINGSIDE 0x0f0f0f0f0f0f0000
+#define BLACK_QUEENSIDE 0xf0f0f0f0f0f00000
 
     bitboard_t king_bb = bitboard_from_index(chess->king_white);
     bitboard_t white_danger_zone = 0;
     if (king_bb & WHITE_KINGSIDE) {
-        white_danger_zone = 0x00000f0f0f0f0f0f;
+        white_danger_zone = WHITE_KINGSIDE;
     } else if (king_bb & WHITE_QUEENSIDE) {
-        white_danger_zone = 0x0000f0f0f0f0f0f0;
+        white_danger_zone = WHITE_QUEENSIDE;
     }
 
     king_bb = bitboard_from_index(chess->king_black);
     bitboard_t black_danger_zone = 0;
     if (king_bb & BLACK_KINGSIDE) {
-        black_danger_zone = 0x0f0f0f0f0f0f0000;
+        black_danger_zone = BLACK_KINGSIDE;
     } else if (king_bb & BLACK_QUEENSIDE) {
-        black_danger_zone = 0xf0f0f0f0f0f00000;
+        black_danger_zone = BLACK_QUEENSIDE;
     }
 
     for (int i = 0; i < 64; i++) {
