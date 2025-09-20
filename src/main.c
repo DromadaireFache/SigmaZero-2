@@ -148,27 +148,27 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
 }
 
 int Piece_danger_zone_bonus(Piece piece, int i, bitboard_t white_danger_zone,
-                            bitboard_t black_danger_zone) {
+                            bitboard_t black_danger_zone, uint8_t fullmoves) {
     bitboard_t bb = bitboard_from_index(i);
-#define IN_DANGER_ZONE(danger_zone, bonus) \
-    if (bb & danger_zone)                  \
-        return bonus;                      \
-    else                                   \
+#define IN_DANGER_ZONE(danger_zone, bonus)                \
+    if (bb & danger_zone)                                 \
+        return bonus * fullmoves * (50 - fullmoves) / 32; \
+    else                                                  \
         return 0;
 
     switch (piece) {
         case WHITE_QUEEN:
-            IN_DANGER_ZONE(black_danger_zone, 20)
+            IN_DANGER_ZONE(black_danger_zone, 2)
         case WHITE_BISHOP:
         case WHITE_KNIGHT:
         case WHITE_ROOK:
-            IN_DANGER_ZONE(black_danger_zone, 10)
+            IN_DANGER_ZONE(black_danger_zone, 1)
         case BLACK_QUEEN:
-            IN_DANGER_ZONE(white_danger_zone, -20)
+            IN_DANGER_ZONE(white_danger_zone, -2)
         case BLACK_BISHOP:
         case BLACK_KNIGHT:
         case BLACK_ROOK:
-            IN_DANGER_ZONE(white_danger_zone, -10)
+            IN_DANGER_ZONE(white_danger_zone, -1)
         default:
             return 0;
     }
@@ -2032,30 +2032,6 @@ int eval(Chess *chess) {
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
 
     // King safety
-    /*
-        Logic: if enemy pieces are on the same side as your king, deduct points.
-
-        if king is in this region:
-        . . . . . . . .
-        . . . . . . . .
-        . . . . . . . .
-        . . . . . x x x
-        . . . . . x x x
-        . . . . . x x x
-        . . . . . x x x
-        . . . . . x x x
-
-        deduct points for enemy pieces (not pawns) in this region:
-        . . . . . . . .
-        . . . . . . . .
-        . . . . x x x x
-        . . . . x x x x
-        . . . . x x x x
-        . . . . x x x x
-        . . . . x x x x
-        . . . . x x x x
-    */
-
 #define WHITE_KINGSIDE 0x00000f0f0f0f0f0f
 #define WHITE_QUEENSIDE 0x0000f0f0f0f0f0f0
 #define BLACK_KINGSIDE 0x0f0f0f0f0f0f0000
@@ -2083,7 +2059,7 @@ int eval(Chess *chess) {
 
         e += Piece_value_at(piece, i, fullmoves);
         e += Piece_danger_zone_bonus(piece, i, white_danger_zone,
-                                     black_danger_zone);
+                                     black_danger_zone, fullmoves);
     }
 
     return e;
