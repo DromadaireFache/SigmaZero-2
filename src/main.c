@@ -10,9 +10,6 @@
 #include <string.h>
 #include <time.h>
 
-/* ~~~~~ TODO next: figure out why the new move generation gives different eval
- * ~~~~~*/
-
 #include "consts.c"
 
 #define class typedef struct
@@ -1320,7 +1317,6 @@ void Chess_fill_attack_map(Chess *chess) {
                 eam->n_checks++;                                            \
                 if (eam->n_checks == 1) eam->block_attack_map = attack_map; \
                 if (eam->n_checks >= 2) return;                             \
-                break;                                                      \
             }                                                               \
         } else if (chess->board[king_i + (offset)] != EMPTY)                \
             break;                                                          \
@@ -1615,10 +1611,10 @@ size_t Chess_pawn_moves(Chess *chess, Move *move, int from,
     // 1 row up
     if (chess->board[from + 8 * direction] == EMPTY && !captures_only) {
         if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_QUEEN)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_ROOK)
             PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_BISHOP)
             PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_KNIGHT)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_QUEEN)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_ROOK)
         } else {
             PAWN_ADD_MOVE(8 * direction)
 

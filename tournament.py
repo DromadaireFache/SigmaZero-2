@@ -4,7 +4,7 @@ from src import sigma_zero
 import chess
 
 TIME = 100  # milliseconds per move
-OLD_BOT = "V2.4"
+OLD_BOT = "V2.3"
 FENS = []
 
 with open("data/FENs.txt", "r") as f:
