@@ -2000,61 +2000,6 @@ int moves(char *fen, int depth) {
     return 0;
 }
 
-static inline int max(int a, int b) { return a > b ? a : b; }
-
-int Piece_king_proximity_bonus(Piece piece, int piece_index,
-                               Position *friendly_king_pos,
-                               Position *enemy_king_pos, int fullmoves) {
-    Position piece_pos = Position_from_index(piece_index);
-    int friendly_distance;          // Distance to friendly king
-    int enemy_distance;             // Distance to enemy king
-    int attack_weight = fullmoves;  // Attack bonus (increases in endgame)
-    int defense_weight = 50 - fullmoves;
-
-#define DEFENSE_BONUS(bonus)                                              \
-    friendly_distance = max(abs(piece_pos.row - friendly_king_pos->row),  \
-                            abs(piece_pos.col - friendly_king_pos->col)); \
-    return (4 - friendly_distance) * (bonus) * defense_weight / 32;
-#define ATTACK_BONUS(bonus)                                         \
-    enemy_distance = max(abs(piece_pos.row - enemy_king_pos->row),  \
-                         abs(piece_pos.col - enemy_king_pos->col)); \
-    return (4 - enemy_distance) * (bonus) * attack_weight / 32;
-
-    switch (piece) {
-        // Queens want to get close to enemy king
-        case WHITE_QUEEN:
-            ATTACK_BONUS(10)
-        case BLACK_QUEEN:
-            ATTACK_BONUS(-10)
-
-        // Rooks are for defense
-        case WHITE_ROOK:
-            DEFENSE_BONUS(10)
-        case BLACK_ROOK:
-            DEFENSE_BONUS(-10)
-
-        // Knights balance between defense and attack
-        case WHITE_KNIGHT:
-            DEFENSE_BONUS(5)
-            ATTACK_BONUS(5)
-        case BLACK_KNIGHT:
-            DEFENSE_BONUS(-5)
-            ATTACK_BONUS(-5)
-
-        // Bishops are snipers so they get a small bonus for defense
-        // Pawns are meant to be close to the king in the opening
-        case WHITE_BISHOP:
-        case WHITE_PAWN:
-            DEFENSE_BONUS(5)
-        case BLACK_BISHOP:
-        case BLACK_PAWN:
-            DEFENSE_BONUS(-5)
-
-        default:
-            return 0;
-    }
-}
-
 int eval(Chess *chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
@@ -2062,20 +2007,11 @@ int eval(Chess *chess) {
     Position black_king_pos = Position_from_index(chess->king_black);
 
     for (int i = 0; i < 64; i++) {
-        Piece piece = chess->board[i];
-        if (piece == EMPTY) continue;
+        e += Piece_value_at(chess->board[i], i, fullmoves);
+    }
 
-        e += Piece_value_at(piece, i, fullmoves);
-
-        if (!Piece_is_king(piece)) {
-            if (Piece_is_white(piece)) {
-                e += Piece_king_proximity_bonus(piece, i, &white_king_pos,
-                                                &black_king_pos, fullmoves);
-            } else {
-                e += Piece_king_proximity_bonus(piece, i, &black_king_pos,
-                                                &white_king_pos, fullmoves);
-            }
-        }
+    if (Chess_friendly_check(chess)) {
+        e -= chess->turn == TURN_WHITE ? 50 : -50;
     }
 
     return e;
