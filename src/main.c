@@ -2199,6 +2199,7 @@ int play(char *fen, int millis) {
         int i = 0;
 
         while (i < n_moves) {
+            int n_threads = 0;
             for (int core = 0; core < n_cores && i < n_moves; core++) {
                 ChessThread *arg = &args[i];
                 memcpy(&arg->chess, chess, sizeof(Chess));
@@ -2212,11 +2213,12 @@ int play(char *fen, int millis) {
                     return 1;
                 }
                 i++;
+                n_threads++;
             }
 
             // Wait for threads to finish
-            for (int i = 0; i < n_moves; i++) {
-                pthread_join(threads[i], NULL);
+            for (int j = i - n_threads; j < i; j++) {
+                pthread_join(threads[j], NULL);
             }
         }
 
