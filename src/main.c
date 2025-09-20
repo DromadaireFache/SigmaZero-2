@@ -1927,10 +1927,13 @@ size_t Chess_count_moves_multi(Chess *chess, int depth) {
 }
 
 // Transposition table
+typedef enum { TT_EXACT, TT_LOWER, TT_UPPER } TTNodeType;
+
 class {
     uint64_t key;
     int eval;
     uint8_t depth;
+    TTNodeType type;
 }
 TTItem;
 
@@ -1962,7 +1965,7 @@ static inline pthread_mutex_t *get_lock(uint64_t key) {
 }
 
 // Store an entry with fine-grained locking
-void TT_store(uint64_t key, int eval, int depth) {
+void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
     pthread_mutex_t *lock = get_lock(key);
 
@@ -1971,19 +1974,26 @@ void TT_store(uint64_t key, int eval, int depth) {
         tt[i].key = key;
         tt[i].eval = eval;
         tt[i].depth = depth;
+        tt[i].type = node_type;
     }
     pthread_mutex_unlock(lock);
 }
 
 // Retrieve an entry with fine-grained locking
-bool TT_get(uint64_t key, int depth, int *eval_p) {
+bool TT_get(uint64_t key, int *eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
     pthread_mutex_t *lock = get_lock(key);
 
     pthread_mutex_lock(lock);
     bool hit = tt[i].key == key && depth <= tt[i].depth;
     if (hit) {
-        *eval_p = tt[i].eval;
+        if (tt[i].type == TT_EXACT ||
+            tt[i].type == TT_LOWER && tt[i].eval >= b ||
+            tt[i].type == TT_UPPER && tt[i].eval <= a) {
+            *eval_p = tt[i].eval;
+        } else {
+            hit = false;
+        }
     }
     pthread_mutex_unlock(lock);
 
@@ -2078,18 +2088,18 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
     // Look for existing eval in transposition table
     uint64_t hash = ZHashStack_peek(&chess->zhstack);
     int tt_eval;
-    if (TT_get(hash, depth, &tt_eval)) {
+    if (TT_get(hash, &tt_eval, depth, a, b)) {
         return tt_eval;
     }
 
-#define RETURN_AND_STORE_TT(e)         \
-    int evaluation = (e);              \
-    TT_store(hash, evaluation, depth); \
+#define RETURN_AND_STORE_TT(e, node_type)         \
+    int evaluation = (e);                         \
+    TT_store(hash, evaluation, depth, node_type); \
     return evaluation;
 
     if (depth == 0 || TIME_NOW() > endtime) {
-        RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess)
-                                                      : -eval(chess))
+        RETURN_AND_STORE_TT(
+            chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
     }
 
     // Check for 3 fold repetition
@@ -2105,13 +2115,15 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
         bool in_check = chess->enemy_attack_map.n_checks > 0;
         if (in_check) {
             // Checkmate
-            RETURN_AND_STORE_TT(-1000000 - depth)
+            RETURN_AND_STORE_TT(-1000000 - depth, TT_EXACT)
         } else {
             // draw by stalemate
-            RETURN_AND_STORE_TT(0)
+            RETURN_AND_STORE_TT(0, TT_EXACT)
         }
     }
 
+    int original_a = a;
+    int original_b = b;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
         Move *move = &moves[i];
@@ -2129,7 +2141,15 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
         }
         if (score >= b) break;
     }
-    RETURN_AND_STORE_TT(best_score)
+
+    TTNodeType node_type;
+    if (best_score <= original_a)
+        node_type = TT_UPPER;  // Failed low
+    else if (best_score >= original_b)
+        node_type = TT_LOWER;  // Failed high
+    else
+        node_type = TT_EXACT;
+    RETURN_AND_STORE_TT(best_score, node_type)
 }
 
 // If piece count < 38 it is an endgame
