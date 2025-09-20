@@ -1987,9 +1987,9 @@ bool TT_get(uint64_t key, int *eval_p, int depth, int a, int b) {
     pthread_mutex_lock(lock);
     bool hit = tt[i].key == key && depth <= tt[i].depth;
     if (hit) {
-        if (tt[i].type == TT_EXACT ||
-            tt[i].type == TT_LOWER && tt[i].eval >= b ||
-            tt[i].type == TT_UPPER && tt[i].eval <= a) {
+        if ((tt[i].type == TT_EXACT) ||
+            (tt[i].type == TT_LOWER && tt[i].eval >= b) ||
+            (tt[i].type == TT_UPPER && tt[i].eval <= a)) {
             *eval_p = tt[i].eval;
         } else {
             hit = false;
