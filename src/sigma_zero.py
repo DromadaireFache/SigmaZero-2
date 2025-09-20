@@ -46,7 +46,7 @@ def command(cmd: str, JSON: bool = False, exe: str = EXE_FILE) -> str | Any:
             print(result.stdout)
             return {"error": "Failed to parse JSON", "raw": result.stdout}
     else:
-        return result
+        return result.stdout.strip()
 
 
 def help():
@@ -68,6 +68,10 @@ def play(fen: str, millis: int) -> dict:
 def old_play(fen: str, millis: int) -> dict:
     result = dict(command(f'play "{fen}" "{millis}"', JSON=True, exe=OLD_EXE_FILE))
     return result
+
+
+def zhash(fen: str) -> str:
+    return command(f'hash "{fen}"')
 
 
 def time_move_gen() -> tuple[float, float]:

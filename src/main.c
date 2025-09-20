@@ -2198,6 +2198,63 @@ void *play_thread(void *arg_void) {
     return NULL;
 }
 
+bool openings_db(Chess *chess, TIME_TYPE start) {
+    char s[100];
+    sprintf(s, "%" PRIx64, Chess_zhash(chess));
+
+    // Opening the database file openings.db
+    // The file should contain lines of the form:
+    // <hash>,<n_options>,<option1>,<option2>,...
+    // options are in UCI format, e.g. e2e4, g1f3, etc.
+    FILE *file = fopen("openings.db", "r");
+    if (!file) return false;
+
+    char line[256];
+    while (fgets(line, sizeof(line), file)) {
+        if (line[0] == '#') continue;  // skip comments
+        char *hash_str = strtok(line, ",");
+        if (!hash_str) continue;
+        if (strcmp(hash_str, s) != 0) continue;
+
+        // Found the hash, now get the number of options
+        char *n_options_str = strtok(NULL, ",");
+        if (!n_options_str) continue;
+
+        int n_options = atoi(n_options_str);
+        if (n_options < 1) continue;
+
+        // Get a random option
+        int option_index = rand() % n_options;
+        char *move_str = NULL;
+
+        for (int i = 0; i < option_index; i++) {
+            move_str = strtok(NULL, ",");  // skip to the chosen option
+        }
+        if (!move_str) continue;
+
+        // Remove trailing newline
+        move_str[strcspn(move_str, "\n")] = 0;
+        TIME_TYPE end = TIME_NOW();
+        double cpu_time = TIME_DIFF_S(end, start);
+
+        puts("{");
+        printf("  \"scores\": {\n");
+        printf("    \"%s\": 0.00\n", move_str);
+        printf("  },\n");
+        printf("  \"millis\": 0,\n");
+        printf("  \"depth\": 0,\n");
+        printf("  \"time\": %.3lf,\n", cpu_time);
+        printf("  \"eval\": 0.00,\n");
+        printf("  \"move\": \"%s\"\n", move_str);
+        puts("}");
+        fclose(file);
+        return true;
+    }
+
+    fclose(file);
+    return false;
+}
+
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
 int play(char *fen, int millis) {
@@ -2207,6 +2264,10 @@ int play(char *fen, int millis) {
 
     TIME_TYPE start = TIME_NOW();
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
+
+    if (openings_db(chess, start)) {
+        return 0;
+    }
 
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
@@ -2303,15 +2364,15 @@ void help(void) {
 }
 
 int test() {
-    // printf("Size of TT: %luMB", (unsigned long)sizeof(tt) / 1000000);
-    // TT_store(0x55, -50, 3);
-    // TT_store(0x7532, -30, 2);
-    // TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2);
-    // if (tt_item == NULL) {
-    //     printf("NULL pointer\n");
-    // } else {
-    //     printf("eval: %d\n", tt_item->eval);
-    // }
+    Chess *chess = Chess_from_fen(
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!chess) return 1;
+
+    uint64_t hash = Chess_zhash(chess);
+    char s[100];
+    sprintf(s, "%" PRIx64, hash);
+    printf("%s\n", s);
+
     return 0;
 }
 
@@ -2336,6 +2397,11 @@ int main(int argc, char **argv) {
         Chess *chess = Chess_from_fen(argv[2]);
         if (!chess) return 1;
         printf("%f\n", (double)eval(chess) / 100);
+        return 0;
+    } else if (argc == 3 && strcmp(argv[1], "hash") == 0) {
+        Chess *chess = Chess_from_fen(argv[2]);
+        if (!chess) return 1;
+        printf("%" PRIx64 "\n", Chess_zhash(chess));
         return 0;
     } else {
         help();
