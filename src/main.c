@@ -2032,25 +2032,23 @@ int eval(Chess *chess) {
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
 
     // King safety
-#define WHITE_KINGSIDE 0x00000f0f0f0f0f0f
-#define WHITE_QUEENSIDE 0x0000f0f0f0f0f0f0
-#define BLACK_KINGSIDE 0x0f0f0f0f0f0f0000
-#define BLACK_QUEENSIDE 0xf0f0f0f0f0f00000
+#define KINGSIDE_DANGER_ZONE 0x0f0f0f0f0f0f0f0f
+#define QUEENSIDE_DANGER_ZONE 0xf0f0f0f0f0f0f0f0
 
     bitboard_t king_bb = bitboard_from_index(chess->king_white);
     bitboard_t white_danger_zone = 0;
-    if (king_bb & WHITE_KINGSIDE) {
-        white_danger_zone = WHITE_KINGSIDE;
-    } else if (king_bb & WHITE_QUEENSIDE) {
-        white_danger_zone = WHITE_QUEENSIDE;
+    if (king_bb & KINGSIDE_DANGER_ZONE) {
+        white_danger_zone = KINGSIDE_DANGER_ZONE;
+    } else if (king_bb & QUEENSIDE_DANGER_ZONE) {
+        white_danger_zone = QUEENSIDE_DANGER_ZONE;
     }
 
     king_bb = bitboard_from_index(chess->king_black);
     bitboard_t black_danger_zone = 0;
-    if (king_bb & BLACK_KINGSIDE) {
-        black_danger_zone = BLACK_KINGSIDE;
-    } else if (king_bb & BLACK_QUEENSIDE) {
-        black_danger_zone = BLACK_QUEENSIDE;
+    if (king_bb & KINGSIDE_DANGER_ZONE) {
+        black_danger_zone = KINGSIDE_DANGER_ZONE;
+    } else if (king_bb & QUEENSIDE_DANGER_ZONE) {
+        black_danger_zone = QUEENSIDE_DANGER_ZONE;
     }
 
     for (int i = 0; i < 64; i++) {
