@@ -147,33 +147,6 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
     }
 }
 
-int Piece_danger_zone_bonus(Piece piece, int i, bitboard_t white_danger_zone,
-                            bitboard_t black_danger_zone) {
-    bitboard_t bb = bitboard_from_index(i);
-#define IN_DANGER_ZONE(danger_zone, bonus)                \
-    if (bb & danger_zone)                                 \
-        return bonus; \
-    else                                                  \
-        return 0;
-
-    switch (piece) {
-        case WHITE_QUEEN:
-            IN_DANGER_ZONE(white_danger_zone, 15)
-        case WHITE_BISHOP:
-        case WHITE_KNIGHT:
-        case WHITE_ROOK:
-            IN_DANGER_ZONE(white_danger_zone, 15)
-        case BLACK_QUEEN:
-            IN_DANGER_ZONE(black_danger_zone, -15)
-        case BLACK_BISHOP:
-        case BLACK_KNIGHT:
-        case BLACK_ROOK:
-            IN_DANGER_ZONE(black_danger_zone, -15)
-        default:
-            return 0;
-    }
-}
-
 uint64_t Piece_zhash_at(Piece piece, int i) {
     switch (piece) {
         case WHITE_PAWN:
@@ -2027,47 +2000,82 @@ int moves(char *fen, int depth) {
     return 0;
 }
 
+static inline int max(int a, int b) { return a > b ? a : b; }
+
+int Piece_king_proximity_bonus(Piece piece, int piece_index,
+                               Position *friendly_king_pos,
+                               Position *enemy_king_pos, int fullmoves) {
+    Position piece_pos = Position_from_index(piece_index);
+    int friendly_distance;          // Distance to friendly king
+    int enemy_distance;             // Distance to enemy king
+    int attack_weight = fullmoves;  // Attack bonus (increases in endgame)
+    int defense_weight = 50 - fullmoves;
+
+#define DEFENSE_BONUS(bonus)                                              \
+    friendly_distance = max(abs(piece_pos.row - friendly_king_pos->row),  \
+                            abs(piece_pos.col - friendly_king_pos->col)); \
+    return (4 - friendly_distance) * (bonus) * defense_weight / 32;
+#define ATTACK_BONUS(bonus)                                         \
+    enemy_distance = max(abs(piece_pos.row - enemy_king_pos->row),  \
+                         abs(piece_pos.col - enemy_king_pos->col)); \
+    return (4 - enemy_distance) * (bonus) * attack_weight / 32;
+
+    switch (piece) {
+        // Queens want to get close to enemy king
+        case WHITE_QUEEN:
+            ATTACK_BONUS(10)
+        case BLACK_QUEEN:
+            ATTACK_BONUS(-10)
+
+        // Rooks are for defense
+        case WHITE_ROOK:
+            DEFENSE_BONUS(10)
+        case BLACK_ROOK:
+            DEFENSE_BONUS(-10)
+
+        // Knights balance between defense and attack
+        case WHITE_KNIGHT:
+            DEFENSE_BONUS(5)
+            ATTACK_BONUS(5)
+        case BLACK_KNIGHT:
+            DEFENSE_BONUS(-5)
+            ATTACK_BONUS(-5)
+
+        // Bishops are snipers so they get a small bonus for defense
+        // Pawns are meant to be close to the king in the opening
+        case WHITE_BISHOP:
+        case WHITE_PAWN:
+            DEFENSE_BONUS(5)
+        case BLACK_BISHOP:
+        case BLACK_PAWN:
+            DEFENSE_BONUS(-5)
+
+        default:
+            return 0;
+    }
+}
+
 int eval(Chess *chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
-
-    // King safety
-#define QUADRANT1 0xf0f0f0f000000000
-#define QUADRANT2 0x0f0f0f0f00000000
-#define QUADRANT3 0x00000000f0f0f0f0
-#define QUADRANT4 0x000000000f0f0f0f
-
-    bitboard_t king_bb = bitboard_from_index(chess->king_white);
-    bitboard_t white_danger_zone = 0;
-    if (king_bb & QUADRANT1) {
-        white_danger_zone = QUADRANT1;
-    } else if (king_bb & QUADRANT2) {
-        white_danger_zone = QUADRANT2;
-    } else if (king_bb & QUADRANT3) {
-        white_danger_zone = QUADRANT3;
-    } else if (king_bb & QUADRANT4) {
-        white_danger_zone = QUADRANT4;
-    }
-
-    king_bb = bitboard_from_index(chess->king_black);
-    bitboard_t black_danger_zone = 0;
-    if (king_bb & QUADRANT1) {
-        black_danger_zone = QUADRANT1;
-    } else if (king_bb & QUADRANT2) {
-        black_danger_zone = QUADRANT2;
-    } else if (king_bb & QUADRANT3) {
-        black_danger_zone = QUADRANT3;
-    } else if (king_bb & QUADRANT4) {
-        black_danger_zone = QUADRANT4;
-    }
+    Position white_king_pos = Position_from_index(chess->king_white);
+    Position black_king_pos = Position_from_index(chess->king_black);
 
     for (int i = 0; i < 64; i++) {
         Piece piece = chess->board[i];
         if (piece == EMPTY) continue;
 
         e += Piece_value_at(piece, i, fullmoves);
-        e += Piece_danger_zone_bonus(piece, i, white_danger_zone,
-                                     black_danger_zone);
+
+        if (!Piece_is_king(piece)) {
+            if (Piece_is_white(piece)) {
+                e += Piece_king_proximity_bonus(piece, i, &white_king_pos,
+                                                &black_king_pos, fullmoves);
+            } else {
+                e += Piece_king_proximity_bonus(piece, i, &black_king_pos,
+                                                &white_king_pos, fullmoves);
+            }
+        }
     }
 
     return e;
