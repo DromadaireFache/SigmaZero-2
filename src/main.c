@@ -21,19 +21,7 @@
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
 #define TIME_PLUS_OFFSET_MS(start, millis) \
     ((start) + CLOCKS_PER_SEC * (millis) / 1000)
-#include <windows.h>
-int get_num_cores(void) {
-    SYSTEM_INFO sysinfo;
-    GetSystemInfo(&sysinfo);
-    return sysinfo.dwNumberOfProcessors;
-}
-
 #else
-#include <unistd.h>
-int get_num_cores(void) {
-    long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
-    return (nprocs > 0) ? nprocs : 1;
-}
 uint64_t now_nanos() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -1938,7 +1926,6 @@ size_t Chess_count_moves_multi(Chess *chess, int depth) {
     return nodes_total;
 }
 
-/* REMOVE FOR NOW BECAUSE I CAN'T GET IT TO WORK :(
 // Transposition table
 class {
     uint64_t key;
@@ -1948,35 +1935,60 @@ class {
 TTItem;
 
 // Will give ~67MB array
-#define TT_LENGTH (1 << 26)
+#define TT_LENGTH (1 << 20)
 
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
 size_t n_transposition = 0;
 
+// Define a smaller number of locks (power of 2 works well)
+#define TT_LOCKS_COUNT 1024
+pthread_mutex_t tt_locks[TT_LOCKS_COUNT];
+
+// Initialize all locks
+void TT_init() {
+    for (int i = 0; i < TT_LOCKS_COUNT; i++) {
+        pthread_mutex_init(&tt_locks[i], NULL);
+    }
+
+    // Initialize your TT array if needed
+    memset(tt, 0, sizeof(tt));
+}
+
+// Get the appropriate lock for a hash
+static inline pthread_mutex_t *get_lock(uint64_t key) {
+    // Use lower bits of the hash to select a lock
+    return &tt_locks[key & (TT_LOCKS_COUNT - 1)];
+}
+
+// Store an entry with fine-grained locking
 void TT_store(uint64_t key, int eval, int depth) {
-    size_t i = key % TT_LENGTH;
-    TTItem *item = &tt[i];
+    size_t i = key & (TT_LENGTH - 1);
+    pthread_mutex_t *lock = get_lock(key);
 
-    if (depth > item->depth) {
-        // if ((item->key % TT_LENGTH) != i) n_transposition++;
-        item->key = key;
-        item->eval = eval;
-        item->depth = depth;
+    pthread_mutex_lock(lock);
+    if (depth > tt[i].depth) {
+        tt[i].key = key;
+        tt[i].eval = eval;
+        tt[i].depth = depth;
     }
+    pthread_mutex_unlock(lock);
 }
 
-TTItem *TT_get(uint64_t key, int depth) {
-    size_t i = key % TT_LENGTH;
-    TTItem *item = &tt[i];
+// Retrieve an entry with fine-grained locking
+bool TT_get(uint64_t key, int depth, int *eval_p) {
+    size_t i = key & (TT_LENGTH - 1);
+    pthread_mutex_t *lock = get_lock(key);
 
-    if (item->key == key && depth <= item->depth) {
-        n_transposition++;
-        return item;
+    pthread_mutex_lock(lock);
+    bool hit = tt[i].key == key && depth <= tt[i].depth;
+    if (hit) {
+        *eval_p = tt[i].eval;
     }
-    return NULL;
+    pthread_mutex_unlock(lock);
+
+    return hit;
 }
-*/
 
 int moves(char *fen, int depth) {
     Chess *chess = Chess_from_fen(fen);
@@ -2064,19 +2076,15 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
     }
 
     // Look for existing eval in transposition table
-    // uint64_t hash = ZHashStack_peek(&chess->zhstack);
-    // if (is_endgame) {
-    //     TTItem *tt_item = TT_get(hash, depth);
-    //     if (tt_item != NULL) {
-    //         nodes_total++;
-    //         return tt_item->eval;
-    //     }
-    // }
+    uint64_t hash = ZHashStack_peek(&chess->zhstack);
+    int tt_eval;
+    if (TT_get(hash, depth, &tt_eval)) {
+        return tt_eval;
+    }
 
-#define RETURN_AND_STORE_TT(e)                             \
-    /*nodes_total++;*/                                     \
-    int evaluation = (e);                                  \
-    /*if (is_endgame) TT_store(hash, evaluation, depth);*/ \
+#define RETURN_AND_STORE_TT(e)         \
+    int evaluation = (e);              \
+    TT_store(hash, evaluation, depth); \
     return evaluation;
 
     if (depth == 0 || TIME_NOW() > endtime) {
@@ -2188,40 +2196,33 @@ int play(char *fen, int millis) {
     Move *best_move = NULL;
     int best_score = -INF;
     int depth = 1;
+    TT_init();
 
     pthread_t *threads = calloc(n_moves, sizeof(pthread_t));
     ChessThread *args = calloc(n_moves, sizeof(ChessThread));
-    const int n_cores = get_num_cores();
 
     while (TIME_NOW() < endtime) {
         // nodes_total = 0;
         // is_endgame = Chess_is_endgame(chess);
-        int i = 0;
 
-        while (i < n_moves) {
-            int n_threads = 0;
-            for (int core = 0; core < n_cores && i < n_moves; core++) {
-                ChessThread *arg = &args[i];
-                memcpy(&arg->chess, chess, sizeof(Chess));
-                memcpy(&arg->move, &moves[i], sizeof(Move));
-                arg->endtime = endtime;
-                arg->depth = depth;
-                arg->score = &scores[i];
-    
-                if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
-                    perror("pthread_create failed");
-                    return 1;
-                }
-                i++;
-                n_threads++;
-            }
+        for (int i = 0; i < n_moves; i++) {
+            ChessThread *arg = &args[i];
+            memcpy(&arg->chess, chess, sizeof(Chess));
+            memcpy(&arg->move, &moves[i], sizeof(Move));
+            arg->endtime = endtime;
+            arg->depth = depth;
+            arg->score = &scores[i];
 
-            // Wait for threads to finish
-            for (int j = i - n_threads; j < i; j++) {
-                pthread_join(threads[j], NULL);
+            if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
+                perror("pthread_create failed");
+                return 1;
             }
         }
 
+        // Wait for threads to finish
+        for (int i = 0; i < n_moves; i++) {
+            pthread_join(threads[i], NULL);
+        }
 
         // If we finished this depth, update best move
         if (TIME_NOW() < endtime) {
@@ -2282,8 +2283,15 @@ void help(void) {
 }
 
 int test() {
-    int n_cores = get_num_cores();
-    printf("cores: %d\n", n_cores);
+    // printf("Size of TT: %luMB", (unsigned long)sizeof(tt) / 1000000);
+    // TT_store(0x55, -50, 3);
+    // TT_store(0x7532, -30, 2);
+    // TTItem *tt_item = TT_get(0x55 + TT_LENGTH, 2);
+    // if (tt_item == NULL) {
+    //     printf("NULL pointer\n");
+    // } else {
+    //     printf("eval: %d\n", tt_item->eval);
+    // }
     return 0;
 }
 
