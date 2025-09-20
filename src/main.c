@@ -147,6 +147,33 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
     }
 }
 
+int Piece_danger_zone_bonus(Piece piece, int i, bitboard_t white_danger_zone,
+                            bitboard_t black_danger_zone) {
+    bitboard_t bb = bitboard_from_index(i);
+#define IN_DANGER_ZONE(danger_zone, bonus) \
+    if (bb & danger_zone)                  \
+        return bonus;                      \
+    else                                   \
+        return 0;
+
+    switch (piece) {
+        case WHITE_QUEEN:
+            IN_DANGER_ZONE(black_danger_zone, 20)
+        case WHITE_BISHOP:
+        case WHITE_KNIGHT:
+        case WHITE_ROOK:
+            IN_DANGER_ZONE(black_danger_zone, 10)
+        case BLACK_QUEEN:
+            IN_DANGER_ZONE(white_danger_zone, -20)
+        case BLACK_BISHOP:
+        case BLACK_KNIGHT:
+        case BLACK_ROOK:
+            IN_DANGER_ZONE(white_danger_zone, -10)
+        default:
+            return 0;
+    }
+}
+
 uint64_t Piece_zhash_at(Piece piece, int i) {
     switch (piece) {
         case WHITE_PAWN:
@@ -420,7 +447,6 @@ class {
     uint8_t king_black;     // Position of black king
     ZHashStack zhstack;     // Stack to store zobrist hash of previous positions
     EnemyAttackMap enemy_attack_map;
-    int eval;  // Crude approx. of the eval calculated during move generation
 }
 Chess;
 
@@ -751,7 +777,7 @@ uint64_t Chess_zhash(Chess *chess) {
 Piece Chess_make_move(Chess *chess, Move *move) {
     Piece moving_piece = chess->board[move->from];
     Piece target_piece = chess->board[move->to];
-    
+
     // Update halfmove clock
     // Reset if a pawn moved or a capture was made
     if (!Piece_is_pawn(moving_piece) && target_piece == EMPTY) {
@@ -759,15 +785,11 @@ Piece Chess_make_move(Chess *chess, Move *move) {
     } else {
         chess->halfmoves = 0;
     }
-    
+
     // Update fullmove number
-    uint8_t prev_fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
     if (chess->turn == TURN_BLACK) {
         chess->fullmoves++;
     }
-
-    uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
-    chess->eval -= Piece_value_at(moving_piece, move->from, prev_fullmoves);
 
     // Update en passant status
     if (Piece_is_pawn(moving_piece) && abs(move->to - move->from) == 16) {
@@ -816,25 +838,24 @@ Piece Chess_make_move(Chess *chess, Move *move) {
     }
 
     // Move the rook if castling
-#define MOVE_CASTLING_ROOK(rook, from, to)                     \
-    chess->board[to] = rook;                                   \
-    chess->board[from] = EMPTY;                                \
-    chess->eval -= Piece_value_at(rook, from, prev_fullmoves); \
-    chess->eval += Piece_value_at(rook, to, fullmoves);
     if (moving_piece == WHITE_KING && move->from == 4 && move->to == 6) {
         // White kingside
-        MOVE_CASTLING_ROOK(WHITE_ROOK, 7, 5)
+        chess->board[5] = WHITE_ROOK;
+        chess->board[7] = EMPTY;
     } else if (moving_piece == WHITE_KING && move->from == 4 && move->to == 2) {
         // White queenside
-        MOVE_CASTLING_ROOK(WHITE_ROOK, 0, 3)
+        chess->board[3] = WHITE_ROOK;
+        chess->board[0] = EMPTY;
     } else if (moving_piece == BLACK_KING && move->from == 60 &&
                move->to == 62) {
         // Black kingside
-        MOVE_CASTLING_ROOK(BLACK_ROOK, 63, 61)
+        chess->board[61] = BLACK_ROOK;
+        chess->board[63] = EMPTY;
     } else if (moving_piece == BLACK_KING && move->from == 60 &&
                move->to == 58) {
         // Black queenside
-        MOVE_CASTLING_ROOK(BLACK_ROOK, 56, 59)
+        chess->board[59] = BLACK_ROOK;
+        chess->board[56] = EMPTY;
     }
 
     // Handle en passant capture
@@ -842,13 +863,11 @@ Piece Chess_make_move(Chess *chess, Move *move) {
         index_col(move->from) != index_col(move->to) && target_piece == EMPTY) {
         // White pawn capturing en passant
         chess->board[move->to - 8] = EMPTY;
-        chess->eval -= Piece_value_at(BLACK_PAWN, move->to - 8, fullmoves);
     } else if (moving_piece == BLACK_PAWN &&
                index_col(move->from) != index_col(move->to) &&
                target_piece == EMPTY) {
         // Black pawn capturing en passant
         chess->board[move->to + 8] = EMPTY;
-        chess->eval -= Piece_value_at(WHITE_PAWN, move->to + 8, fullmoves);
     }
 
     // Handle promotion
@@ -895,15 +914,8 @@ Piece Chess_make_move(Chess *chess, Move *move) {
 
     chess->board[move->to] = moving_piece;
     chess->board[move->from] = EMPTY;
-
-    // Update hash stack
     uint64_t hash = Chess_zhash(chess);
     ZHashStack_push(&chess->zhstack, hash);
-
-    // Update eval
-    chess->eval -= Piece_value_at(target_piece, move->to, fullmoves);
-    chess->eval += Piece_value_at(moving_piece, move->to, fullmoves);
-
     return target_piece;
 }
 
@@ -1032,18 +1044,6 @@ bool string_isdigit(const char *s) {
     return s[0] != '\0' && strspn(s, "0123456789") == strlen(s);
 }
 
-int crude_eval(Chess *chess) {
-    int e = 0;
-    uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
-
-    for (int i = 0; i < 64; i++) {
-        e += Piece_value_at(chess->board[i], i, fullmoves);
-    }
-
-    chess->eval = e;
-    return e;
-}
-
 // FEN fields used for parsing
 typedef enum {
     FEN_PLACEMENT,
@@ -1064,8 +1064,8 @@ Chess *Chess_from_fen(char *fen_arg) {
     strncpy(fen, fen_arg, sizeof(fen) - 1);
 
     static Chess chess_struct;
-    Chess *chess = &chess_struct;  // empty board
-    Chess_empty_board(chess);
+    Chess *board = &chess_struct;  // empty board
+    Chess_empty_board(board);
 
     // Split FEN into fields
     char *fields[6];
@@ -1099,7 +1099,7 @@ Chess *Chess_from_fen(char *fen_arg) {
             if (piece == -1) {
                 FEN_PARSING_ERROR("Invalid piece");
             }
-            Chess_add(chess, piece, pos);
+            Chess_add(board, piece, pos);
             pos.col += 1;
         }
         if (pos.col == 8) {
@@ -1110,28 +1110,28 @@ Chess *Chess_from_fen(char *fen_arg) {
 
     // 2. Turn
     if (strcmp(fields[1], "w") == 0) {
-        chess->turn = TURN_WHITE;
+        board->turn = TURN_WHITE;
     } else if (strcmp(fields[1], "b") == 0) {
-        chess->turn = TURN_BLACK;
+        board->turn = TURN_BLACK;
     } else {
         FEN_PARSING_ERROR("Turn must be 'w' or 'b'");
     }
 
     // 3. Castling rights
-    Chess_castle_Q_set(chess, strchr(fields[2], 'Q') != NULL);
-    Chess_castle_q_set(chess, strchr(fields[2], 'q') != NULL);
-    Chess_castle_K_set(chess, strchr(fields[2], 'K') != NULL);
-    Chess_castle_k_set(chess, strchr(fields[2], 'k') != NULL);
+    Chess_castle_Q_set(board, strchr(fields[2], 'Q') != NULL);
+    Chess_castle_q_set(board, strchr(fields[2], 'q') != NULL);
+    Chess_castle_K_set(board, strchr(fields[2], 'K') != NULL);
+    Chess_castle_k_set(board, strchr(fields[2], 'k') != NULL);
 
     // 4. En passant
     if (strcmp(fields[3], "-") == 0) {
-        Chess_en_passant_set(chess, -1);
+        Chess_en_passant_set(board, -1);
     } else {
         Position ep = Position_from_string(fields[3]);
         if (!Position_valid(&ep)) {
             FEN_PARSING_ERROR("Invalid en passant position");
         }
-        Chess_en_passant_set(chess, ep.col);
+        Chess_en_passant_set(board, ep.col);
     }
 
     // 5. Halfmove clock
@@ -1142,7 +1142,7 @@ Chess *Chess_from_fen(char *fen_arg) {
     if (halfmoves > 99) {
         FEN_PARSING_ERROR("Half move clock overflow");
     }
-    chess->halfmoves = (uint8_t)halfmoves;
+    board->halfmoves = (uint8_t)halfmoves;
 
     // 6. Fullmove number
     if (!string_isdigit(fields[5])) {
@@ -1152,10 +1152,9 @@ Chess *Chess_from_fen(char *fen_arg) {
     if (fullmoves > 255) {
         FEN_PARSING_ERROR("Full move clock overflow");
     }
-    chess->fullmoves = (uint8_t)fullmoves;
-    Chess_find_kings(chess);
-    crude_eval(chess);
-    return chess;
+    board->fullmoves = (uint8_t)fullmoves;
+    Chess_find_kings(board);
+    return board;
 }
 
 void Chess_print_fen(Chess *chess) {
@@ -1652,14 +1651,12 @@ size_t Chess_pawn_moves(Chess *chess, Move *move, int from,
     move->to = from + (offset);                   \
     move->promotion = NO_PROMOTION;               \
     gamestate_t gamestate = chess->gamestate;     \
-    int e = chess->eval;                          \
     Piece capture = Chess_make_move(chess, move); \
     chess->turn = !chess->turn;                   \
     bool in_check = Chess_friendly_check(chess);  \
     chess->turn = !chess->turn;                   \
     Chess_unmake_move(chess, move, capture);      \
     chess->gamestate = gamestate;                 \
-    chess->eval = e;                              \
     if (!in_check) {                              \
         move++;                                   \
         n_moves++;                                \
@@ -1864,12 +1861,10 @@ size_t Chess_count_moves(Chess *chess, int depth) {
     size_t nodes = 0;
     for (int i = 0; i < n_moves; i++) {
         gamestate_t gamestate = chess->gamestate;
-        int e = chess->eval;
         Piece capture = Chess_make_move(chess, &moves[i]);
         nodes += Chess_count_moves(chess, depth - 1);
         Chess_unmake_move(chess, &moves[i], capture);
         chess->gamestate = gamestate;
-        chess->eval = e;
     }
 
     return nodes;
@@ -2033,12 +2028,63 @@ int moves(char *fen, int depth) {
 }
 
 int eval(Chess *chess) {
-    int e = chess->eval;
-    // uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
+    int e = 0;
+    uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
 
-    // for (int i = 0; i < 64; i++) {
-    //     e += Piece_value_at(chess->board[i], i, fullmoves);
-    // }
+    // King safety
+    /*
+        Logic: if enemy pieces are on the same side as your king, deduct points.
+
+        if king is in this region:
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . x x x
+        . . . . . x x x
+        . . . . . x x x
+        . . . . . x x x
+        . . . . . x x x
+
+        deduct points for enemy pieces (not pawns) in this region:
+        . . . . . . . .
+        . . . . . . . .
+        . . . . x x x x
+        . . . . x x x x
+        . . . . x x x x
+        . . . . x x x x
+        . . . . x x x x
+        . . . . x x x x
+    */
+
+#define WHITE_KINGSIDE 0x0000000707070707
+#define WHITE_QUEENSIDE 0x000000e0e0e0e0e0
+#define BLACK_KINGSIDE 0x0707070707000000
+#define BLACK_QUEENSIDE 0xe0e0e0e0e0000000
+
+    bitboard_t king_bb = bitboard_from_index(chess->king_white);
+    bitboard_t white_danger_zone = 0;
+    if (king_bb & WHITE_KINGSIDE) {
+        white_danger_zone = 0x00000f0f0f0f0f0f;
+    } else if (king_bb & WHITE_QUEENSIDE) {
+        white_danger_zone = 0x0000f0f0f0f0f0f0;
+    }
+
+    king_bb = bitboard_from_index(chess->king_black);
+    bitboard_t black_danger_zone = 0;
+    if (king_bb & BLACK_KINGSIDE) {
+        black_danger_zone = 0x0f0f0f0f0f0f0000;
+    } else if (king_bb & BLACK_QUEENSIDE) {
+        black_danger_zone = 0xf0f0f0f0f0f00000;
+    }
+
+    for (int i = 0; i < 64; i++) {
+        Piece piece = chess->board[i];
+        if (piece == EMPTY) continue;
+
+        e += Piece_value_at(piece, i, fullmoves);
+        e += Piece_danger_zone_bonus(piece, i, white_danger_zone,
+                                     black_danger_zone);
+    }
 
     return e;
 }
@@ -2060,14 +2106,12 @@ int minimax_captures_only(Chess *chess, TIME_TYPE endtime, int depth, int a,
     for (int i = 0; i < n_moves; i++) {
         Move *move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
-        int e = chess->eval;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax_captures_only(chess, endtime, depth - 1, -b, -a);
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
-        chess->eval = e;
 
         if (score >= b) return score;
         if (score > best_score) best_score = score;
@@ -2130,14 +2174,12 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
     for (int i = 0; i < n_moves; i++) {
         Move *move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
-        int e = chess->eval;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax(chess, endtime, depth - 1, -b, -a, capture);
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
-        chess->eval = e;
 
         if (score > best_score) {
             best_score = score;
