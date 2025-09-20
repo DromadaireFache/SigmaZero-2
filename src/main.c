@@ -148,27 +148,27 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
 }
 
 int Piece_danger_zone_bonus(Piece piece, int i, bitboard_t white_danger_zone,
-                            bitboard_t black_danger_zone, uint8_t fullmoves) {
+                            bitboard_t black_danger_zone) {
     bitboard_t bb = bitboard_from_index(i);
 #define IN_DANGER_ZONE(danger_zone, bonus)                \
     if (bb & danger_zone)                                 \
-        return bonus * fullmoves * (50 - fullmoves) / 32; \
+        return bonus; \
     else                                                  \
         return 0;
 
     switch (piece) {
         case WHITE_QUEEN:
-            IN_DANGER_ZONE(black_danger_zone, 2)
+            IN_DANGER_ZONE(black_danger_zone, 100)
         case WHITE_BISHOP:
         case WHITE_KNIGHT:
         case WHITE_ROOK:
-            IN_DANGER_ZONE(black_danger_zone, 1)
+            IN_DANGER_ZONE(black_danger_zone, 35)
         case BLACK_QUEEN:
-            IN_DANGER_ZONE(white_danger_zone, -2)
+            IN_DANGER_ZONE(white_danger_zone, -100)
         case BLACK_BISHOP:
         case BLACK_KNIGHT:
         case BLACK_ROOK:
-            IN_DANGER_ZONE(white_danger_zone, -1)
+            IN_DANGER_ZONE(white_danger_zone, -35)
         default:
             return 0;
     }
@@ -2067,7 +2067,7 @@ int eval(Chess *chess) {
 
         e += Piece_value_at(piece, i, fullmoves);
         e += Piece_danger_zone_bonus(piece, i, white_danger_zone,
-                                     black_danger_zone, fullmoves);
+                                     black_danger_zone);
     }
 
     return e;
