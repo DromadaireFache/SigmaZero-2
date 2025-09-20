@@ -158,17 +158,17 @@ int Piece_danger_zone_bonus(Piece piece, int i, bitboard_t white_danger_zone,
 
     switch (piece) {
         case WHITE_QUEEN:
-            IN_DANGER_ZONE(black_danger_zone, 100)
+            IN_DANGER_ZONE(white_danger_zone, 15)
         case WHITE_BISHOP:
         case WHITE_KNIGHT:
         case WHITE_ROOK:
-            IN_DANGER_ZONE(black_danger_zone, 35)
+            IN_DANGER_ZONE(white_danger_zone, 15)
         case BLACK_QUEEN:
-            IN_DANGER_ZONE(white_danger_zone, -100)
+            IN_DANGER_ZONE(black_danger_zone, -15)
         case BLACK_BISHOP:
         case BLACK_KNIGHT:
         case BLACK_ROOK:
-            IN_DANGER_ZONE(white_danger_zone, -35)
+            IN_DANGER_ZONE(black_danger_zone, -15)
         default:
             return 0;
     }
