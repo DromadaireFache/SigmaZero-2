@@ -21,7 +21,19 @@
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
 #define TIME_PLUS_OFFSET_MS(start, millis) \
     ((start) + CLOCKS_PER_SEC * (millis) / 1000)
+#include <windows.h>
+int get_num_cores(void) {
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    return sysinfo.dwNumberOfProcessors;
+}
+
 #else
+#include <unistd.h>
+int get_num_cores(void) {
+    long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+    return (nprocs > 0) ? nprocs : 1;
+}
 uint64_t now_nanos() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -2039,42 +2051,11 @@ int eval(Chess *chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
 
-    int white_pawns[8] = {0};
-    int black_pawns[8] = {0};
-
     for (int i = 0; i < 64; i++) {
         Piece piece = chess->board[i];
         if (piece == EMPTY) continue;
 
         e += Piece_value_at(piece, i, fullmoves);
-
-        // add pawns to the list
-        if (piece == WHITE_PAWN) {
-            white_pawns[index_col(i)]++;
-        } else if (piece == BLACK_PAWN) {
-            black_pawns[index_col(i)]++;
-        }
-    }
-
-    // remove points for isolated pawns
-#define ISOLATED_PAWN_PENALTY 20
-    for (int i = 0; i < 8; i++) {
-        if (i == 0) {
-            if (white_pawns[1] == 0)
-                e -= ISOLATED_PAWN_PENALTY * white_pawns[0];
-            if (black_pawns[1] == 0)
-                e += ISOLATED_PAWN_PENALTY * black_pawns[0];
-        } else if (i == 7) {
-            if (white_pawns[6] == 0)
-                e -= ISOLATED_PAWN_PENALTY * white_pawns[7];
-            if (black_pawns[6] == 0)
-                e += ISOLATED_PAWN_PENALTY * black_pawns[7];
-        } else {
-            if (white_pawns[i + 1] == 0 && white_pawns[i - 1] == 0)
-                e -= ISOLATED_PAWN_PENALTY * white_pawns[i];
-            if (black_pawns[i + 1] == 0 && black_pawns[i - 1] == 0)
-                e += ISOLATED_PAWN_PENALTY * black_pawns[i];
-        }
     }
 
     return e;
@@ -2317,28 +2298,35 @@ int play(char *fen, int millis) {
 
     pthread_t *threads = calloc(n_moves, sizeof(pthread_t));
     ChessThread *args = calloc(n_moves, sizeof(ChessThread));
+    const int n_cores = get_num_cores();
 
     while (TIME_NOW() < endtime) {
         // nodes_total = 0;
         // is_endgame = Chess_is_endgame(chess);
+        int i = 0;
 
-        for (int i = 0; i < n_moves; i++) {
-            ChessThread *arg = &args[i];
-            memcpy(&arg->chess, chess, sizeof(Chess));
-            memcpy(&arg->move, &moves[i], sizeof(Move));
-            arg->endtime = endtime;
-            arg->depth = depth;
-            arg->score = &scores[i];
-
-            if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
-                perror("pthread_create failed");
-                return 1;
+        while (i < n_moves) {
+            int n_threads = 0;
+            for (int core = 0; core < n_cores && i < n_moves; core++) {
+                ChessThread *arg = &args[i];
+                memcpy(&arg->chess, chess, sizeof(Chess));
+                memcpy(&arg->move, &moves[i], sizeof(Move));
+                arg->endtime = endtime;
+                arg->depth = depth;
+                arg->score = &scores[i];
+    
+                if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
+                    perror("pthread_create failed");
+                    return 1;
+                }
+                i++;
+                n_threads++;
             }
-        }
 
-        // Wait for threads to finish
-        for (int i = 0; i < n_moves; i++) {
-            pthread_join(threads[i], NULL);
+            // Wait for threads to finish
+            for (int j = i - n_threads; j < i; j++) {
+                pthread_join(threads[j], NULL);
+            }
         }
 
         // If we finished this depth, update best move
