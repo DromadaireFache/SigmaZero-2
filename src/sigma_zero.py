@@ -5,6 +5,8 @@ import sys
 from typing import Any
 from itertools import permutations
 
+import chess
+
 
 DEPTH = 5
 _COMPILED = set()
@@ -39,11 +41,12 @@ def make(version: str | None = None):
 def command(cmd: str, JSON: bool = False, exe: str = EXE_FILE) -> str | Any:
     make()
     result = subprocess.run(rf"{exe} {cmd}", shell=True, capture_output=True, text=True)
+    print(result.stderr, file=sys.stderr)
     if JSON:
         try:
             return json.loads(result.stdout)
         except:
-            print(result.stdout)
+            # print(result.stdout)
             return {"error": "Failed to parse JSON", "raw": result.stdout}
     else:
         return result.stdout.strip()
@@ -61,13 +64,36 @@ def moves(fen: str, depth: int) -> dict:
     return dict(command(f'moves "{fen}" "{depth}"', JSON=True))
 
 
-def play(fen: str, millis: int) -> dict:
-    return dict(command(f'play "{fen}" "{millis}"', JSON=True))
+def get_history_stack(board: chess.Board) -> list[str]:
+    history = []
+
+    if board.move_stack:
+        temp_board = chess.Board()
+        for move in board.move_stack[:-1]:  # Exclude last move (current position)
+            temp_board.push(move)
+            history.append(temp_board.fen())
+
+    return history
 
 
-def old_play(fen: str, millis: int) -> dict:
-    result = dict(command(f'play "{fen}" "{millis}"', JSON=True, exe=OLD_EXE_FILE))
-    return result
+def play(board: chess.Board, millis: int) -> dict:
+    history_str = ",".join(get_history_stack(board))
+    if history_str:
+        result = dict(command(f'play "{board.fen()}" "{millis}" "{history_str}"', JSON=True))
+        if result.get("error") is None:
+            return result
+    return dict(command(f'play "{board.fen()}" "{millis}"', JSON=True))
+
+
+def old_play(board: chess.Board, millis: int) -> dict:
+    history_str = ",".join(get_history_stack(board))
+    if history_str:
+        result = dict(
+            command(f'play "{board.fen()}" "{millis}" "{history_str}"', JSON=True, exe=OLD_EXE_FILE)
+        )
+        if result.get("error") is None:
+            return result
+    return dict(command(f'play "{board.fen()}" "{millis}"', JSON=True, exe=OLD_EXE_FILE))
 
 
 def zhash(fen: str) -> str:

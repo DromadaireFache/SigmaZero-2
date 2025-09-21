@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+
+import chess
 from src import sigma_zero
 
 TIME = 1000  # milliseconds per move
@@ -22,7 +24,8 @@ def run_puzzles():
     for i, puzzle in enumerate(PUZZLES):
         try:
             print(f"Puzzle {i+1}/{len(PUZZLES)}: {puzzle.fen}")
-            result = sigma_zero.play(puzzle.fen, TIME)
+            board = chess.Board(puzzle.fen)
+            result = sigma_zero.play(board, TIME)
             move = result.get("move", "<unknown>")
             if move == puzzle.move:
                 print("Correct!\n")

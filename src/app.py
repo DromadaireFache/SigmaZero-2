@@ -174,10 +174,10 @@ class Api:
 
     def bot_move(self, millis: int, version: str, tries: int = 0) -> bool:
         if version.lower() == "latest":
-            result = sigma_zero.play(board.fen(), millis)
+            result = sigma_zero.play(board, millis)
         else:
             sigma_zero.make(version)
-            result = sigma_zero.old_play(board.fen(), millis)
+            result = sigma_zero.old_play(board, millis)
             
         move_uci = result.get("move", "<unknown>")
         try:

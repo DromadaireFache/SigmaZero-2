@@ -49,11 +49,11 @@ def play_game(fen: str, is_white: bool) -> dict:
     number_of_moves = 0
     while not board.is_game_over(claim_draw=True):
         if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
-            result = sigma_zero.play(board.fen(), TIME)
+            result = sigma_zero.play(board, TIME)
             results["time_new"] += result.get("time", 0)
             results["avg_depth_new"] += result.get("depth", 0)
         else:
-            result = sigma_zero.old_play(board.fen(), TIME)
+            result = sigma_zero.old_play(board, TIME)
             results["time_old"] += result.get("time", 0)
             results["avg_depth_old"] += result.get("depth", 0)
         move_uci = result.get("move", "<unknown>")

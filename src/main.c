@@ -1189,6 +1189,25 @@ void Chess_print_fen(Chess *chess) {
     putchar('\n');
 }
 
+void ZHashStack_game_history(ZHashStack *zhstack, char *_game_history) {
+    char *game_history = calloc(strlen(_game_history) + 1, sizeof(char));
+    strcpy(game_history, _game_history);
+    
+    char *saveptr;
+    char *fen = strtok_r(game_history, ",", &saveptr);
+
+    while (fen) {
+        Chess *chess = Chess_from_fen(fen);
+        if (!chess) return;
+        uint64_t hash = Chess_zhash(chess);
+        ZHashStack_push(zhstack, hash);
+
+        fen = strtok_r(NULL, ",", &saveptr);
+    }
+
+    free(game_history);
+}
+
 static inline uint8_t Chess_friendly_king_i(Chess *chess) {
     return chess->turn == TURN_WHITE ? chess->king_white : chess->king_black;
 }
@@ -2046,10 +2065,6 @@ int eval(Chess *chess) {
         e += Piece_value_at(piece, i, fullmoves);
     }
 
-    if (Chess_friendly_check(chess)) {
-        e -= chess->turn == TURN_WHITE ? 50 : -50;
-    }
-
     return e;
 }
 
@@ -2266,10 +2281,16 @@ bool openings_db(Chess *chess, TIME_TYPE start) {
 
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
-int play(char *fen, int millis) {
+int play(char *fen, int millis, char *game_history) {
+    ZHashStack zhstack = {0};
+    if (game_history != NULL) {
+        ZHashStack_game_history(&zhstack, game_history);
+    }
+
     Chess *chess = Chess_from_fen(fen);
     if (!chess) return 1;
     if (millis < 1) return 1;
+    memcpy(&chess->zhstack, &zhstack, sizeof(ZHashStack));
 
     TIME_TYPE start = TIME_NOW();
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
@@ -2396,9 +2417,13 @@ int main(int argc, char **argv) {
         return version();
     } else if (strcmp(argv[1], "test") == 0) {
         return test();
-    } else if (argc == 4 && strcmp(argv[1], "play") == 0) {
+    } else if ((argc == 4 || argc == 5) && strcmp(argv[1], "play") == 0) {
         int millis = atoi(argv[3]);
-        return play(argv[2], millis);
+        if (argc == 4) {
+            return play(argv[2], millis, NULL);
+        } else {
+            return play(argv[2], millis, argv[4]);
+        }
     } else if (argc == 4 && strcmp(argv[1], "moves") == 0) {
         int depth = atoi(argv[3]);
         return moves(argv[2], depth);
