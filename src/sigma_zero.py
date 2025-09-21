@@ -41,7 +41,6 @@ def make(version: str | None = None):
 def command(cmd: str, JSON: bool = False, exe: str = EXE_FILE) -> str | Any:
     make()
     result = subprocess.run(rf"{exe} {cmd}", shell=True, capture_output=True, text=True)
-    print(result.stderr, file=sys.stderr)
     if JSON:
         try:
             return json.loads(result.stdout)
@@ -66,14 +65,13 @@ def moves(fen: str, depth: int) -> dict:
 
 def get_history_stack(board: chess.Board) -> list[str]:
     history = []
+    temp_board = board.copy()
 
-    if board.move_stack:
-        temp_board = chess.Board()
-        for move in board.move_stack[:-1]:  # Exclude last move (current position)
-            temp_board.push(move)
-            history.append(temp_board.fen())
+    while temp_board.move_stack:
+        history.append(temp_board.fen())
+        temp_board.pop()
 
-    return history
+    return history[::-1]
 
 
 def play(board: chess.Board, millis: int) -> dict:
