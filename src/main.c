@@ -2046,6 +2046,10 @@ int eval(Chess *chess) {
         e += Piece_value_at(piece, i, fullmoves);
     }
 
+    if (Chess_friendly_check(chess)) {
+        e -= chess->turn == TURN_WHITE ? 50 : -50;
+    }
+
     return e;
 }
 
