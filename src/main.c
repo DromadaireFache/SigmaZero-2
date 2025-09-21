@@ -21,19 +21,7 @@
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
 #define TIME_PLUS_OFFSET_MS(start, millis) \
     ((start) + CLOCKS_PER_SEC * (millis) / 1000)
-#include <windows.h>
-int get_num_cores(void) {
-    SYSTEM_INFO sysinfo;
-    GetSystemInfo(&sysinfo);
-    return sysinfo.dwNumberOfProcessors;
-}
-
 #else
-#include <unistd.h>
-int get_num_cores(void) {
-    long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
-    return (nprocs > 0) ? nprocs : 1;
-}
 uint64_t now_nanos() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -2298,35 +2286,28 @@ int play(char *fen, int millis) {
 
     pthread_t *threads = calloc(n_moves, sizeof(pthread_t));
     ChessThread *args = calloc(n_moves, sizeof(ChessThread));
-    const int n_cores = get_num_cores();
 
     while (TIME_NOW() < endtime) {
         // nodes_total = 0;
         // is_endgame = Chess_is_endgame(chess);
-        int i = 0;
 
-        while (i < n_moves) {
-            int n_threads = 0;
-            for (int core = 0; core < n_cores && i < n_moves; core++) {
-                ChessThread *arg = &args[i];
-                memcpy(&arg->chess, chess, sizeof(Chess));
-                memcpy(&arg->move, &moves[i], sizeof(Move));
-                arg->endtime = endtime;
-                arg->depth = depth;
-                arg->score = &scores[i];
-    
-                if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
-                    perror("pthread_create failed");
-                    return 1;
-                }
-                i++;
-                n_threads++;
-            }
+        for (int i = 0; i < n_moves; i++) {
+            ChessThread *arg = &args[i];
+            memcpy(&arg->chess, chess, sizeof(Chess));
+            memcpy(&arg->move, &moves[i], sizeof(Move));
+            arg->endtime = endtime;
+            arg->depth = depth;
+            arg->score = &scores[i];
 
-            // Wait for threads to finish
-            for (int j = i - n_threads; j < i; j++) {
-                pthread_join(threads[j], NULL);
+            if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
+                perror("pthread_create failed");
+                return 1;
             }
+        }
+
+        // Wait for threads to finish
+        for (int i = 0; i < n_moves; i++) {
+            pthread_join(threads[i], NULL);
         }
 
         // If we finished this depth, update best move
