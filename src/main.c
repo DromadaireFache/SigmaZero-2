@@ -2037,9 +2037,42 @@ int moves(char *fen, int depth) {
 int eval(Chess *chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
+    int white_pawns[8] = {0};
+    int black_pawns[8] = {0};
 
     for (int i = 0; i < 64; i++) {
-        e += Piece_value_at(chess->board[i], i, fullmoves);
+        Piece piece = chess->board[i];
+        if (piece == EMPTY) continue;
+
+        e += Piece_value_at(piece, i, fullmoves);
+
+        // add pawns to the list
+        if (piece == WHITE_PAWN) {
+            white_pawns[index_col(i)]++;
+        } else if (piece == BLACK_PAWN) {
+            black_pawns[index_col(i)]++;
+        }
+    }
+
+    // remove points for isolated pawns
+#define ISOLATED_PAWN_PENALTY 20
+    for (int i = 0; i < 8; i++) {
+        if (i == 0) {
+            if (white_pawns[1] == 0)
+                e -= ISOLATED_PAWN_PENALTY * white_pawns[0];
+            if (black_pawns[1] == 0)
+                e += ISOLATED_PAWN_PENALTY * black_pawns[0];
+        } else if (i == 7) {
+            if (white_pawns[6] == 0)
+                e -= ISOLATED_PAWN_PENALTY * white_pawns[7];
+            if (black_pawns[6] == 0)
+                e += ISOLATED_PAWN_PENALTY * black_pawns[7];
+        } else {
+            if (white_pawns[i + 1] == 0 && white_pawns[i - 1] == 0)
+                e -= ISOLATED_PAWN_PENALTY * white_pawns[i];
+            if (black_pawns[i + 1] == 0 && black_pawns[i - 1] == 0)
+                e += ISOLATED_PAWN_PENALTY * black_pawns[i];
+        }
     }
 
     return e;
@@ -2201,6 +2234,7 @@ void *play_thread(void *arg_void) {
 bool openings_db(Chess *chess, TIME_TYPE start) {
     char s[100];
     sprintf(s, "%" PRIx64, Chess_zhash(chess));
+    srand((unsigned int)time(NULL));
 
     // Opening the database file openings.db
     // The file should contain lines of the form:
@@ -2227,7 +2261,7 @@ bool openings_db(Chess *chess, TIME_TYPE start) {
         int option_index = rand() % n_options;
         char *move_str = NULL;
 
-        for (int i = 0; i < option_index; i++) {
+        for (int i = 0; i < option_index + 1; i++) {
             move_str = strtok(NULL, ",");  // skip to the chosen option
         }
         if (!move_str) continue;
@@ -2265,7 +2299,7 @@ int play(char *fen, int millis) {
     TIME_TYPE start = TIME_NOW();
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
 
-    if (openings_db(chess, start)) {
+    if (chess->fullmoves <= 5 && openings_db(chess, start)) {
         return 0;
     }
 
