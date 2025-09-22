@@ -2158,29 +2158,6 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
         }
     }
 
-    if (depth >= 3 && chess->fullmoves < 40 &&
-        !chess->enemy_attack_map.n_checks && last_capture == EMPTY) {
-        // Save state
-        turn_t old_turn = chess->turn;
-        uint8_t old_ep = Chess_en_passant(chess);
-
-        // Make null move
-        chess->turn = !chess->turn;
-        Chess_en_passant_set(chess, -1);  // Clear en passant
-        uint64_t null_hash = Chess_zhash(chess);
-        ZHashStack_push(&chess->zhstack, null_hash);
-
-        int null_score =
-            -minimax(chess, endtime, depth - 2, -b, -b + 1, EMPTY, extensions);
-
-        // Restore state
-        ZHashStack_pop(&chess->zhstack);
-        chess->turn = old_turn;
-        Chess_en_passant_set(chess, old_ep);
-
-        if (null_score >= b) return b;
-    }
-
     int original_a = a;
     int original_b = b;
     int best_score = -INF;
