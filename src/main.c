@@ -2158,7 +2158,7 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
         }
     }
 
-    if (depth >= 3 && !chess->enemy_attack_map.n_checks && !last_capture) {
+    if (depth >= 3 && !chess->enemy_attack_map.n_checks && last_capture == EMPTY) {
         // Try skipping a move - if opponent still can't beat beta, we're good
         chess->turn = !chess->turn;
         int null_score = -minimax(chess, endtime, depth-3, -b, -b+1, EMPTY, extensions);
