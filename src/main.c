@@ -1639,24 +1639,20 @@ size_t Chess_pawn_moves(Chess *chess, Move *move, int from,
         }
     }
 
-#define PAWN_EN_PASSANT(offset)                        \
-    move->from = from;                                 \
-    move->to = from + (offset);                        \
-    move->promotion = NO_PROMOTION;                    \
-    Chess tmp_chess;                                   \
-    memcpy(&tmp_chess, chess, sizeof(Chess));          \
-    Chess_make_move(&tmp_chess, move);                 \
-    bool in_check = Chess_friendly_check(&tmp_chess);  \
-    /*gamestate_t gamestate = chess->gamestate;     */ \
-    /*Piece capture = Chess_make_move(chess, move); */ \
-    /*chess->turn = !chess->turn;                   */ \
-    /*bool in_check = Chess_friendly_check(chess);  */ \
-    /*chess->turn = !chess->turn;                   */ \
-    /*Chess_unmake_move(chess, move, capture);      */ \
-    /*chess->gamestate = gamestate;                 */ \
-    if (!in_check) {                                   \
-        move++;                                        \
-        n_moves++;                                     \
+#define PAWN_EN_PASSANT(offset)                   \
+    move->from = from;                            \
+    move->to = from + (offset);                   \
+    move->promotion = NO_PROMOTION;               \
+    gamestate_t gamestate = chess->gamestate;     \
+    Piece capture = Chess_make_move(chess, move); \
+    chess->turn = !chess->turn;                   \
+    bool in_check = Chess_friendly_check(chess);  \
+    chess->turn = !chess->turn;                   \
+    Chess_unmake_move(chess, move, capture);      \
+    chess->gamestate = gamestate;                 \
+    if (!in_check) {                              \
+        move++;                                   \
+        n_moves++;                                \
     }
 
     // en passant capture
@@ -1857,15 +1853,11 @@ size_t Chess_count_moves(Chess *chess, int depth) {
 
     size_t nodes = 0;
     for (int i = 0; i < n_moves; i++) {
-        Chess tmp_chess;
-        memcpy(&tmp_chess, chess, sizeof(Chess));
-        Chess_make_move(&tmp_chess, &moves[i]);
-        nodes += Chess_count_moves(&tmp_chess, depth - 1);
-        // gamestate_t gamestate = chess->gamestate;
-        // Piece capture = Chess_make_move(chess, &moves[i]);
-        // nodes += Chess_count_moves(chess, depth - 1);
-        // Chess_unmake_move(chess, &moves[i], capture);
-        // chess->gamestate = gamestate;
+        gamestate_t gamestate = chess->gamestate;
+        Piece capture = Chess_make_move(chess, &moves[i]);
+        nodes += Chess_count_moves(chess, depth - 1);
+        Chess_unmake_move(chess, &moves[i], capture);
+        chess->gamestate = gamestate;
     }
 
     return nodes;
@@ -2092,19 +2084,13 @@ int minimax_captures_only(Chess *chess, TIME_TYPE endtime, int depth, int a,
 
     for (int i = 0; i < n_moves; i++) {
         Move *move = &moves[i];
-        Chess tmp_chess;
-        memcpy(&tmp_chess, chess, sizeof(Chess));
-        Chess_make_move(&tmp_chess, move);
-        int score =
-            -minimax_captures_only(&tmp_chess, endtime, depth - 1, -b, -a);
-        // gamestate_t gamestate = chess->gamestate;
-        // Piece capture = Chess_make_move(chess, move);
+        gamestate_t gamestate = chess->gamestate;
+        Piece capture = Chess_make_move(chess, move);
 
-        // int score = -minimax_captures_only(chess, endtime, depth - 1, -b,
-        // -a);
+        int score = -minimax_captures_only(chess, endtime, depth - 1, -b, -a);
 
-        // Chess_unmake_move(chess, move, capture);
-        // chess->gamestate = gamestate;
+        Chess_unmake_move(chess, move, capture);
+        chess->gamestate = gamestate;
 
         if (score >= b) return score;
         if (score > best_score) best_score = score;
@@ -2134,9 +2120,21 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
     TT_store(hash, evaluation, depth, node_type); \
     return evaluation;
 
-    if (depth == 0 || TIME_NOW() > endtime) {
+    // Time cutoff
+    if (TIME_NOW() > endtime) {
         RETURN_AND_STORE_TT(
             chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
+    }
+
+    // Extend search if in check, otherwise don't
+    if (depth == 0) {
+        if (Chess_friendly_check(chess)) {
+            depth++;
+        } else {
+            RETURN_AND_STORE_TT(
+                chess->turn == TURN_WHITE ? eval(chess) : -eval(chess),
+                TT_EXACT)
+        }
     }
 
     // Check for 3 fold repetition
@@ -2164,17 +2162,13 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
         Move *move = &moves[i];
-        Chess tmp_chess;
-        memcpy(&tmp_chess, chess, sizeof(Chess));
-        Piece capture = Chess_make_move(&tmp_chess, move);
-        int score = -minimax(&tmp_chess, endtime, depth - 1, -b, -a, capture);
-        // gamestate_t gamestate = chess->gamestate;
-        // Piece capture = Chess_make_move(chess, move);
+        gamestate_t gamestate = chess->gamestate;
+        Piece capture = Chess_make_move(chess, move);
 
-        // int score = -minimax(chess, endtime, depth - 1, -b, -a, capture);
+        int score = -minimax(chess, endtime, depth - 1, -b, -a, capture);
 
-        // Chess_unmake_move(chess, move, capture);
-        // chess->gamestate = gamestate;
+        Chess_unmake_move(chess, move, capture);
+        chess->gamestate = gamestate;
 
         if (score > best_score) {
             best_score = score;
