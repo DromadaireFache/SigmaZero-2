@@ -2103,7 +2103,7 @@ int minimax_captures_only(Chess *chess, TIME_TYPE endtime, int depth, int a,
 // bool is_endgame = false;
 
 int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
-            Piece last_capture) {
+            Piece last_capture, int extensions) {
     if (depth == 0 && last_capture != EMPTY) {
         return minimax_captures_only(chess, endtime, QUIES_DEPTH, a, b);
     }
@@ -2128,8 +2128,9 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
 
     // Extend search if in check, otherwise don't
     if (depth == 0) {
-        if (Chess_friendly_check(chess)) {
+        if (extensions < 3 && Chess_friendly_check(chess)) {
             depth++;
+            extensions++;
         } else {
             RETURN_AND_STORE_TT(
                 chess->turn == TURN_WHITE ? eval(chess) : -eval(chess),
@@ -2165,7 +2166,7 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
         gamestate_t gamestate = chess->gamestate;
         Piece capture = Chess_make_move(chess, move);
 
-        int score = -minimax(chess, endtime, depth - 1, -b, -a, capture);
+        int score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
@@ -2227,7 +2228,7 @@ void *play_thread(void *arg_void) {
     int depth = arg->depth;
     Piece capture = Chess_make_move(chess, move);
 
-    int score = -minimax(chess, endtime, depth, -INF, INF, capture);
+    int score = -minimax(chess, endtime, depth, -INF, INF, capture, 0);
     *arg->score = score;
 
     return NULL;
