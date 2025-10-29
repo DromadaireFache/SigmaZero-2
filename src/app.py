@@ -112,7 +112,7 @@ class Api:
                 legal_moves.append({"row": to_row, "col": to_col})
         return legal_moves
 
-    def make_move(self, from_row: int, from_col: int, to_row: int, to_col: int) -> bool:
+    def make_move(self, from_row: int, from_col: int, to_row: int, to_col: int, promotion: str = None) -> bool:
         global board, white_captures, black_captures, previous_states, move_index
         from_square = chess.square(from_col, 7 - from_row)
         to_square = chess.square(to_col, 7 - to_row)
@@ -123,7 +123,11 @@ class Api:
             if (board.piece_at(from_square).color == chess.WHITE and to_row == 0) or (
                 board.piece_at(from_square).color == chess.BLACK and to_row == 7
             ):
-                move.promotion = chess.QUEEN
+                if promotion in ["q", "r", "b", "n"]:
+                    promo_map = {"q": chess.QUEEN, "r": chess.ROOK, "b": chess.BISHOP, "n": chess.KNIGHT}
+                    move.promotion = promo_map[promotion]
+                else:
+                    move.promotion = chess.QUEEN
 
         if move in board.legal_moves:
             captured_piece = board.piece_at(to_square)
@@ -188,6 +192,7 @@ class Api:
                     chess.square_file(move.from_square),
                     7 - chess.square_rank(move.to_square),
                     chess.square_file(move.to_square),
+                    promotion=move.promotion and chess.piece_symbol(move.promotion).lower(),
                 )
             else:
                 print("Bot move is not legal")

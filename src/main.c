@@ -2367,9 +2367,8 @@ int play(char *fen, int millis, char *game_history) {
 
     puts("{");
     printf("  \"scores\": {\n");
-    int show_n_scores = (n_moves > 5 ? n_moves : n_moves);
-    for (int i = 0; i < show_n_scores; i++) {
-        if (i >= show_n_scores - 1) {
+    for (int i = 0; i < n_moves; i++) {
+        if (i >= n_moves - 1) {
             printf("    \"%s\": %.2f\n", Move_string(moves + i),
                    (double)scores[i] / 100);
         } else {
