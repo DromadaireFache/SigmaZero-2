@@ -19,8 +19,7 @@
 #define TIME_TYPE clock_t
 #define TIME_NOW() clock()
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
-#define TIME_PLUS_OFFSET_MS(start, millis) \
-    ((start) + CLOCKS_PER_SEC * (millis) / 1000)
+#define TIME_PLUS_OFFSET_MS(start, millis) ((start) + CLOCKS_PER_SEC * (millis) / 1000)
 #else
 uint64_t now_nanos() {
     struct timespec ts;
@@ -30,8 +29,7 @@ uint64_t now_nanos() {
 #define TIME_TYPE uint64_t
 #define TIME_NOW() now_nanos()
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / 1000000000.0)
-#define TIME_PLUS_OFFSET_MS(start, millis) \
-    ((start) + ((uint64_t)millis) * 1000000)
+#define TIME_PLUS_OFFSET_MS(start, millis) ((start) + ((uint64_t)millis) * 1000000)
 #endif
 
 // A bitboard is a 64-bit integer where each bit represents a square on the
@@ -48,9 +46,7 @@ void bitboard_print(bitboard_t bb) {
 }
 
 // Convert an index (0-63) to a bitboard with only that bit set
-static inline bitboard_t bitboard_from_index(int i) {
-    return (bitboard_t)(1ULL << i);
-}
+static inline bitboard_t bitboard_from_index(int i) { return (bitboard_t)(1ULL << i); }
 
 static inline int index_col(int index) { return index % 8; }
 
@@ -178,29 +174,19 @@ uint64_t Piece_zhash_at(Piece piece, int i) {
     }
 }
 
-static inline bool Piece_is_white(Piece piece) {
-    return isupper(piece) && piece != EMPTY;
-}
+static inline bool Piece_is_white(Piece piece) { return isupper(piece) && piece != EMPTY; }
 
-static inline bool Piece_is_black(Piece piece) {
-    return islower(piece) && piece != EMPTY;
-}
+static inline bool Piece_is_black(Piece piece) { return islower(piece) && piece != EMPTY; }
 
-static inline bool Piece_is_pawn(Piece piece) {
-    return piece == WHITE_PAWN || piece == BLACK_PAWN;
-}
+static inline bool Piece_is_pawn(Piece piece) { return piece == WHITE_PAWN || piece == BLACK_PAWN; }
 
-static inline bool Piece_is_king(Piece piece) {
-    return piece == WHITE_KING || piece == BLACK_KING;
-}
+static inline bool Piece_is_king(Piece piece) { return piece == WHITE_KING || piece == BLACK_KING; }
 
 static inline bool Piece_is_queen(Piece piece) {
     return piece == WHITE_QUEEN || piece == BLACK_QUEEN;
 }
 
-static inline bool Piece_is_rook(Piece piece) {
-    return piece == WHITE_ROOK || piece == BLACK_ROOK;
-}
+static inline bool Piece_is_rook(Piece piece) { return piece == WHITE_ROOK || piece == BLACK_ROOK; }
 
 static inline bool Piece_is_bishop(Piece piece) {
     return piece == WHITE_BISHOP || piece == BLACK_BISHOP;
@@ -251,13 +237,13 @@ class {
 Position;
 
 // Check if a position is valid (on the board)
-static inline bool Position_valid(Position *pos) {
+static inline bool Position_valid(Position* pos) {
     return 0 <= pos->col && pos->col < 8 && 0 <= pos->row && pos->row < 8;
 }
 
 // Convert a string (e.g. "e4") to a position
 // Returns (Position){-1, -1} if invalid
-Position Position_from_string(char *s) {
+Position Position_from_string(char* s) {
     if (strlen(s) != 2) {
         fprintf(stderr, "Invalid position string: %s\n", s);
         return (Position){-1, -1};
@@ -294,7 +280,7 @@ Position Position_from_bitboard(bitboard_t b) {
 
 // Convert a position to a string (e.g. "e4")
 // Returns a pointer to a static buffer
-char *Position_to_string(Position *pos) {
+char* Position_to_string(Position* pos) {
     static char buffer[3];
     buffer[0] = 'a' + pos->col;
     buffer[1] = '1' + pos->row;
@@ -303,18 +289,13 @@ char *Position_to_string(Position *pos) {
 }
 
 // Convert a position to an index (0-63)
-static inline int Position_to_index(Position *pos) {
-    return pos->row * 8 + pos->col;
-}
+static inline int Position_to_index(Position* pos) { return pos->row * 8 + pos->col; }
 
-Position Position_from_index(int index) {
-    return (Position){index / 8, index % 8};
-}
+Position Position_from_index(int index) { return (Position){index / 8, index % 8}; }
 
 // Print a position
 void Position_print(Position pos) {
-    printf("Position: %s (row: %d, col: %d)\n", Position_to_string(&pos),
-           pos.row, pos.col);
+    printf("Position: %s (row: %d, col: %d)\n", Position_to_string(&pos), pos.row, pos.col);
 }
 
 typedef enum {
@@ -335,7 +316,7 @@ Move;
 
 #define MAX_LEGAL_MOVES 218
 
-char *Move_string(Move *move) {
+char* Move_string(Move* move) {
     static char buffer[6];
     Position from = Position_from_index(move->from);
     Position to = Position_from_index(move->to);
@@ -355,7 +336,7 @@ char *Move_string(Move *move) {
     return buffer;
 }
 
-void Move_print(Move *move) { printf("%s\n", Move_string(move)); }
+void Move_print(Move* move) { printf("%s\n", Move_string(move)); }
 
 #define TURN_BLACK true
 #define TURN_WHITE false
@@ -380,15 +361,15 @@ class {
 }
 ZHashStack;
 
-static inline void ZHashStack_push(ZHashStack *zhstack, uint64_t hash) {
+static inline void ZHashStack_push(ZHashStack* zhstack, uint64_t hash) {
     zhstack->hashes[zhstack->sp++] = hash;
 }
 
-static inline uint64_t ZHashStack_pop(ZHashStack *zhstack) {
+static inline uint64_t ZHashStack_pop(ZHashStack* zhstack) {
     return zhstack->hashes[--zhstack->sp];
 }
 
-static inline uint64_t ZHashStack_peek(ZHashStack *zhstack) {
+static inline uint64_t ZHashStack_peek(ZHashStack* zhstack) {
     return zhstack->hashes[zhstack->sp - 1];
 }
 
@@ -426,7 +407,7 @@ Chess;
 #define BITMASK(nbit) (1 << (nbit))
 
 // Set white kingside castling right
-static inline void Chess_castle_K_set(Chess *board, bool allow) {
+static inline void Chess_castle_K_set(Chess* board, bool allow) {
     if (allow)
         board->gamestate &= ~BITMASK(0);
     else
@@ -434,7 +415,7 @@ static inline void Chess_castle_K_set(Chess *board, bool allow) {
 }
 
 // Set white queenside castling right
-static inline void Chess_castle_Q_set(Chess *board, bool allow) {
+static inline void Chess_castle_Q_set(Chess* board, bool allow) {
     if (allow)
         board->gamestate &= ~BITMASK(1);
     else
@@ -442,7 +423,7 @@ static inline void Chess_castle_Q_set(Chess *board, bool allow) {
 }
 
 // Set black kingside castling right
-static inline void Chess_castle_k_set(Chess *board, bool allow) {
+static inline void Chess_castle_k_set(Chess* board, bool allow) {
     if (allow)
         board->gamestate &= ~BITMASK(2);
     else
@@ -450,7 +431,7 @@ static inline void Chess_castle_k_set(Chess *board, bool allow) {
 }
 
 // Set black queenside castling right
-static inline void Chess_castle_q_set(Chess *board, bool allow) {
+static inline void Chess_castle_q_set(Chess* board, bool allow) {
     if (allow)
         board->gamestate &= ~BITMASK(3);
     else
@@ -458,7 +439,7 @@ static inline void Chess_castle_q_set(Chess *board, bool allow) {
 }
 
 // Get kingside castling right
-static inline bool Chess_castle_king_side(Chess *chess) {
+static inline bool Chess_castle_king_side(Chess* chess) {
     if (chess->turn == TURN_WHITE) {
         return !(chess->gamestate & BITMASK(0));
     } else {
@@ -467,7 +448,7 @@ static inline bool Chess_castle_king_side(Chess *chess) {
 }
 
 // Get queenside castling right
-static inline bool Chess_castle_queen_side(Chess *chess) {
+static inline bool Chess_castle_queen_side(Chess* chess) {
     if (chess->turn == TURN_WHITE) {
         return !(chess->gamestate & BITMASK(1));
     } else {
@@ -476,7 +457,7 @@ static inline bool Chess_castle_queen_side(Chess *chess) {
 }
 
 // Set en passant column (0-7) or disable (-1)
-static inline void Chess_en_passant_set(Chess *board, uint8_t col) {
+static inline void Chess_en_passant_set(Chess* board, uint8_t col) {
     if (0 <= col && col < 8) {
         board->gamestate |= BITMASK(4);
         board->gamestate &= 0b00011111;
@@ -487,7 +468,7 @@ static inline void Chess_en_passant_set(Chess *board, uint8_t col) {
 }
 
 // Get en passant column (or -1 if not available)
-static inline uint8_t Chess_en_passant(Chess *chess) {
+static inline uint8_t Chess_en_passant(Chess* chess) {
     if (chess->gamestate & BITMASK(4)) {
         return chess->gamestate >> 5;
     } else {
@@ -497,25 +478,24 @@ static inline uint8_t Chess_en_passant(Chess *chess) {
 
 // Add a piece to the board at a given position
 // Only meant for initializing the board
-void Chess_add(Chess *chess, Piece piece, Position pos) {
+void Chess_add(Chess* chess, Piece piece, Position pos) {
     if (!Position_valid(&pos)) return;
     int i = Position_to_index(&pos);
     chess->board[i] = piece;
 }
 
-void Chess_empty_board(Chess *chess) {
+void Chess_empty_board(Chess* chess) {
     for (int i = 0; i < 64; i++) {
         chess->board[i] = EMPTY;
     }
     chess->turn = TURN_WHITE;
-    chess->gamestate =
-        0b00001111;  // All castling rights available, no en passant
+    chess->gamestate = 0b00001111;  // All castling rights available, no en passant
     chess->halfmoves = 0;
     chess->fullmoves = 1;
     chess->zhstack = (ZHashStack){0};
 }
 
-void Chess_find_kings(Chess *chess) {
+void Chess_find_kings(Chess* chess) {
     for (int i = 0; i < 64; i++) {
         Piece piece = chess->board[i];
         if (piece == WHITE_KING) {
@@ -527,8 +507,8 @@ void Chess_find_kings(Chess *chess) {
 }
 
 // Create a new board with the initial chess position
-Chess *Chess_new() {
-    static Chess *chess;
+Chess* Chess_new() {
+    static Chess* chess;
     Chess_empty_board(chess);
 
     // Pawns
@@ -567,7 +547,7 @@ Chess *Chess_new() {
 }
 
 // Get a string representation of the board (64 characters)
-char *Chess_to_string(Chess *chess) {
+char* Chess_to_string(Chess* chess) {
     static char board_s[65];
     for (int i = 0; i < 64; i++) {
         board_s[i] = chess->board[i];
@@ -577,7 +557,7 @@ char *Chess_to_string(Chess *chess) {
 }
 
 // Dump the board state (for debugging)
-void Chess_dump(Chess *chess) {
+void Chess_dump(Chess* chess) {
     printf("Board: %s\n", Chess_to_string(chess));
     printf("Game state: %02x\n", chess->gamestate);
     printf("Turn: %s\n", chess->turn == TURN_WHITE ? "White" : "Black");
@@ -588,8 +568,7 @@ void Chess_dump(Chess *chess) {
     printf("%s\n", chess->gamestate & BITMASK(3) ? "" : "q");
     bitboard_t en_passant = Chess_en_passant(chess);
     Position pos = Position_from_bitboard(en_passant);
-    printf("En passant: %s\n",
-           en_passant == -1 ? "NA" : Position_to_string(&pos));
+    printf("En passant: %s\n", en_passant == -1 ? "NA" : Position_to_string(&pos));
     printf("Half moves: %d\n", chess->halfmoves);
     printf("Full moves: %d\n", chess->fullmoves);
     printf("White king: %d\n", chess->king_white);
@@ -597,8 +576,8 @@ void Chess_dump(Chess *chess) {
 }
 
 // Print the board in a human-readable format
-void Chess_print(Chess *board) {
-    char *board_s = Chess_to_string(board);
+void Chess_print(Chess* board) {
+    char* board_s = Chess_to_string(board);
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < 8; j++) {
             putchar(board_s[(7 - i) * 8 + j]);
@@ -608,7 +587,7 @@ void Chess_print(Chess *board) {
     }
 }
 
-bool Chess_friendly_piece_at(Chess *chess, int index) {
+bool Chess_friendly_piece_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (piece == EMPTY) return false;
     if (chess->turn == TURN_WHITE) {
@@ -618,7 +597,7 @@ bool Chess_friendly_piece_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_enemy_piece_at(Chess *chess, int index) {
+bool Chess_enemy_piece_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (piece == EMPTY) return false;
     if (chess->turn == TURN_WHITE) {
@@ -628,7 +607,7 @@ bool Chess_enemy_piece_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_friendly_king_at(Chess *chess, int index) {
+bool Chess_friendly_king_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == WHITE_KING;
@@ -637,7 +616,7 @@ bool Chess_friendly_king_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_enemy_king_at(Chess *chess, int index) {
+bool Chess_enemy_king_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == BLACK_KING;
@@ -646,7 +625,7 @@ bool Chess_enemy_king_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_friendly_pawn_at(Chess *chess, int index) {
+bool Chess_friendly_pawn_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == WHITE_PAWN;
@@ -655,7 +634,7 @@ bool Chess_friendly_pawn_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_enemy_pawn_at(Chess *chess, int index) {
+bool Chess_enemy_pawn_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == BLACK_PAWN;
@@ -664,7 +643,7 @@ bool Chess_enemy_pawn_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_friendly_knight_at(Chess *chess, int index) {
+bool Chess_friendly_knight_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == WHITE_KNIGHT;
@@ -673,7 +652,7 @@ bool Chess_friendly_knight_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_enemy_knight_at(Chess *chess, int index) {
+bool Chess_enemy_knight_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == BLACK_KNIGHT;
@@ -682,7 +661,7 @@ bool Chess_enemy_knight_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_friendly_bishop_at(Chess *chess, int index) {
+bool Chess_friendly_bishop_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == WHITE_BISHOP;
@@ -691,7 +670,7 @@ bool Chess_friendly_bishop_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_enemy_bishop_at(Chess *chess, int index) {
+bool Chess_enemy_bishop_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == BLACK_BISHOP;
@@ -700,7 +679,7 @@ bool Chess_enemy_bishop_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_friendly_rook_at(Chess *chess, int index) {
+bool Chess_friendly_rook_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == WHITE_ROOK;
@@ -709,7 +688,7 @@ bool Chess_friendly_rook_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_enemy_rook_at(Chess *chess, int index) {
+bool Chess_enemy_rook_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == BLACK_ROOK;
@@ -718,7 +697,7 @@ bool Chess_enemy_rook_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_friendly_queen_at(Chess *chess, int index) {
+bool Chess_friendly_queen_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == WHITE_QUEEN;
@@ -727,7 +706,7 @@ bool Chess_friendly_queen_at(Chess *chess, int index) {
     }
 }
 
-bool Chess_enemy_queen_at(Chess *chess, int index) {
+bool Chess_enemy_queen_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
     if (chess->turn == TURN_WHITE) {
         return piece == BLACK_QUEEN;
@@ -736,7 +715,7 @@ bool Chess_enemy_queen_at(Chess *chess, int index) {
     }
 }
 
-uint64_t Chess_zhash(Chess *chess) {
+uint64_t Chess_zhash(Chess* chess) {
     uint64_t hash = ZHASH_STATE[chess->gamestate];
     hash ^= chess->turn == TURN_WHITE ? ZHASH_WHITE : ZHASH_BLACK;
     for (int i = 0; i < 64; i++) {
@@ -747,7 +726,7 @@ uint64_t Chess_zhash(Chess *chess) {
 }
 
 // Returns the piece that was captured, or EMPTY if no capture
-Piece Chess_make_move(Chess *chess, Move *move) {
+Piece Chess_make_move(Chess* chess, Move* move) {
     Piece moving_piece = chess->board[move->from];
     Piece target_piece = chess->board[move->to];
 
@@ -819,25 +798,22 @@ Piece Chess_make_move(Chess *chess, Move *move) {
         // White queenside
         chess->board[3] = WHITE_ROOK;
         chess->board[0] = EMPTY;
-    } else if (moving_piece == BLACK_KING && move->from == 60 &&
-               move->to == 62) {
+    } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 62) {
         // Black kingside
         chess->board[61] = BLACK_ROOK;
         chess->board[63] = EMPTY;
-    } else if (moving_piece == BLACK_KING && move->from == 60 &&
-               move->to == 58) {
+    } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 58) {
         // Black queenside
         chess->board[59] = BLACK_ROOK;
         chess->board[56] = EMPTY;
     }
 
     // Handle en passant capture
-    if (moving_piece == WHITE_PAWN &&
-        index_col(move->from) != index_col(move->to) && target_piece == EMPTY) {
+    if (moving_piece == WHITE_PAWN && index_col(move->from) != index_col(move->to) &&
+        target_piece == EMPTY) {
         // White pawn capturing en passant
         chess->board[move->to - 8] = EMPTY;
-    } else if (moving_piece == BLACK_PAWN &&
-               index_col(move->from) != index_col(move->to) &&
+    } else if (moving_piece == BLACK_PAWN && index_col(move->from) != index_col(move->to) &&
                target_piece == EMPTY) {
         // Black pawn capturing en passant
         chess->board[move->to + 8] = EMPTY;
@@ -893,7 +869,7 @@ Piece Chess_make_move(Chess *chess, Move *move) {
 }
 
 // NEED to reset gamestate manually afterwards
-void Chess_unmake_move(Chess *chess, Move *move, Piece capture) {
+void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
     ZHashStack_pop(&chess->zhstack);
     chess->turn = !chess->turn;
 
@@ -965,7 +941,7 @@ void Chess_unmake_move(Chess *chess, Move *move, Piece capture) {
 
 // Parse and make a user move in algebraic notation (e.g. "e2e4")
 // No validation is done, so the move must be legal
-Piece Chess_user_move(Chess *chess, char *move_input) {
+Piece Chess_user_move(Chess* chess, char* move_input) {
 #define INVALID_MOVE(details)                                 \
     fprintf(stderr, "Invalid move: " details ": %s\n", move); \
     return EMPTY
@@ -1013,9 +989,7 @@ Piece Chess_user_move(Chess *chess, char *move_input) {
 }
 
 // Check if a string is a valid non-empty digit string
-bool string_isdigit(const char *s) {
-    return s[0] != '\0' && strspn(s, "0123456789") == strlen(s);
-}
+bool string_isdigit(const char* s) { return s[0] != '\0' && strspn(s, "0123456789") == strlen(s); }
 
 // FEN fields used for parsing
 typedef enum {
@@ -1028,7 +1002,7 @@ typedef enum {
     FEN_END
 } FENField;
 
-Chess *Chess_from_fen(char *fen_arg) {
+Chess* Chess_from_fen(char* fen_arg) {
 #define FEN_PARSING_ERROR(details)                                \
     fprintf(stderr, "FEN Parsing error: " details ": %s\n", fen); \
     return NULL
@@ -1037,13 +1011,13 @@ Chess *Chess_from_fen(char *fen_arg) {
     strncpy(fen, fen_arg, sizeof(fen) - 1);
 
     static Chess chess_struct;
-    Chess *board = &chess_struct;  // empty board
+    Chess* board = &chess_struct;  // empty board
     Chess_empty_board(board);
 
     // Split FEN into fields
-    char *fields[6];
+    char* fields[6];
     int i = 0;
-    char *token = strtok(fen, " ");
+    char* token = strtok(fen, " ");
     while (token && i < 6) {
         fields[i++] = token;
         token = strtok(NULL, " ");
@@ -1054,7 +1028,7 @@ Chess *Chess_from_fen(char *fen_arg) {
 
     // 1. Piece placement
     Position pos = {.col = 0, .row = 7};
-    for (char *c = fields[0]; *c; ++c) {
+    for (char* c = fields[0]; *c; ++c) {
         if (*c == '/') {
             if (pos.col != 0) {
                 FEN_PARSING_ERROR("Invalid FEN format");
@@ -1130,7 +1104,7 @@ Chess *Chess_from_fen(char *fen_arg) {
     return board;
 }
 
-void Chess_print_fen(Chess *chess) {
+void Chess_print_fen(Chess* chess) {
     // board
     for (int i = 0; i < 8; i++) {
         int empty_counter = 0;
@@ -1189,15 +1163,15 @@ void Chess_print_fen(Chess *chess) {
     putchar('\n');
 }
 
-void ZHashStack_game_history(ZHashStack *zhstack, char *_game_history) {
-    char *game_history = calloc(strlen(_game_history) + 1, sizeof(char));
+void ZHashStack_game_history(ZHashStack* zhstack, char* _game_history) {
+    char* game_history = calloc(strlen(_game_history) + 1, sizeof(char));
     strcpy(game_history, _game_history);
 
-    char *saveptr;
-    char *fen = strtok_r(game_history, ",", &saveptr);
+    char* saveptr;
+    char* fen = strtok_r(game_history, ",", &saveptr);
 
     while (fen) {
-        Chess *chess = Chess_from_fen(fen);
+        Chess* chess = Chess_from_fen(fen);
         if (!chess) return;
         uint64_t hash = Chess_zhash(chess);
         ZHashStack_push(zhstack, hash);
@@ -1208,16 +1182,16 @@ void ZHashStack_game_history(ZHashStack *zhstack, char *_game_history) {
     free(game_history);
 }
 
-static inline uint8_t Chess_friendly_king_i(Chess *chess) {
+static inline uint8_t Chess_friendly_king_i(Chess* chess) {
     return chess->turn == TURN_WHITE ? chess->king_white : chess->king_black;
 }
 
-static inline uint8_t Chess_enemy_king_i(Chess *chess) {
+static inline uint8_t Chess_enemy_king_i(Chess* chess) {
     return chess->turn == TURN_WHITE ? chess->king_black : chess->king_white;
 }
 
-void Chess_fill_attack_map(Chess *chess) {
-    EnemyAttackMap *eam = &chess->enemy_attack_map;
+void Chess_fill_attack_map(Chess* chess) {
+    EnemyAttackMap* eam = &chess->enemy_attack_map;
     eam->n_checks = 0;
 
     uint8_t king_i = Chess_friendly_king_i(chess);
@@ -1271,8 +1245,7 @@ void Chess_fill_attack_map(Chess *chess) {
     uint8_t enemy_king_i = Chess_enemy_king_i(chess);
     Position enemy_king_pos = Position_from_index(enemy_king_i);
     ENEMY_ATTACK(abs(enemy_king_pos.row - king_pos.row) <= 1,
-                 abs(enemy_king_pos.col - king_pos.col) <= 1,
-                 bitboard_from_index(enemy_king_i))
+                 abs(enemy_king_pos.col - king_pos.col) <= 1, bitboard_from_index(enemy_king_i))
 
     int i;
     bitboard_t attack_map;
@@ -1346,7 +1319,7 @@ void Chess_fill_attack_map(Chess *chess) {
     }
 }
 
-Piece Chess_set_friendly_king_i(Chess *chess, uint8_t index) {
+Piece Chess_set_friendly_king_i(Chess* chess, uint8_t index) {
     if (chess->turn == TURN_WHITE) {
         chess->king_white = index;
         return WHITE_KING;
@@ -1356,7 +1329,7 @@ Piece Chess_set_friendly_king_i(Chess *chess, uint8_t index) {
     }
 }
 
-bool Chess_friendly_check(Chess *chess) {
+bool Chess_friendly_check(Chess* chess) {
     // Find the king
     uint8_t king_i = Chess_friendly_king_i(chess);
     Position king_pos = Position_from_index(king_i);
@@ -1407,13 +1380,12 @@ bool Chess_friendly_check(Chess *chess) {
     }
 
     int i;
-#define SLIDING_PIECE_CHECK(fn, condition, offset)            \
-    for (i = 0; (condition); i++) {                           \
-        if (fn(chess, king_i + (offset)) ||                   \
-            Chess_enemy_queen_at(chess, king_i + (offset))) { \
-            return true;                                      \
-        }                                                     \
-        if (chess->board[king_i + (offset)] != EMPTY) break;  \
+#define SLIDING_PIECE_CHECK(fn, condition, offset)                                            \
+    for (i = 0; (condition); i++) {                                                           \
+        if (fn(chess, king_i + (offset)) || Chess_enemy_queen_at(chess, king_i + (offset))) { \
+            return true;                                                                      \
+        }                                                                                     \
+        if (chess->board[king_i + (offset)] != EMPTY) break;                                  \
     }
 #define kp king_pos
 
@@ -1433,8 +1405,7 @@ bool Chess_friendly_check(Chess *chess) {
     }
 
     // Look for rook/queen attacks
-#define ROOK_CHECK(condition, offset) \
-    SLIDING_PIECE_CHECK(Chess_enemy_rook_at, condition, offset)
+#define ROOK_CHECK(condition, offset) SLIDING_PIECE_CHECK(Chess_enemy_rook_at, condition, offset)
     if (chess->turn == TURN_WHITE) {
         ROOK_CHECK(king_pos.row + i < 7, (i + 1) * 8)
         ROOK_CHECK(king_pos.col + i < 7, (i + 1))
@@ -1451,8 +1422,8 @@ bool Chess_friendly_check(Chess *chess) {
 }
 
 // This will check if the king is in check after the move
-bool Chess_is_move_legal(Chess *chess, Move *move) {
-    EnemyAttackMap *eam = &chess->enemy_attack_map;
+bool Chess_is_move_legal(Chess* chess, Move* move) {
+    EnemyAttackMap* eam = &chess->enemy_attack_map;
     uint8_t king_i = Chess_friendly_king_i(chess);
     bitboard_t to_bb = bitboard_from_index(move->to);
     bool is_king = move->from == king_i;
@@ -1460,8 +1431,7 @@ bool Chess_is_move_legal(Chess *chess, Move *move) {
     if (is_king) {
         bool still_attacked = to_bb & eam->block_attack_map;
         bool captured_attacker = to_bb == eam->block_attack_map;
-        if (eam->n_checks >= 1 && still_attacked && !captured_attacker)
-            return false;
+        if (eam->n_checks >= 1 && still_attacked && !captured_attacker) return false;
 
         // Check if the king is in check after its move
         Chess_set_friendly_king_i(chess, move->to);
@@ -1497,7 +1467,7 @@ bool Chess_is_move_legal(Chess *chess, Move *move) {
     return true;
 }
 
-bool Chess_square_available(Chess *chess, int index, bool captures_only) {
+bool Chess_square_available(Chess* chess, int index, bool captures_only) {
     return captures_only ? Chess_enemy_piece_at(chess, index)
                          : !Chess_friendly_piece_at(chess, index);
 }
@@ -1515,8 +1485,7 @@ bool Chess_square_available(Chess *chess, int index, bool captures_only) {
         }                                                             \
     }
 
-size_t Chess_knight_moves(Chess *chess, Move *move, int from,
-                          bool captures_only) {
+size_t Chess_knight_moves(Chess* chess, Move* move, int from, bool captures_only) {
     size_t n_moves = 0;
     Position pos = Position_from_index(from);
 
@@ -1545,8 +1514,7 @@ size_t Chess_knight_moves(Chess *chess, Move *move, int from,
         if (chess->board[from + (offset)] != EMPTY) break;            \
     }
 
-size_t Chess_bishop_moves(Chess *chess, Move *move, int from,
-                          bool captures_only) {
+size_t Chess_bishop_moves(Chess* chess, Move* move, int from, bool captures_only) {
     size_t n_moves = 0;
     Position pos = Position_from_index(from);
     int i;
@@ -1559,8 +1527,7 @@ size_t Chess_bishop_moves(Chess *chess, Move *move, int from,
     return n_moves;
 }
 
-size_t Chess_rook_moves(Chess *chess, Move *move, int from,
-                        bool captures_only) {
+size_t Chess_rook_moves(Chess* chess, Move* move, int from, bool captures_only) {
     size_t n_moves = 0;
     Position pos = Position_from_index(from);
     int i;
@@ -1573,22 +1540,18 @@ size_t Chess_rook_moves(Chess *chess, Move *move, int from,
     return n_moves;
 }
 
-size_t Chess_queen_moves(Chess *chess, Move *move, int from,
-                         bool captures_only) {
+size_t Chess_queen_moves(Chess* chess, Move* move, int from, bool captures_only) {
     size_t n_moves = Chess_rook_moves(chess, move, from, captures_only);
-    return n_moves +
-           Chess_bishop_moves(chess, move + n_moves, from, captures_only);
+    return n_moves + Chess_bishop_moves(chess, move + n_moves, from, captures_only);
 }
 
-size_t Chess_pawn_moves(Chess *chess, Move *move, int from,
-                        bool captures_only) {
+size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) {
     Position pos = Position_from_index(from);
     size_t n_moves = 0;
     int direction = chess->turn == TURN_WHITE ? 1 : -1;
     bool at_home_rank = chess->turn == TURN_WHITE ? pos.row == 1 : pos.row == 6;
     bool at_last_rank = chess->turn == TURN_WHITE ? pos.row == 6 : pos.row == 1;
-    bool at_en_passant_rank =
-        chess->turn == TURN_WHITE ? pos.row == 4 : pos.row == 3;
+    bool at_en_passant_rank = chess->turn == TURN_WHITE ? pos.row == 4 : pos.row == 3;
 
 #define PAWN_ADD_MOVE_PROMOTE(offset, promote_to) \
     move->from = from;                            \
@@ -1668,8 +1631,7 @@ size_t Chess_pawn_moves(Chess *chess, Move *move, int from,
     return n_moves;
 }
 
-size_t Chess_king_moves(Chess *chess, Move *move, int from,
-                        bool captures_only) {
+size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) {
     Position pos = Position_from_index(from);
     size_t n_moves = 0;
     bool left_safe = false;
@@ -1719,16 +1681,15 @@ size_t Chess_king_moves(Chess *chess, Move *move, int from,
     }
 
     // Castling
-#define ADD_CASTLE_MOVE(k1, k2, q1, q2, q3)                       \
-    /* King side castling */                                      \
-    if (right_safe && Chess_castle_king_side(chess) &&            \
-        chess->board[k1] == EMPTY && chess->board[k2] == EMPTY) { \
-        ADD_KING_MOVE_IF(2)                                       \
-    } /* Queen side castling */                                   \
-    if (left_safe && Chess_castle_queen_side(chess) &&            \
-        chess->board[q1] == EMPTY && chess->board[q2] == EMPTY && \
-        chess->board[q3] == EMPTY) {                              \
-        ADD_KING_MOVE_IF(-2)                                      \
+#define ADD_CASTLE_MOVE(k1, k2, q1, q2, q3)                                         \
+    /* King side castling */                                                        \
+    if (right_safe && Chess_castle_king_side(chess) && chess->board[k1] == EMPTY && \
+        chess->board[k2] == EMPTY) {                                                \
+        ADD_KING_MOVE_IF(2)                                                         \
+    } /* Queen side castling */                                                     \
+    if (left_safe && Chess_castle_queen_side(chess) && chess->board[q1] == EMPTY && \
+        chess->board[q2] == EMPTY && chess->board[q3] == EMPTY) {                   \
+        ADD_KING_MOVE_IF(-2)                                                        \
     }
 
     bool king_in_check = chess->enemy_attack_map.n_checks > 0;
@@ -1743,7 +1704,7 @@ size_t Chess_king_moves(Chess *chess, Move *move, int from,
     return n_moves;
 }
 
-size_t Chess_legal_moves(Chess *chess, Move *moves, bool captures_only) {
+size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     // make the enemy attack map to check legality
     Chess_fill_attack_map(chess);
     size_t n_moves = 0;
@@ -1757,7 +1718,7 @@ size_t Chess_legal_moves(Chess *chess, Move *moves, bool captures_only) {
     for (int i = 0; i < 64; i++) {
         if (!Chess_friendly_piece_at(chess, i)) continue;
         Piece piece = chess->board[i];
-        Move *move_p = &moves[n_moves];
+        Move* move_p = &moves[n_moves];
 
         if (Piece_is_pawn(piece)) {
             n_moves += Chess_pawn_moves(chess, move_p, i, captures_only);
@@ -1778,7 +1739,7 @@ size_t Chess_legal_moves(Chess *chess, Move *moves, bool captures_only) {
 
 #define SCORE_VICTIM_MULTIPLIER 1
 
-void Chess_score_move(Chess *chess, Move *move) {
+void Chess_score_move(Chess* chess, Move* move) {
     // Give very high scores to promotions
     if (move->promotion == PROMOTE_QUEEN) {
         move->score = 100;
@@ -1792,8 +1753,7 @@ void Chess_score_move(Chess *chess, Move *move) {
 
     // MVV - LVA
     if (victim != EMPTY) {
-        move->score += abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) -
-                           Piece_value(aggressor));
+        move->score += abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) - Piece_value(aggressor));
     } else {
         // Deduct points if attacked by enemy pawns
 #define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
@@ -1810,18 +1770,18 @@ void Chess_score_move(Chess *chess, Move *move) {
     }
 }
 
-int compare_moves(const void *a, const void *b) {
-    const Move *ma = (const Move *)a;
-    const Move *mb = (const Move *)b;
+int compare_moves(const void* a, const void* b) {
+    const Move* ma = (const Move*)a;
+    const Move* mb = (const Move*)b;
     return mb->score - ma->score;
 }
 
-size_t Chess_legal_moves_sorted(Chess *chess, Move *moves, bool captures_only) {
+size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
     size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
 
     // Give a score to each move
     for (int i = 0; i < n_moves; i++) {
-        Move *move = &moves[i];
+        Move* move = &moves[i];
         Chess_score_move(chess, move);
     }
 
@@ -1831,14 +1791,14 @@ size_t Chess_legal_moves_sorted(Chess *chess, Move *moves, bool captures_only) {
     return n_moves;
 }
 
-bool Chess_equal(Chess *chess, char *board_fen) {
+bool Chess_equal(Chess* chess, char* board_fen) {
     for (int i = 0; i < 64; i++) {
         if (chess->board[i] != board_fen[i]) return false;
     }
     return true;
 }
 
-size_t Chess_count_moves(Chess *chess, int depth) {
+size_t Chess_count_moves(Chess* chess, int depth) {
     if (depth == 0) return 1;
 
     Move moves[MAX_LEGAL_MOVES];
@@ -1863,7 +1823,7 @@ size_t Chess_count_moves(Chess *chess, int depth) {
     return nodes;
 }
 
-int Chess_3fold_repetition(Chess *chess) {
+int Chess_3fold_repetition(Chess* chess) {
     uint64_t hash = ZHashStack_peek(&chess->zhstack);
     int count = 1;
 
@@ -1885,15 +1845,15 @@ class {
     int depth;
     Move move;
     TIME_TYPE endtime;
-    int *score;
+    int* score;
 }
 ChessThread;
 
-void *Chess_count_moves_thread(void *arg_void) {
-    ChessThread *arg = (ChessThread *)arg_void;
-    Chess *chess = &arg->chess;
+void* Chess_count_moves_thread(void* arg_void) {
+    ChessThread* arg = (ChessThread*)arg_void;
+    Chess* chess = &arg->chess;
     int depth = arg->depth;
-    Move *move = &arg->move;
+    Move* move = &arg->move;
 
     Chess_make_move(chess, move);
     size_t nodes = Chess_count_moves(chess, depth - 1);
@@ -1905,13 +1865,13 @@ void *Chess_count_moves_thread(void *arg_void) {
     return NULL;
 }
 
-size_t Chess_count_moves_multi(Chess *chess, int depth) {
+size_t Chess_count_moves_multi(Chess* chess, int depth) {
     Move moves[MAX_LEGAL_MOVES];
     size_t n_moves = Chess_legal_moves(chess, moves, false);
     nodes_total = 0;
 
-    pthread_t *threads = calloc(n_moves, sizeof(pthread_t));
-    ChessThread *args = calloc(n_moves, sizeof(ChessThread));
+    pthread_t* threads = calloc(n_moves, sizeof(pthread_t));
+    ChessThread* args = calloc(n_moves, sizeof(ChessThread));
 
     // Initialize the mutex
     if (pthread_mutex_init(&lock, NULL) != 0) {
@@ -1921,13 +1881,12 @@ size_t Chess_count_moves_multi(Chess *chess, int depth) {
 
     // Create threads
     for (int i = 0; i < n_moves; i++) {
-        ChessThread *arg = &args[i];
+        ChessThread* arg = &args[i];
         arg->depth = depth;
         memcpy(&arg->chess, chess, sizeof(Chess));
         memcpy(&arg->move, &moves[i], sizeof(Move));
 
-        if (pthread_create(&threads[i], NULL, Chess_count_moves_thread, arg) !=
-            0) {
+        if (pthread_create(&threads[i], NULL, Chess_count_moves_thread, arg) != 0) {
             perror("pthread_create failed");
             return 1;
         }
@@ -1979,7 +1938,7 @@ void TT_init() {
 }
 
 // Get the appropriate lock for a hash
-static inline pthread_mutex_t *get_lock(uint64_t key) {
+static inline pthread_mutex_t* get_lock(uint64_t key) {
     // Use lower bits of the hash to select a lock
     return &tt_locks[key & (TT_LOCKS_COUNT - 1)];
 }
@@ -1987,7 +1946,7 @@ static inline pthread_mutex_t *get_lock(uint64_t key) {
 // Store an entry with fine-grained locking
 void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
-    pthread_mutex_t *lock = get_lock(key);
+    pthread_mutex_t* lock = get_lock(key);
 
     pthread_mutex_lock(lock);
     if (depth > tt[i].depth) {
@@ -2000,15 +1959,14 @@ void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
 }
 
 // Retrieve an entry with fine-grained locking
-bool TT_get(uint64_t key, int *eval_p, int depth, int a, int b) {
+bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
-    pthread_mutex_t *lock = get_lock(key);
+    pthread_mutex_t* lock = get_lock(key);
 
     pthread_mutex_lock(lock);
     bool hit = tt[i].key == key && depth <= tt[i].depth;
     if (hit) {
-        if ((tt[i].type == TT_EXACT) ||
-            (tt[i].type == TT_LOWER && tt[i].eval >= b) ||
+        if ((tt[i].type == TT_EXACT) || (tt[i].type == TT_LOWER && tt[i].eval >= b) ||
             (tt[i].type == TT_UPPER && tt[i].eval <= a)) {
             *eval_p = tt[i].eval;
         } else {
@@ -2020,8 +1978,8 @@ bool TT_get(uint64_t key, int *eval_p, int depth, int a, int b) {
     return hit;
 }
 
-int moves(char *fen, int depth) {
-    Chess *chess = Chess_from_fen(fen);
+int moves(char* fen, int depth) {
+    Chess* chess = Chess_from_fen(fen);
     if (!chess) return 1;
     if (depth > 1) {
         TIME_TYPE start = TIME_NOW();
@@ -2054,7 +2012,30 @@ int moves(char *fen, int depth) {
     return 0;
 }
 
-int eval(Chess *chess) {
+bitboard_t Chess_king_perimiter(int pos) {
+    int col = index_col(pos);
+    int row = index_row(pos);
+
+    bitboard_t mask = 0x0000001F1F1F1F1FULL;
+    mask <<= (col - 2);
+    mask <<= (row - 2) * 8;
+    return mask;
+}
+
+int Chess_piece_king_proximity(Chess* chess, Piece piece, int i) {
+    if (Piece_is_king(piece) || Piece_is_pawn(piece)) return 0;
+    bitboard_t piece_bb = bitboard_from_index(i);
+    int king_pos = Piece_is_white(piece) ? chess->king_black : chess->king_white;
+    bitboard_t enemy_king_quadrant = Chess_king_perimiter(king_pos);
+
+    if (piece_bb & enemy_king_quadrant) {
+        return Piece_value(piece) / 16;
+    } else {
+        return 0;
+    }
+}
+
+int eval(Chess* chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
 
@@ -2063,13 +2044,13 @@ int eval(Chess *chess) {
         if (piece == EMPTY) continue;
 
         e += Piece_value_at(piece, i, fullmoves);
+        e += Chess_piece_king_proximity(chess, piece, i);
     }
 
     return e;
 }
 
-int minimax_captures_only(Chess *chess, TIME_TYPE endtime, int depth, int a,
-                          int b) {
+int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int b) {
     int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
@@ -2083,7 +2064,7 @@ int minimax_captures_only(Chess *chess, TIME_TYPE endtime, int depth, int a,
     size_t n_moves = Chess_legal_moves_sorted(chess, moves, true);
 
     for (int i = 0; i < n_moves; i++) {
-        Move *move = &moves[i];
+        Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
         Piece capture = Chess_make_move(chess, move);
 
@@ -2102,8 +2083,8 @@ int minimax_captures_only(Chess *chess, TIME_TYPE endtime, int depth, int a,
 #define QUIES_DEPTH 5
 // bool is_endgame = false;
 
-int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
-            Piece last_capture, int extensions) {
+int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last_capture,
+            int extensions) {
     if (depth == 0 && last_capture != EMPTY) {
         return minimax_captures_only(chess, endtime, QUIES_DEPTH, a, b);
     }
@@ -2122,8 +2103,7 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
 
     // Time cutoff
     if (TIME_NOW() > endtime) {
-        RETURN_AND_STORE_TT(
-            chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
+        RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
     }
 
     // Extend search if in check, otherwise don't
@@ -2132,9 +2112,7 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
             depth++;
             extensions++;
         } else {
-            RETURN_AND_STORE_TT(
-                chess->turn == TURN_WHITE ? eval(chess) : -eval(chess),
-                TT_EXACT)
+            RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
         }
     }
 
@@ -2162,12 +2140,11 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
     int original_b = b;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
-        Move *move = &moves[i];
+        Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
         Piece capture = Chess_make_move(chess, move);
 
-        int score =
-            -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
+        int score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
@@ -2190,7 +2167,7 @@ int minimax(Chess *chess, TIME_TYPE endtime, int depth, int a, int b,
 }
 
 // If piece count < 38 it is an endgame
-bool Chess_is_endgame(Chess *chess) {
+bool Chess_is_endgame(Chess* chess) {
     int count = 0;
     for (int i = 0; i < 64; i++) {
         Piece piece = chess->board[i];
@@ -2203,7 +2180,7 @@ bool Chess_is_endgame(Chess *chess) {
 }
 
 // if is_white sort in descending order, otherwise ascending
-void bubble_sort(Move *moves, int *scores, size_t n_moves) {
+void bubble_sort(Move* moves, int* scores, size_t n_moves) {
     bool swapped;
     do {
         swapped = false;
@@ -2221,11 +2198,11 @@ void bubble_sort(Move *moves, int *scores, size_t n_moves) {
     } while (swapped);
 }
 
-void *play_thread(void *arg_void) {
-    ChessThread *arg = (ChessThread *)arg_void;
-    Chess *chess = &arg->chess;
+void* play_thread(void* arg_void) {
+    ChessThread* arg = (ChessThread*)arg_void;
+    Chess* chess = &arg->chess;
     TIME_TYPE endtime = arg->endtime;
-    Move *move = &arg->move;
+    Move* move = &arg->move;
     int depth = arg->depth;
     Piece capture = Chess_make_move(chess, move);
 
@@ -2235,7 +2212,7 @@ void *play_thread(void *arg_void) {
     return NULL;
 }
 
-bool openings_db(Chess *chess, TIME_TYPE start) {
+bool openings_db(Chess* chess) {
     char s[100];
     sprintf(s, "%" PRIx64, Chess_zhash(chess));
     srand((unsigned int)time(NULL));
@@ -2244,18 +2221,18 @@ bool openings_db(Chess *chess, TIME_TYPE start) {
     // The file should contain lines of the form:
     // <hash>,<n_options>,<option1>,<option2>,...
     // options are in UCI format, e.g. e2e4, g1f3, etc.
-    FILE *file = fopen("openings.db", "r");
+    FILE* file = fopen("openings.db", "r");
     if (!file) return false;
 
     char line[256];
     while (fgets(line, sizeof(line), file)) {
         if (line[0] == '#') continue;  // skip comments
-        char *hash_str = strtok(line, ",");
+        char* hash_str = strtok(line, ",");
         if (!hash_str) continue;
         if (strcmp(hash_str, s) != 0) continue;
 
         // Found the hash, now get the number of options
-        char *n_options_str = strtok(NULL, ",");
+        char* n_options_str = strtok(NULL, ",");
         if (!n_options_str) continue;
 
         int n_options = atoi(n_options_str);
@@ -2263,7 +2240,7 @@ bool openings_db(Chess *chess, TIME_TYPE start) {
 
         // Get a random option
         int option_index = rand() % n_options;
-        char *move_str = NULL;
+        char* move_str = NULL;
 
         for (int i = 0; i < option_index + 1; i++) {
             move_str = strtok(NULL, ",");  // skip to the chosen option
@@ -2272,8 +2249,6 @@ bool openings_db(Chess *chess, TIME_TYPE start) {
 
         // Remove trailing newline
         move_str[strcspn(move_str, "\n")] = 0;
-        TIME_TYPE end = TIME_NOW();
-        double cpu_time = TIME_DIFF_S(end, start);
 
         puts("{");
         printf("  \"scores\": {\n");
@@ -2281,7 +2256,7 @@ bool openings_db(Chess *chess, TIME_TYPE start) {
         printf("  },\n");
         printf("  \"millis\": 0,\n");
         printf("  \"depth\": 0,\n");
-        printf("  \"time\": %.3lf,\n", cpu_time);
+        printf("  \"time\": %.3lf,\n", 0.0);
         printf("  \"eval\": 0.00,\n");
         printf("  \"move\": \"%s\"\n", move_str);
         puts("}");
@@ -2295,43 +2270,42 @@ bool openings_db(Chess *chess, TIME_TYPE start) {
 
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
-int play(char *fen, int millis, char *game_history) {
+int play(char* fen, int millis, char* game_history) {
     ZHashStack zhstack = {0};
     if (game_history != NULL) {
         ZHashStack_game_history(&zhstack, game_history);
     }
 
-    Chess *chess = Chess_from_fen(fen);
+    Chess* chess = Chess_from_fen(fen);
     if (!chess) return 1;
     if (millis < 1) return 1;
     memcpy(&chess->zhstack, &zhstack, sizeof(ZHashStack));
 
-    TIME_TYPE start = TIME_NOW();
-    TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
-
-    if (chess->fullmoves <= 5 && openings_db(chess, start)) {
+    if (chess->fullmoves <= 5 && openings_db(chess)) {
         return 0;
     }
-
+    
+    TIME_TYPE start = TIME_NOW();
+    TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
     size_t n_moves = Chess_legal_moves_sorted(chess, moves, false);
     if (n_moves < 1) return 1;
 
-    Move *best_move = NULL;
+    Move* best_move = NULL;
     int best_score = -INF;
     int depth = 1;
     TT_init();
 
-    pthread_t *threads = calloc(n_moves, sizeof(pthread_t));
-    ChessThread *args = calloc(n_moves, sizeof(ChessThread));
+    pthread_t* threads = calloc(n_moves, sizeof(pthread_t));
+    ChessThread* args = calloc(n_moves, sizeof(ChessThread));
 
     while (TIME_NOW() < endtime) {
         // nodes_total = 0;
         // is_endgame = Chess_is_endgame(chess);
 
         for (int i = 0; i < n_moves; i++) {
-            ChessThread *arg = &args[i];
+            ChessThread* arg = &args[i];
             memcpy(&arg->chess, chess, sizeof(Chess));
             memcpy(&arg->move, &moves[i], sizeof(Move));
             arg->endtime = endtime;
@@ -2369,11 +2343,9 @@ int play(char *fen, int millis, char *game_history) {
     printf("  \"scores\": {\n");
     for (int i = 0; i < n_moves; i++) {
         if (i >= n_moves - 1) {
-            printf("    \"%s\": %.2f\n", Move_string(moves + i),
-                   (double)scores[i] / 100);
+            printf("    \"%s\": %.2f\n", Move_string(moves + i), (double)scores[i] / 100);
         } else {
-            printf("    \"%s\": %.2f,\n", Move_string(moves + i),
-                   (double)scores[i] / 100);
+            printf("    \"%s\": %.2f,\n", Move_string(moves + i), (double)scores[i] / 100);
         }
     }
     printf("  },\n");
@@ -2398,17 +2370,13 @@ void help(void) {
 #define HELP_WIDTH "  %-20s "
     printf(HELP_WIDTH "Show this help message\n", "help");
     printf(HELP_WIDTH "Show version information\n", "version");
-    printf(HELP_WIDTH "Show legal moves for the given position\n",
-           "moves <FEN> <depth>");
-    printf(HELP_WIDTH "Get the evaluation of the given position\n",
-           "eval <FEN>");
-    printf(HELP_WIDTH "Bot plays a move based on the given position\n",
-           "play <FEN> <millis>");
+    printf(HELP_WIDTH "Show legal moves for the given position\n", "moves <FEN> <depth>");
+    printf(HELP_WIDTH "Get the evaluation of the given position\n", "eval <FEN>");
+    printf(HELP_WIDTH "Bot plays a move based on the given position\n", "play <FEN> <millis>");
 }
 
 int test() {
-    Chess *chess = Chess_from_fen(
-        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    Chess* chess = Chess_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     if (!chess) return 1;
 
     uint64_t hash = Chess_zhash(chess);
@@ -2419,13 +2387,12 @@ int test() {
     return 0;
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2 || strcmp(argv[1], "help") == 0 ||
-        strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
+int main(int argc, char** argv) {
+    if (argc < 2 || strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0 ||
+        strcmp(argv[1], "-h") == 0) {
         help();
         return argc > 1;
-    } else if (strcmp(argv[1], "version") == 0 ||
-               strcmp(argv[1], "--version") == 0 ||
+    } else if (strcmp(argv[1], "version") == 0 || strcmp(argv[1], "--version") == 0 ||
                strcmp(argv[1], "-v") == 0) {
         return version();
     } else if (strcmp(argv[1], "test") == 0) {
@@ -2441,12 +2408,12 @@ int main(int argc, char **argv) {
         int depth = atoi(argv[3]);
         return moves(argv[2], depth);
     } else if (argc == 3 && strcmp(argv[1], "eval") == 0) {
-        Chess *chess = Chess_from_fen(argv[2]);
+        Chess* chess = Chess_from_fen(argv[2]);
         if (!chess) return 1;
         printf("%f\n", (double)eval(chess) / 100);
         return 0;
     } else if (argc == 3 && strcmp(argv[1], "hash") == 0) {
-        Chess *chess = Chess_from_fen(argv[2]);
+        Chess* chess = Chess_from_fen(argv[2]);
         if (!chess) return 1;
         printf("%" PRIx64 "\n", Chess_zhash(chess));
         return 0;
