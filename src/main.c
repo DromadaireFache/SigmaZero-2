@@ -2053,14 +2053,14 @@ int eval(Chess* chess) {
     for (int i = 0; i < 8; i++) {
         // remove points for isolated pawns
         if (i == 0) {
-            if (white_pawns[1] == 0) e -= 25 * white_pawns[0];
-            if (black_pawns[1] == 0) e += 25 * black_pawns[0];
+            if (white_pawns[1] == 0) e -= 10 * white_pawns[0];
+            if (black_pawns[1] == 0) e += 10 * black_pawns[0];
         } else if (i == 7) {
-            if (white_pawns[6] == 0) e -= 25 * white_pawns[7];
-            if (black_pawns[6] == 0) e += 25 * black_pawns[7];
+            if (white_pawns[6] == 0) e -= 10 * white_pawns[7];
+            if (black_pawns[6] == 0) e += 10 * black_pawns[7];
         } else {
-            if (white_pawns[i - 1] == 0 && white_pawns[i + 1] == 0) e -= 25 * white_pawns[i];
-            if (black_pawns[i - 1] == 0 && black_pawns[i + 1] == 0) e += 25 * black_pawns[i];
+            if (white_pawns[i - 1] == 0 && white_pawns[i + 1] == 0) e -= 10 * white_pawns[i];
+            if (black_pawns[i - 1] == 0 && black_pawns[i + 1] == 0) e += 10 * black_pawns[i];
         }
 
         // pawn shield to protect the king
@@ -2074,9 +2074,9 @@ int eval(Chess* chess) {
         }
         if (black_king_col - 1 <= i && i <= black_king_col + 1) {
             if (black_pawns[i] == 0) {
-                e -= 25;
+                e += 25;
                 if (white_pawns[i] == 0) {
-                    e -= 15;
+                    e += 15;
                 }
             }
         }
