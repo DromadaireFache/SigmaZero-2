@@ -2,6 +2,7 @@ import sys
 import time
 from src import sigma_zero
 import chess
+import chess.pgn
 
 TIME = 100  # milliseconds per move
 OLD_BOT = "V2.4"
@@ -46,7 +47,18 @@ def illegal_move(board: chess.Board, move_uci: str, result: dict):
 def play_game(fen: str, is_white: bool) -> dict:
     results = {"score": 0, "time_old": 0, "time_new": 0, "avg_depth_new": 0, "avg_depth_old": 0}
     board = chess.Board(fen)
+
+    # Create a PGN game object
+    game = chess.pgn.Game()
+    game.headers["Event"] = "SigmaZero Tournament"
+    game.headers["White"] = "SigmaZero" if is_white else OLD_BOT
+    game.headers["Black"] = OLD_BOT if is_white else "SigmaZero"
+    game.headers["FEN"] = fen
+    game.setup(board)  # Set the starting position
+
+    node = game  # Start at the root node
     number_of_moves = 0
+
     while not board.is_game_over(claim_draw=True):
         if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
             result = sigma_zero.play(board, TIME)
@@ -56,16 +68,21 @@ def play_game(fen: str, is_white: bool) -> dict:
             result = sigma_zero.old_play(board, TIME)
             results["time_old"] += result.get("time", 0)
             results["avg_depth_old"] += result.get("depth", 0)
+
         move_uci = result.get("move", "<unknown>")
         try:
             move = chess.Move.from_uci(move_uci)
             if move in board.legal_moves:
                 board.push(move)
+                node = node.add_variation(move)  # Add move to PGN
                 number_of_moves += 1
             else:
                 illegal_move(board, move_uci, result)
         except Exception:
             illegal_move(board, move_uci, result)
+
+    # Set the game result
+    game.headers["Result"] = board.result(claim_draw=True)
 
     if board.result(claim_draw=True) == "1-0":
         results["score"] = 1 if is_white else -1
@@ -73,10 +90,18 @@ def play_game(fen: str, is_white: bool) -> dict:
         results["score"] = -1 if is_white else 1
     else:
         what_draw(board)
+
     results["end_fen"] = board.fen()
     if number_of_moves > 0:
         results["avg_depth_new"] /= number_of_moves / 2
         results["avg_depth_old"] /= number_of_moves / 2
+
+    # Write the PGN to file
+    with open("pgns.txt", "a") as f:
+        exporter = chess.pgn.FileExporter(f)
+        game.accept(exporter)
+        f.write("\n\n")  # Add spacing between games
+
     return results
 
 
@@ -109,4 +134,6 @@ def tournament():
 
 
 if __name__ == "__main__":
+    with open("pgns.txt", "w") as f:
+        f.write("")  # Clear previous PGNs
     tournament()

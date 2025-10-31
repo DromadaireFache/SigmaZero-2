@@ -2022,29 +2022,64 @@ bitboard_t Chess_king_perimiter(int pos) {
     return mask;
 }
 
-int Chess_piece_king_proximity(Chess* chess, Piece piece, int i) {
-    if (Piece_is_king(piece) || Piece_is_pawn(piece)) return 0;
-    bitboard_t piece_bb = bitboard_from_index(i);
-    int king_pos = Piece_is_white(piece) ? chess->king_black : chess->king_white;
-    bitboard_t enemy_king_quadrant = Chess_king_perimiter(king_pos);
-
-    if (piece_bb & enemy_king_quadrant) {
-        return Piece_value(piece) / 16;
-    } else {
-        return 0;
-    }
-}
-
 int eval(Chess* chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
+    int white_pawns[8] = {0};
+    int black_pawns[8] = {0};
 
     for (int i = 0; i < 64; i++) {
         Piece piece = chess->board[i];
         if (piece == EMPTY) continue;
 
         e += Piece_value_at(piece, i, fullmoves);
-        e += Chess_piece_king_proximity(chess, piece, i);
+
+        switch (piece) {
+            case WHITE_PAWN:
+                white_pawns[index_col(i)]++;
+                break;
+            case BLACK_PAWN:
+                black_pawns[index_col(i)]++;
+                break;
+            default:
+                break;
+        }
+    }
+
+    if (chess->fullmoves > 40 || chess->fullmoves < 10) return e;
+
+    int white_king_col = index_col(chess->king_white);
+    int black_king_col = index_col(chess->king_black);
+    for (int i = 0; i < 8; i++) {
+        // remove points for isolated pawns
+        if (i == 0) {
+            if (white_pawns[1] == 0) e -= 25 * white_pawns[0];
+            if (black_pawns[1] == 0) e += 25 * black_pawns[0];
+        } else if (i == 7) {
+            if (white_pawns[6] == 0) e -= 25 * white_pawns[7];
+            if (black_pawns[6] == 0) e += 25 * black_pawns[7];
+        } else {
+            if (white_pawns[i - 1] == 0 && white_pawns[i + 1] == 0) e -= 25 * white_pawns[i];
+            if (black_pawns[i - 1] == 0 && black_pawns[i + 1] == 0) e += 25 * black_pawns[i];
+        }
+
+        // pawn shield to protect the king
+        if (white_king_col - 1 <= i && i <= white_king_col + 1) {
+            if (white_pawns[i] == 0) {
+                e -= 25;
+                if (black_pawns[i] == 0) {
+                    e -= 15;
+                }
+            }
+        }
+        if (black_king_col - 1 <= i && i <= black_king_col + 1) {
+            if (black_pawns[i] == 0) {
+                e -= 25;
+                if (white_pawns[i] == 0) {
+                    e -= 15;
+                }
+            }
+        }
     }
 
     return e;
@@ -2284,7 +2319,7 @@ int play(char* fen, int millis, char* game_history) {
     if (chess->fullmoves <= 5 && openings_db(chess)) {
         return 0;
     }
-    
+
     TIME_TYPE start = TIME_NOW();
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
     Move moves[MAX_LEGAL_MOVES];
