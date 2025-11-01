@@ -10,7 +10,7 @@
 #include <time.h>
 #include <limits.h>
 
-#include "../consts.c"
+#include "./old_consts.c"
 
 #define class typedef struct
 
