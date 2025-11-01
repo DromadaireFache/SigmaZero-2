@@ -72,29 +72,29 @@ typedef enum {
 int Piece_value(Piece piece) {
     switch (piece) {
         case WHITE_PAWN:
-            return 100;
+            return PAWN_VALUE;
         case BLACK_PAWN:
-            return -100;
+            return -PAWN_VALUE;
         case WHITE_KNIGHT:
-            return 320;
+            return KNIGHT_VALUE;
         case BLACK_KNIGHT:
-            return -320;
+            return -KNIGHT_VALUE;
         case WHITE_BISHOP:
-            return 330;
+            return BISHOP_VALUE;
         case BLACK_BISHOP:
-            return -330;
+            return -BISHOP_VALUE;
         case WHITE_ROOK:
-            return 500;
+            return ROOK_VALUE;
         case BLACK_ROOK:
-            return -500;
+            return -ROOK_VALUE;
         case WHITE_QUEEN:
-            return 900;
+            return QUEEN_VALUE;
         case BLACK_QUEEN:
-            return -900;
+            return -QUEEN_VALUE;
         case WHITE_KING:
-            return 20000;
+            return KING_VALUE;
         case BLACK_KING:
-            return -20000;
+            return -KING_VALUE;
         default:
             return 0;
     }
@@ -106,38 +106,38 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
         case WHITE_PAWN:
             // give a bonus for higher rank in the endgame
             a = index_row(i);
-            b = ((a - 1) * (int)fullmoves) / 8;
-            return 100 + PS_WHITE_PAWN[i] + b;  // constant
+            b = ((a - 1) * (int)fullmoves) / PAWN_RANK_BONUS;
+            return PAWN_VALUE + PS_WHITE_PAWN[i] + b;
         case BLACK_PAWN:
             a = index_row(i);
-            b = ((a - 6) * (int)fullmoves) / 8;
-            return -100 + PS_BLACK_PAWN[i] + b;  // constant
+            b = ((a - 6) * (int)fullmoves) / PAWN_RANK_BONUS;
+            return -PAWN_VALUE + PS_BLACK_PAWN[i] + b;
         case WHITE_KNIGHT:
-            return 320 + PS_WHITE_KNIGHT[i];
+            return KNIGHT_VALUE + PS_WHITE_KNIGHT[i];
         case BLACK_KNIGHT:
-            return -320 + PS_BLACK_KNIGHT[i];
+            return -KNIGHT_VALUE + PS_BLACK_KNIGHT[i];
         case WHITE_BISHOP:
-            return 330 + PS_WHITE_BISHOP[i];
+            return BISHOP_VALUE + PS_WHITE_BISHOP[i];
         case BLACK_BISHOP:
-            return -330 + PS_BLACK_BISHOP[i];
+            return -BISHOP_VALUE + PS_BLACK_BISHOP[i];
         case WHITE_ROOK:
-            return 500 + PS_WHITE_ROOK[i];
+            return ROOK_VALUE + PS_WHITE_ROOK[i];
         case BLACK_ROOK:
-            return -500 + PS_BLACK_ROOK[i];
+            return -ROOK_VALUE + PS_BLACK_ROOK[i];
         case WHITE_QUEEN:
-            return 900 + PS_WHITE_QUEEN[i];
+            return QUEEN_VALUE + PS_WHITE_QUEEN[i];
         case BLACK_QUEEN:
-            return -900 + PS_BLACK_QUEEN[i];
+            return -QUEEN_VALUE + PS_BLACK_QUEEN[i];
         case WHITE_KING:
-            a = PS_WHITE_KING[i] * (50 - fullmoves);
+            a = PS_WHITE_KING[i] * (FULLMOVES_ENDGAME - fullmoves);
             b = PS_WHITE_KING_ENDGAME[i] * fullmoves;
-            c = (a + b) / 50;
-            return 20000 + c;
+            c = (a + b) / FULLMOVES_ENDGAME;
+            return KING_VALUE + c;
         case BLACK_KING:
-            a = PS_BLACK_KING[i] * (50 - fullmoves);
+            a = PS_BLACK_KING[i] * (FULLMOVES_ENDGAME - fullmoves);
             b = PS_BLACK_KING_ENDGAME[i] * fullmoves;
-            c = (a + b) / 50;
-            return -20000 + c;
+            c = (a + b) / FULLMOVES_ENDGAME;
+            return -KING_VALUE + c;
         default:
             return 0;
     }
@@ -1737,12 +1737,10 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     return n_moves;
 }
 
-#define SCORE_VICTIM_MULTIPLIER 64  // constant
-
 void Chess_score_move(Chess* chess, Move* move) {
     // Give very high scores to promotions
     if (move->promotion == PROMOTE_QUEEN) {
-        move->score = 100;  // constant
+        move->score = PROMOTION_MOVE_SCORE;
         return;
     }
 
@@ -1777,24 +1775,6 @@ int compare_moves(const void* a, const void* b) {
     return mb->score - ma->score;
 }
 
-// Find and swap the best move to the front
-static inline void select_best_move(Move* moves, size_t start, size_t n_moves) {
-    if (start >= n_moves) return;
-    
-    size_t best = start;
-    for (size_t i = start + 1; i < n_moves; i++) {
-        if (moves[i].score > moves[best].score) {
-            best = i;
-        }
-    }
-    
-    if (best != start) {
-        Move tmp = moves[start];
-        moves[start] = moves[best];
-        moves[best] = tmp;
-    }
-}
-
 size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
     size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
 
@@ -1805,7 +1785,7 @@ size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
     }
 
     // C lib sort
-    // qsort(moves, n_moves, sizeof(Move), compare_moves);
+    qsort(moves, n_moves, sizeof(Move), compare_moves);
 
     return n_moves;
 }
@@ -1936,7 +1916,7 @@ class {
 TTItem;
 
 // Will give ~100MB array
-#define TT_LENGTH (1 << 22) // constant
+#define TT_LENGTH (1 << 22)
 
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
@@ -2033,8 +2013,7 @@ int moves(char* fen, int depth) {
 
 int eval(Chess* chess) {
     int e = 0;
-    // constant number of full moves until endgame
-    uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves; 
+    uint8_t fullmoves = chess->fullmoves > FULLMOVES_ENDGAME ? FULLMOVES_ENDGAME : chess->fullmoves;
 
     for (int i = 0; i < 64; i++) {
         Piece piece = chess->board[i];
@@ -2060,7 +2039,6 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     size_t n_moves = Chess_legal_moves_sorted(chess, moves, true);
 
     for (int i = 0; i < n_moves; i++) {
-        select_best_move(moves, i, n_moves);  // Find best remaining move
         Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
         Piece capture = Chess_make_move(chess, move);
@@ -2076,8 +2054,6 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     }
     return best_score;
 }
-
-#define QUIES_DEPTH 5 // constant
 
 int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last_capture,
             int extensions) {
@@ -2104,7 +2080,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
 
     // Extend search if in check, otherwise don't
     if (depth == 0) {
-        if (extensions < 3 && Chess_friendly_check(chess)) {
+        if (extensions < MAX_EXTENSION && Chess_friendly_check(chess)) {
             depth++;
             extensions++;
         } else {
@@ -2136,7 +2112,6 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int original_b = b;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
-        select_best_move(moves, i, n_moves);  // Find best remaining move
         Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
         Piece capture = Chess_make_move(chess, move);

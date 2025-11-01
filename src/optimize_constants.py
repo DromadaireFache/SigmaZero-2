@@ -1,35 +1,19 @@
-#include <inttypes.h>
+import copy
+import os
+from pprint import pprint
+import random
+import shutil
+import sys
+import time
 
-// Constant parameters
-#define PAWN_RANK_BONUS 8
-#define PAWN_VALUE 100
-#define KNIGHT_VALUE 320
-#define BISHOP_VALUE 330
-#define ROOK_VALUE 500
-#define QUEEN_VALUE 900
-#define KING_VALUE 20000
-#define SCORE_VICTIM_MULTIPLIER 64
-#define PROMOTION_MOVE_SCORE 100
-#define FULLMOVES_ENDGAME 50
-#define QUIES_DEPTH 5
-#define MAX_EXTENSION 3
+import chess
 
-// Piece square values
-const int PS_BLACK_PAWN[] = {0, 0, 0, 0, 0, 0, 0, 0, -50, -50, -50, -50, -50, -50, -50, -50, -10, -10, -20, -30, -30, -20, -10, -10, -5, -5, -10, -25, -25, -10, -5, -5, 0, 0, 0, -20, -20, 0, 0, 0, -5, 5, 10, 0, 0, 10, 5, -5, -5, -10, -10, 20, 20, -10, -10, -5, 0, 0, 0, 0, 0, 0, 0, 0};
-const int PS_WHITE_PAWN[] = {0, 0, 0, 0, 0, 0, 0, 0, 5, 10, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 10, 25, 25, 10, 5, 5, 10, 10, 20, 30, 30, 20, 10, 10, 50, 50, 50, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0};
-const int PS_BLACK_KNIGHT[] = {50, 40, 30, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 40, 30, 0, -10, -15, -15, -10, 0, 30, 30, -5, -15, -20, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 30, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 40, 50, 40, 30, 30, 30, 30, 40, 50};
-const int PS_WHITE_KNIGHT[] = {-50, -40, -30, -30, -30, -30, -40, -50, -40, -20, 0, 5, 5, 0, -20, -40, -30, 5, 10, 15, 15, 10, 5, -30, -30, 0, 15, 20, 20, 15, 0, -30, -30, 5, 15, 20, 20, 15, 5, -30, -30, 0, 10, 15, 15, 10, 0, -30, -40, -20, 0, 0, 0, 0, -20, -40, -50, -40, -30, -30, -30, -30, -40, -50};
-const int PS_BLACK_BISHOP[] = {20, 10, 10, 10, 10, 10, 10, 20, 10, 0, 0, 0, 0, 0, 0, 10, 10, 0, -5, -10, -10, -5, 0, 10, 10, -5, -5, -10, -10, -5, -5, 10, 10, 0, -10, -10, -10, -10, 0, 10, 10, -10, -10, -10, -10, -10, -10, 10, 10, -5, 0, 0, 0, 0, -5, 10, 20, 10, 10, 10, 10, 10, 10, 20};
-const int PS_WHITE_BISHOP[] = {-20, -10, -10, -10, -10, -10, -10, -20, -10, 5, 0, 0, 0, 0, 5, -10, -10, 10, 10, 10, 10, 10, 10, -10, -10, 0, 10, 10, 10, 10, 0, -10, -10, 5, 5, 10, 10, 5, 5, -10, -10, 0, 5, 10, 10, 5, 0, -10, -10, 0, 0, 0, 0, 0, 0, -10, -20, -10, -10, -10, -10, -10, -10, -20};
-const int PS_BLACK_ROOK[] = {0, 0, 0, 0, 0, 0, 0, 0, -5, -10, -10, -10, -10, -10, -10, -5, 5, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, -5, -5, 0, 0, 0};
-const int PS_WHITE_ROOK[] = {0, 0, 0, 5, 5, 0, 0, 0, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, 5, 10, 10, 10, 10, 10, 10, 5, 0, 0, 0, 0, 0, 0, 0, 0};
-const int PS_BLACK_QUEEN[] = {20, 10, 10, 5, 5, 10, 10, 20, 10, 0, 0, 0, 0, 0, 0, 10, 10, 0, -5, -5, -5, -5, 0, 10, 5, 0, -5, -5, -5, -5, 0, 5, 0, 0, -5, -5, -5, -5, 0, 5, 10, -5, -5, -5, -5, -5, 0, 10, 10, 0, -5, 0, 0, 0, 0, 10, 20, 10, 10, 5, 5, 10, 10, 20};
-const int PS_WHITE_QUEEN[] = {-20, -10, -10, -5, -5, -10, -10, -20, -10, 0, 5, 0, 0, 0, 0, -10, -10, 5, 5, 5, 5, 5, 0, -10, 0, 0, 5, 5, 5, 5, 0, -5, -5, 0, 5, 5, 5, 5, 0, -5, -10, 0, 5, 5, 5, 5, 0, -10, -10, 0, 0, 0, 0, 0, 0, -10, -20, -10, -10, -5, -5, -10, -10, -20};
-const int PS_BLACK_KING[] = {30, 40, 40, 50, 50, 40, 40, 30, 30, 40, 40, 50, 50, 40, 40, 30, 30, 40, 40, 50, 50, 40, 40, 30, 30, 40, 40, 50, 50, 40, 40, 30, 20, 30, 30, 40, 40, 30, 30, 20, 10, 20, 20, 20, 20, 20, 20, 10, -20, -20, 0, 0, 0, 0, -20, -20, -20, -30, -10, 0, 0, -10, -30, -20};
-const int PS_WHITE_KING[] = {20, 30, 10, 0, 0, 10, 30, 20, 20, 20, 0, 0, 0, 0, 20, 20, -10, -20, -20, -20, -20, -20, -20, -10, -20, -30, -30, -40, -40, -30, -30, -20, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30};
-const int PS_BLACK_KING_ENDGAME[] = {50, 40, 30, 20, 20, 30, 40, 50, 30, 20, 10, 0, 0, 10, 20, 30, 30, 10, -20, -30, -30, -20, 10, 30, 30, 10, -30, -40, -40, -30, 10, 30, 30, 10, -30, -40, -40, -30, 10, 30, 30, 10, -20, -30, -30, -20, 10, 30, 30, 30, 0, 0, 0, 0, 30, 30, 50, 30, 30, 30, 30, 30, 30, 50};
-const int PS_WHITE_KING_ENDGAME[] = {-50, -30, -30, -30, -30, -30, -30, -50, -30, -30, 0, 0, 0, 0, -30, -30, -30, -10, 20, 30, 30, 20, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30, -10, 20, 30, 30, 20, -10, -30, -30, -20, -10, 0, 0, -10, -20, -30, -50, -40, -30, -20, -20, -30, -40, -50};
+try:
+    import sigma_zero
+except ModuleNotFoundError:
+    from . import sigma_zero
 
+ZOBRIST_CONSTANTS = """
 // Zobrist hashing values
 const uint64_t ZHASH_WHITE_KING[] = {0x190d3964b05efd1f, 0x76ba326c46c7b9f7, 0x43f25f9ef54d972a, 0xf4d2c72508000759, 0xe45cd2f16980e4b5, 0xe48bcad5b0f8c977, 0x809dce25ef0c7cf, 0x4b4c28bf4913b678, 0xb3f33a622e4bc220, 0x23c0b958a206d414, 0x6059184aae8db862, 0x80d72d5ff5e02e8f, 0x6f2247912cc1d5f5, 0xf45debf453ab3021, 0xcee7ea6ee2d16b31, 0x2d957f8a941544ab, 0x36fd2aea203e9cc, 0x488b189afb040e0e, 0xeb2b5b4793886f48, 0xc664a39aed1a74dc, 0xafa3d2221ef4e7f, 0xf036256846d3c6ad, 0x130e1850d09d24, 0x7cd2c5fd9354ffea, 0xaad00f1e48927873, 0x9bef315acf5f2496, 0x2426d06922d6eb8c, 0x83642d088b7673c7, 0x182c74fc92a92931, 0xa4121f3bbfbb2ffc, 0xb3c335e442e7e9b1, 0x5cb162ce7ed74aa5, 0x3fc825f57b178d13, 0x950961285684eee2, 0x95b8d90fdc2c3ce, 0x29563f564b9b18ca, 0x723ebfee5801da09, 0x33ded6e553cbfd13, 0xd741192ce74a7d6d, 0x712e6e92296a9e83, 0x8f85e00b298b96ac, 0xe48a0e91b37e09c5, 0x7651e2887c2a8a33, 0x72a22b5d6d1f0acf, 0x768a648a19731c12, 0x8d941992ddedc4b9, 0xfcc23484a16ee7c9, 0x59f8d1ea20218f58, 0xdd4a208352555f73, 0x78abe86569a45fed, 0xcba994ae95e58113, 0x978bb6a8f0c3e2ca, 0x3c1364b59c95f0ea, 0x45801c8500c7f4e4, 0x266de5331919292a, 0x7a6eae9d0f69f9e4, 0x32863caa2bf1675, 0xcfb3a18208681e85, 0xde0ccf4a9e5ea4b9, 0x171e274ec27d334d, 0xd43ad29140e71cf, 0x4eb06332eca60cfe, 0xd1ca58f5e017e68e, 0x53dc85952f5aeca4};
 const uint64_t ZHASH_BLACK_KING[] = {0x1928d70da7513ef9, 0x18bbbcdf1da3c1f5, 0x665145d367ff7719, 0x9d1738ca88ba7cf1, 0x730dd76b944ccf7, 0x3551125162249e7, 0x8f58ba36ec4c169f, 0x553ec750e43fd6b1, 0xf6b44a4c50b67361, 0x553c1f8ede3b9e91, 0xe15a13641a2a1dcc, 0xe0f522362ae33072, 0xbea55f9c636492e8, 0x4f468d531a0246c9, 0x1dfe2f667d70fd6a, 0x768856d0efa8e097, 0x9b97148fe83bf821, 0xea0d901139ec7631, 0xe64b7b6002e2781a, 0x4de0b121ca159b21, 0xcbabb86b68e81069, 0xd6ac36b61bdbe7e4, 0x4173d5452f8d5cf, 0xe86a923ccdf3a0c2, 0x2c99ce0b7456511b, 0xd0e0823b76fcedf8, 0x189c2f70a5471050, 0xbaec9006ff6aafd1, 0xeb7950524b98c729, 0xc5ac4e8094d7ccdd, 0xff4b3e426dee7aaf, 0x7a78a7756299ab41, 0x52f19ce1acf0701e, 0xaaa4d59b46d78697, 0xd1422ab88f08960d, 0xacb12c658314290b, 0x3ab70aa62f2cecc5, 0x4bfc2b316a686803, 0x760244208a92044a, 0xe70e9b4d3f93c0df, 0x9b23975ec7752c08, 0xb26b2667235c3ca1, 0xe288f1b1c19c4192, 0x4eeda9b0bdd5bb15, 0x8b6ac11a31bb1f86, 0x92b087be2813851f, 0xb2721a5da6dca66e, 0x9c11c9b11c8d5e7, 0x12dfbe4681174078, 0x7fe0af69f25d720b, 0x209ae0d11a55af08, 0xb803fa2bcf20414d, 0xfce57f01caafb648, 0xed17ef89f203ab97, 0xb9a4f498d2c0ce55, 0x802c265b59cddfe7, 0xe4dda132e9f64b9, 0xf894168910ac6206, 0x6cdff5b65d5741c5, 0x31e750d6475554aa, 0x72d56accbfb19e46, 0x961b4ae82056fe0b, 0x65367b3a4b3d724a, 0x7358c69fde54b26b};
@@ -46,3 +30,299 @@ const uint64_t ZHASH_BLACK_PAWN[] = {0x9152b9336d697c39, 0x9014b1137ede53de, 0xe
 const uint64_t ZHASH_STATE[256] = {0x119a61b56b2bc6c2, 0x24bcd8a0972e2a4b, 0x28da956e9242f336, 0xb73dd2020eba053, 0xe9b02d6e93e0618, 0x7b4eb1123ce39b5f, 0x10ad2fe1d84d82a9, 0xf66b2231297ec507, 0x4e74d1bd24c0a002, 0x7f2b54c04e43d8dc, 0xdc84c3c806df01f, 0x5d66450edfe7ce36, 0x3a5b2e621d17fd3c, 0x42a1e06df4f41b56, 0x21a1cb9d17ac9bfb, 0x666fff26ec58ec35, 0xe22663e32aea9ef7, 0x79f05c8d7d470da7, 0xe98c4cc0efbabddf, 0x810970ed06189e7e, 0x84ae8faf0ab9f364, 0xb356de94159e8236, 0xbb74ede183661c38, 0xab8854954da26896, 0x61eab10fca7d0e34, 0x6d7de4f86f3070d7, 0xd3b8b9a026494d49, 0x151a6a6725de5db5, 0xeba00ca0d0d02fc, 0x2b990eab56f24e1, 0x2e4296f290aca9d0, 0x696c49e21bfe3fd9, 0xdc42369f9cf5c365, 0x2d44c6899dbc762b, 0x269493713530b311, 0x58d8aaa869ab4966, 0x68f3ba2228ed72f, 0xbc2e8ea95f03d95a, 0x4f9a2532fc0a00cc, 0xd632d92496863079, 0x59e0f81fb456877b, 0x1d1a4fd3d01662a7, 0xb84cfcaf7304f241, 0xe34e966efc791df7, 0xaeac0ab5eb28859c, 0xad53421c3839a6e, 0x8c3278e55bede7e5, 0xb951e4e8b4590186, 0x7e703ee99c8202e4, 0x546e6c4e85f59abf, 0xe081a40d7d10e9c1, 0xe1d074bb9d7e1df4, 0x8b903bf4b6392979, 0x900b79ec86a08c74, 0x69c1f6e6e93eaea9, 0xd4b28f69c9af3ec3, 0x492bf7faaf3ff408, 0xc66641cd1586f4ca, 0xbdf9ba1457f607d4, 0x1b67fd61fe19b84d, 0xfc94573bdaf5ede5, 0x3efb6fa5617a49ad, 0xe1ac63f7b79ce293, 0x182c29d5b318c0d, 0x422804cc6d5a8024, 0x4a44a06cd10fbd9e, 0xbc416f684a2e9f4b, 0xfbe887ad0bff00a7, 0x2871d90e6e0350bf, 0xc16a7ee0defe7980, 0x68cf13e3b96c5f0e, 0x4421270e698bc0b8, 0x7d0ce4fab55155c6, 0x2f6392ca9e03f2de, 0xb92f80b24e19fb1, 0x884ef2cb3f503dd7, 0xd998de7b8a69e39c, 0xd6deacf2a1b39423, 0xaddf838e3d23b0b, 0x26948f7c55142e9c, 0x22170ad7a71e5dc6, 0xe0b785caf8fa227d, 0x93ca0a4163e28203, 0x37887f8f6c93efe2, 0xb19a82be828ab071, 0xe1e0c0183e45dea6, 0x4ad81d84acd59f6b, 0x564ab00b6d4fa94e, 0x62ec78735a47068a, 0x24619e3ad97ce6f4, 0x5462a8519c0c6b08, 0x9b0416d0c2c32d24, 0x469d15ad43ce745c, 0xd974b742cfeb5789, 0xa923ebc8ac21ebd1, 0xb7c6ee942423b096, 0x9186bd3a42c7ab71, 0x7120beb7ee792077, 0xd7bd189af96deedd, 0xcc4539df17c9bc88, 0x897eef745a128ee3, 0x80e223b6afec3409, 0x775817b419bb2009, 0x11a29a4e5e3793b0, 0x657ff5ca73fe020f, 0x8ee8773e3989897c, 0xd39c6857a6f79363, 0xd47f0337adccd9bc, 0x128bee7d049b834b, 0xc344088eb1f6810, 0x69a79ef0323cb6a, 0x96b5a9ef8448af4c, 0x433a4c52786fb3eb, 0x4cfbd280b2ed6222, 0x9b41b15ced8995f3, 0xae9ec5762cdf43f0, 0xddae3bb06ff81093, 0x6bb5a0bfeba4c21b, 0xde133e27a97d787d, 0xa4fd051769f4446c, 0x17269b4b9cc251e5, 0xfa3c63ae2413d9c1, 0xf21bba871553c23, 0x9560ea5628cb384a, 0xb1869e0c3ef81b8e, 0x754a7022cd666060, 0xeb9a607fac97f215, 0xa9a2eca76a892f61, 0xfc5bd9582b9f1615, 0x3948b05698a707b8, 0xabf6efc612e795a8, 0x5639b2ae8ea2d24a, 0xfb38c77ffea72bc4, 0x5c170f17d18e1aba, 0x1ec0f5ddd030abd7, 0x733df0790cf9456d, 0xfd59df1f7e2807df, 0xd78d355962c32d67, 0x6d8406b28896e463, 0x7e10982bd36e92e1, 0x5ed91b2d84eaa900, 0xb1b5a178973aa20e, 0x989a729861d33c22, 0xe627d8bd267c60ce, 0x8e13cbc162926e9f, 0x9b3f6b7243fa3886, 0x25dc46d344ab0152, 0x8259ece456028325, 0xb56e7da05169757, 0xa33f85c358faef12, 0xd66ef97a722eec39, 0xdb26c20f5737b37f, 0x21bfe2785df0f1d1, 0x7bddbe901418db40, 0x1e9b4b7b59ce6b4, 0x5b5e818a0c947528, 0x5c22506b059cf458, 0x5d070e7fe407ca2e, 0xe61baefb986c0969, 0x666dd6fc022671c, 0x3396ea50762ecdce, 0x77009d23399b428, 0x9817401dabceabc1, 0xb5197af242b71333, 0x2d7ad19e471d8b85, 0xc431fcdd6b0dccdf, 0xced4c0ecfaab751, 0x127ec5d8399ab8d6, 0x596a92ca5e9a0f2, 0x296a45d8edb0fc9f, 0xf80fb8a1ac303dab, 0xe9bab061374b1c7, 0x168b2104cc5e0588, 0xf0e94ebaae0922a7, 0x405f1b1d0ed821cf, 0xfe47262de4c9f8a5, 0x67b1c8e3a560d0d1, 0x5ae10187b316e617, 0x22742755be6efe96, 0x859fece72223ba1e, 0xf1f58f5ebe116262, 0x61d8c19ffc1d5240, 0x5dec382f86e31991, 0xf44d9c73a4f499a7, 0xcbcd69ede9039123, 0x24404871a4039d85, 0x3739efba7f2e2934, 0xa7298a80b6021b1b, 0xf18ad856a33542e9, 0x57b9f5503afd5185, 0x6d8d4bec4bb6ea85, 0xfac40f5163bcc2a1, 0x8d7553f5aea56b0, 0x66e57e8541964615, 0x30d1fdd890b8f546, 0x97f001885ec6f7a9, 0x8081b94ac3906be2, 0x80c9a112e4cfa62a, 0x2c58af855fd14687, 0xca5f119596e3685c, 0x3e6263e120432b7e, 0x75336fb847971ac7, 0xe12886f0026b453f, 0xf2eb7ffaa14d0b0, 0xbc3fab1a9f41cff2, 0xc5c2c3f67cfa4759, 0xffe407c9f6a4d1b5, 0x4b9ee9c6904c5267, 0xc6f6fd8ae1ff9eb5, 0x56284a9e72dfaf9a, 0xfffd38e36fafed8f, 0xe62ba62ec21a402f, 0x283891e36280c8de, 0xe64a0eca3ca6d08c, 0xab39c5c79f188120, 0xeced36ecf90ee054, 0xda6f04e6af5bf935, 0x34034f79d461b98, 0xb7b97b51916abbd7, 0x14df4a16593e2c01, 0x347d0cafff4da5b9, 0x5bd2c820912c9ce6, 0x9e6e4ac671fe4281, 0x5777396b69d3e67d, 0xa266cd975d761e06, 0x4fc1b1b53bc057e, 0x132dacd5e50441a7, 0x2f787d5ed1baac3, 0x88ad3b9f0e2302ad, 0xdb0e576a0e0f41d6, 0xc2ce6fe9fd60ecd1, 0x1a6c591e3b8afaa5, 0x6870e01562c0a875, 0xa1956949f3a42c62, 0x5f14a9c72eba85f, 0x7749d8404fcc4c, 0x193ebadc3f3e5d6e, 0xdf63912633738f9e, 0xd7b783d8744a74ff, 0x2a0fd65fb10f0459, 0x12dea8f5e024ba9a, 0x5ea7412af242ec00, 0x655060f908300e06, 0xf03530558a97e7c0, 0xc0c1831b86449772, 0xbee16648ede0b098, 0x314f899acc523e21, 0x6c4551b46174733, 0x448b9c4c11051416, 0xc8322fb51e5ae42b, 0x82e4dd6f0c4ea583, 0x7c660954814e2e5, 0xd8f4fa1bd6c3749f, 0xf149cf553d2f3b3f, 0x1a5842fa4b39d4e7, 0xb3298d4af99b4177};
 const uint64_t ZHASH_WHITE = 0xe8554e0e45604657;
 const uint64_t ZHASH_BLACK = 0x4c4a333dfffc947d;
+""".strip()
+
+TIME = 100  # milliseconds per move
+
+# FENs to use for tournament
+FENS = []
+with open("data/FENs.txt", "r") as f:
+    for line in f:
+        fen = line.strip()
+        if fen:  # append twice for both colors
+            FENS.append(fen)
+            FENS.append(fen)
+
+best_consts = {
+    "PAWN_RANK_BONUS": 8,
+    "PAWN_VALUE": 100,
+    "KNIGHT_VALUE": 320,
+    "BISHOP_VALUE": 330,
+    "ROOK_VALUE": 500,
+    "QUEEN_VALUE": 900,
+    "KING_VALUE": 20000,
+    "SCORE_VICTIM_MULTIPLIER": 64,
+    "PROMOTION_MOVE_SCORE": 100,
+    "FULLMOVES_ENDGAME": 50,
+    "QUIES_DEPTH": 5,
+    "MAX_EXTENSION": 3,
+    "PS_BLACK_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, -50, -50, -50, -50, -50, -50, -50, -50, -10, -10, -20, -30, -30, -20, -10, -10, -5, -5, -10, -25, -25, -10, -5, -5, 0, 0, 0, -20, -20, 0, 0, 0, -5, 5, 10, 0, 0, 10, 5, -5, -5, -10, -10, 20, 20, -10, -10, -5, 0, 0, 0, 0, 0, 0, 0, 0],
+    "PS_WHITE_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, 5, 10, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 10, 25, 25, 10, 5, 5, 10, 10, 20, 30, 30, 20, 10, 10, 50, 50, 50, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0],
+    "PS_BLACK_KNIGHT": [50, 40, 30, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 40, 30, 0, -10, -15, -15, -10, 0, 30, 30, -5, -15, -20, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 30, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 40, 50, 40, 30, 30, 30, 30, 40, 50],
+    "PS_WHITE_KNIGHT": [-50, -40, -30, -30, -30, -30, -40, -50, -40, -20, 0, 5, 5, 0, -20, -40, -30, 5, 10, 15, 15, 10, 5, -30, -30, 0, 15, 20, 20, 15, 0, -30, -30, 5, 15, 20, 20, 15, 5, -30, -30, 0, 10, 15, 15, 10, 0, -30, -40, -20, 0, 0, 0, 0, -20, -40, -50, -40, -30, -30, -30, -30, -40, -50],
+    "PS_BLACK_BISHOP": [20, 10, 10, 10, 10, 10, 10, 20, 10, 0, 0, 0, 0, 0, 0, 10, 10, 0, -5, -10, -10, -5, 0, 10, 10, -5, -5, -10, -10, -5, -5, 10, 10, 0, -10, -10, -10, -10, 0, 10, 10, -10, -10, -10, -10, -10, -10, 10, 10, -5, 0, 0, 0, 0, -5, 10, 20, 10, 10, 10, 10, 10, 10, 20],
+    "PS_WHITE_BISHOP": [-20, -10, -10, -10, -10, -10, -10, -20, -10, 5, 0, 0, 0, 0, 5, -10, -10, 10, 10, 10, 10, 10, 10, -10, -10, 0, 10, 10, 10, 10, 0, -10, -10, 5, 5, 10, 10, 5, 5, -10, -10, 0, 5, 10, 10, 5, 0, -10, -10, 0, 0, 0, 0, 0, 0, -10, -20, -10, -10, -10, -10, -10, -10, -20],
+    "PS_BLACK_ROOK": [0, 0, 0, 0, 0, 0, 0, 0, -5, -10, -10, -10, -10, -10, -10, -5, 5, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, -5, -5, 0, 0, 0],
+    "PS_WHITE_ROOK": [0, 0, 0, 5, 5, 0, 0, 0, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, 5, 10, 10, 10, 10, 10, 10, 5, 0, 0, 0, 0, 0, 0, 0, 0],
+    "PS_BLACK_QUEEN": [20, 10, 10, 5, 5, 10, 10, 20, 10, 0, 0, 0, 0, 0, 0, 10, 10, 0, -5, -5, -5, -5, 0, 10, 5, 0, -5, -5, -5, -5, 0, 5, 0, 0, -5, -5, -5, -5, 0, 5, 10, -5, -5, -5, -5, -5, 0, 10, 10, 0, -5, 0, 0, 0, 0, 10, 20, 10, 10, 5, 5, 10, 10, 20],
+    "PS_WHITE_QUEEN": [-20, -10, -10, -5, -5, -10, -10, -20, -10, 0, 5, 0, 0, 0, 0, -10, -10, 5, 5, 5, 5, 5, 0, -10, 0, 0, 5, 5, 5, 5, 0, -5, -5, 0, 5, 5, 5, 5, 0, -5, -10, 0, 5, 5, 5, 5, 0, -10, -10, 0, 0, 0, 0, 0, 0, -10, -20, -10, -10, -5, -5, -10, -10, -20],
+    "PS_BLACK_KING": [30, 40, 40, 50, 50, 40, 40, 30, 30, 40, 40, 50, 50, 40, 40, 30, 30, 40, 40, 50, 50, 40, 40, 30, 30, 40, 40, 50, 50, 40, 40, 30, 20, 30, 30, 40, 40, 30, 30, 20, 10, 20, 20, 20, 20, 20, 20, 10, -20, -20, 0, 0, 0, 0, -20, -20, -20, -30, -10, 0, 0, -10, -30, -20],
+    "PS_WHITE_KING": [20, 30, 10, 0, 0, 10, 30, 20, 20, 20, 0, 0, 0, 0, 20, 20, -10, -20, -20, -20, -20, -20, -20, -10, -20, -30, -30, -40, -40, -30, -30, -20, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30],
+    "PS_BLACK_KING_ENDGAME": [50, 40, 30, 20, 20, 30, 40, 50, 30, 20, 10, 0, 0, 10, 20, 30, 30, 10, -20, -30, -30, -20, 10, 30, 30, 10, -30, -40, -40, -30, 10, 30, 30, 10, -30, -40, -40, -30, 10, 30, 30, 10, -20, -30, -30, -20, 10, 30, 30, 30, 0, 0, 0, 0, 30, 30, 50, 30, 30, 30, 30, 30, 30, 50],
+    "PS_WHITE_KING_ENDGAME": [-50, -30, -30, -30, -30, -30, -30, -50, -30, -30, 0, 0, 0, 0, -30, -30, -30, -10, 20, 30, 30, 20, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30, -10, 20, 30, 30, 20, -10, -30, -30, -20, -10, 0, 0, -10, -20, -30, -50, -40, -30, -20, -20, -30, -40, -50],
+}
+
+def make_const_file(consts: dict) -> str:
+    constant_params = ""
+    ps_values = ""
+    
+    for key, value in consts.items():
+        if isinstance(value, list):
+            array_values = ", ".join(str(v) for v in value)
+            ps_values += f"const int {key}[] = {{{array_values}}};\n"
+        else:
+            constant_params += f"#define {key} {value}\n"
+
+    text = "#include <inttypes.h>\n\n"
+    text += "// Constant parameters\n"
+    text += constant_params + "\n"
+    text += "// Piece square values\n"
+    text += ps_values + "\n"
+    text += ZOBRIST_CONSTANTS + "\n"
+    return text
+
+# Make sure consts.c is updated with the best constants
+with open("src/consts.c", "r") as f:
+    current_consts = f.read()
+    if current_consts != make_const_file(best_consts):
+        print("best constants are not updated in optimize_constants.py")
+        sys.exit(1)
+    
+
+# Make a backup copy of consts.c
+shutil.copyfile("src/consts.c", "src/consts_backup.c")
+
+
+def round_up(n: float) -> int:
+    if n > 0:
+        return max(1, round(n))
+    elif n < 0:
+        return min(-1, round(n))
+    else:
+        return 0
+
+
+def mutated_consts(consts: dict) -> dict:
+    new_consts = copy.deepcopy(consts)
+    for key in consts.keys():
+        if isinstance(consts[key], list):
+            for i in range(len(consts[key])):
+                if random.randint(1, 5) == 1:
+                    change_percent = random.uniform(-0.1, 0.1)
+                    change_amount = round_up(consts[key][i] * change_percent)
+                    new_consts[key][i] = consts[key][i] + change_amount
+                    
+        elif random.randint(1, 5) == 1:
+            change_percent = random.uniform(-0.1, 0.1)
+            change_amount = round_up(consts[key] * change_percent)
+            new_consts[key] = max(consts[key] + change_amount, 0)
+    
+    return new_consts
+
+
+def executable(name: str) -> str:
+    if os.name == "nt":
+        return f"{name}.exe"
+    else:
+        return f"./{name}"
+
+
+def what_draw(board: chess.Board) -> str:
+    if board.is_stalemate():
+        print("Draw by stalemate")
+    elif board.is_insufficient_material():
+        print("Draw by insufficient material")
+    elif board.is_seventyfive_moves():
+        print("Draw by 75-move rule")
+    elif board.is_fivefold_repetition():
+        print("Draw by fivefold repetition")
+    elif board.is_fifty_moves():
+        print("Draw by 50-move rule")
+    elif board.can_claim_threefold_repetition():
+        print("Draw by threefold repetition")
+    else:
+        print("Draw by agreement or unknown reason")
+
+
+def illegal_move(board: chess.Board, move_uci: str, result: dict):
+    print("Bot suggested an illegal move. Exiting.")
+    print(f"{result=}")
+    print(f"Board FEN:\n{board.fen()}")
+    print(f"Illegal move UCI: {move_uci}")
+    sys.exit(1)
+
+
+def play_game(fen: str, is_white: bool) -> dict:
+    results = {"score": 0, "time_old": 0, "time_new": 0, "avg_depth_new": 0, "avg_depth_old": 0}
+    board = chess.Board(fen)
+    number_of_moves = 0
+
+    while not board.is_game_over(claim_draw=True):
+        if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
+            result = sigma_zero.play(board, TIME)
+            results["time_new"] += result.get("time", 0)
+            results["avg_depth_new"] += result.get("depth", 0)
+        else:
+            result = sigma_zero.old_play(board, TIME)
+            results["time_old"] += result.get("time", 0)
+            results["avg_depth_old"] += result.get("depth", 0)
+
+        move_uci = result.get("move", "<unknown>")
+        try:
+            move = chess.Move.from_uci(move_uci)
+            if move in board.legal_moves:
+                board.push(move)
+                number_of_moves += 1
+            else:
+                illegal_move(board, move_uci, result)
+        except Exception:
+            illegal_move(board, move_uci, result)
+
+    if board.result(claim_draw=True) == "1-0":
+        results["score"] = 1 if is_white else -1
+    elif board.result(claim_draw=True) == "0-1":
+        results["score"] = -1 if is_white else 1
+    else:
+        what_draw(board)
+
+    results["end_fen"] = board.fen()
+    if number_of_moves > 0:
+        results["avg_depth_new"] /= number_of_moves / 2
+        results["avg_depth_old"] /= number_of_moves / 2
+
+    return results
+
+
+def tournament(exec1: str, exec2: str) -> int:
+    sigma_zero.EXE_FILE = exec1
+    sigma_zero.OLD_EXE_FILE = exec2
+    sigma_zero._COMPILED = {"make"}
+    
+    start = time.perf_counter()
+    results = {"wins": 0, "losses": 0, "draws": 0}
+    for i, fen in enumerate(FENS):
+        print(f"Game {i+1}/{len(FENS)}")
+        result = play_game(fen, is_white=(i % 2 == 0))
+        print("End FEN:", result.get("end_fen", "N/A"))
+        print(f"Time SigmaZero: {result['time_new']:.2f}s, Old: {result['time_old']:.2f}s")
+        print(f"Avg Depth SigmaZero: {result['avg_depth_new']:.2f}, Old: {result['avg_depth_old']:.2f}")
+        if result["score"] == 1:
+            results["wins"] += 1
+            print("Result: Win", end=" ")
+        elif result["score"] == -1:
+            results["losses"] += 1
+            print("Result: Loss", end=" ")
+        else:
+            results["draws"] += 1
+            print("Result: Draw", end=" ")
+        print(f"({results['wins']}W/{results['losses']}L/{results['draws']}D)\n")
+    print(f"Tournament completed in {time.perf_counter() - start:.2f} seconds.")
+    print("Tournament Results:")
+    print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}")
+    return results['wins'] - results['losses']
+
+
+def log(message: str):
+    with open("optimize_constants.log", "a") as log_file:
+        log_file.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
+    print(message)
+
+
+
+# Training loop:
+# 1. Take the dict of constants 'best_consts' and select 1 in 5 for mutation
+# 2. For each selected constant, randomly increase or decrease it by up to 10% (rounded to nearest non-zero integer)
+# 3. Make sigma-zero with best_consts (rename executable to sigma-zero-best)
+# 4. Make sigma-zero with mutated constants (rename executable to sigma-zero-mutated)
+# 5. Run 100 games between the two versions, alternating colors
+# 6. Give score to mutated version: # wins - # losses
+# 7. If score <= 0, discard mutated constants and go back to step 1
+# 8. Run 100 games between sigma-zero-mutated and V2.4
+# 9. If score <= best_score_against_V2_4, discard mutated constants and go back to step 1
+# 10. If score > best_score_against_V2_4, keep mutated constants as best_consts and go back to step 1
+best_score_against_V2_4 = 0  # initially zero
+def training_step():
+    global best_consts, best_score_against_V2_4
+    
+    # Step 1 and 2
+    mut_consts = mutated_consts(best_consts)
+    
+    # Step 3
+    with open("src/consts.c", "w") as f:
+        f.write(make_const_file(best_consts))
+    os.system("make")
+    shutil.move(executable("sigma-zero"), executable("sigma-zero-best"))
+    
+    # Step 4
+    with open("src/consts.c", "w") as f:
+        f.write(make_const_file(mut_consts))
+    os.system("make")
+    shutil.move(executable("sigma-zero"), executable("sigma-zero-mutated"))
+    
+    # Step 5 and 6
+    print("Playing tournament between best and mutated constants...")
+    score = tournament(executable("sigma-zero-mutated"), executable("sigma-zero-best"))
+
+    # Step 7
+    if score <= 0:
+        log("Mutated constants did not outperform best constants. Discarding mutations.")
+        return 0
+    
+    # Step 8
+    log("Mutated constants outperformed best constants. Now testing against V2.4...")
+    sigma_zero.make("V2.4")
+    score = tournament(executable("sigma-zero-mutated"), executable("old"))
+    
+    # Step 9
+    if score <= best_score_against_V2_4:
+        log("Mutated constants did not outperform V2.4. Discarding mutations.")
+        return 0
+    
+    # Step 10
+    log("Mutated constants outperformed V2.4! Updating best constants.")
+    best_consts = mut_consts
+    best_score_against_V2_4 = score
+    with open("src/consts_best.c", "w") as f:
+        f.write(make_const_file(best_consts))
+    return 1
+
+
+if __name__ == "__main__":
+    # Clear log file
+    with open("optimize_constants.log", "w") as log_file:
+        log_file.write("=== Optimize Constants Log ===\n")
+    
+    n_mutations = 0
+    n_steps = 0
+    while True:
+        n_steps += 1
+        log(f"=== Training Step {n_steps} ===")
+        log(f"{n_mutations} successful mutations so far.")
+        try:
+            n_mutations += training_step()
+        except KeyboardInterrupt:
+            log("Training interrupted.")
+            break
+        except Exception as e:
+            log(f"Error during training step: {e}")
+            break
+    
+    with open("src/consts.c", "w") as f:
+        f.write(make_const_file(best_consts))
+    print("Final best constants written to src/consts.c")
+    
+    # Cleanup
+    os.remove(executable("sigma-zero-best"))
+    os.remove(executable("sigma-zero-mutated"))
+    if os.path.exists("src/consts_best.c"):
+        os.remove("src/consts_best.c")

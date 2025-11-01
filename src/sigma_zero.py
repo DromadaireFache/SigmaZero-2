@@ -38,8 +38,9 @@ def make(version: str | None = None):
     _COMPILED.add(cmd)
 
 
-def command(cmd: str, JSON: bool = False, exe: str = EXE_FILE) -> str | Any:
+def command(cmd: str, JSON: bool = False, exe: str = None) -> str | Any:
     make()
+    exe = exe or EXE_FILE
     result = subprocess.run(rf"{exe} {cmd}", shell=True, capture_output=True, text=True)
     if JSON:
         try:

@@ -10,3 +10,6 @@ __pycache__/
 tournament.txt
 sigma-zero
 old
+consts_backup.c
+consts_best.c
+*.log
