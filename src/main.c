@@ -1777,16 +1777,22 @@ int compare_moves(const void* a, const void* b) {
     return mb->score - ma->score;
 }
 
-void insertion_sort_moves(Move* moves, size_t n_moves) {
-    for (int i = 1; i < n_moves; i++) {
-        Move key = moves[i];
-        int j = i - 1;
-        
-        while (j >= 0 && moves[j].score < key.score) {
-            moves[j + 1] = moves[j];
-            j--;
+// Only sort the first k moves
+void partial_sort_moves(Move* moves, size_t n_moves, size_t k) {
+    k = k > n_moves ? n_moves : k;
+
+    for (int i = 0; i < k; i++) {
+        int best_idx = i;
+        for (int j = i + 1; j < n_moves; j++) {
+            if (moves[j].score > moves[best_idx].score) {
+                best_idx = j;
+            }
         }
-        moves[j + 1] = key;
+        if (best_idx != i) {
+            Move tmp = moves[i];
+            moves[i] = moves[best_idx];
+            moves[best_idx] = tmp;
+        }
     }
 }
 
@@ -1801,7 +1807,7 @@ size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
 
     // C lib sort
     // qsort(moves, n_moves, sizeof(Move), compare_moves);
-    insertion_sort_moves(moves, n_moves);
+    partial_sort_moves(moves, n_moves, n_moves > 10 ? 10 : n_moves);
 
     return n_moves;
 }
@@ -2040,8 +2046,6 @@ bitboard_t Chess_king_perimiter(int pos) {
 int eval(Chess* chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
-    int white_pawns[8] = {0};
-    int black_pawns[8] = {0};
 
     for (int i = 0; i < 64; i++) {
         Piece piece = chess->board[i];
@@ -2049,7 +2053,7 @@ int eval(Chess* chess) {
 
         e += Piece_value_at(piece, i, fullmoves);
     }
-    
+
     return e;
 }
 
