@@ -122,7 +122,7 @@ def mutated_consts(consts: dict) -> dict:
                     change_amount = round_up(consts[key][i] * change_percent)
                     new_consts[key][i] = consts[key][i] + change_amount
                     
-        elif random.randint(1, 10) == 1:
+        elif random.randint(1, 5) == 1:
             change_percent = random.uniform(-0.1, 0.1)
             change_amount = round_up(consts[key] * change_percent)
             new_consts[key] = max(consts[key] + change_amount, 0)
@@ -166,6 +166,7 @@ def play_game(fen: str, is_white: bool) -> dict:
     results = {"score": 0, "time_old": 0, "time_new": 0, "avg_depth_new": 0, "avg_depth_old": 0}
     board = chess.Board(fen)
     number_of_moves = 0
+    print(sigma_zero.EXE_FILE, "v", sigma_zero.OLD_EXE_FILE, f"({best_score_against_V2_4})")
 
     while not board.is_game_over(claim_draw=True):
         if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
@@ -285,7 +286,7 @@ def training_step():
     
     # Step 9
     if score <= best_score_against_V2_4:
-        log("Mutated constants did not outperform V2.4. Discarding mutations.")
+        log("Mutated constants did not outperform best constants against V2.4. Discarding mutations.")
         return 0
     
     # Step 10
@@ -298,6 +299,12 @@ def training_step():
 
 
 if __name__ == "__main__":
+    # Calculate baseline score against V2.4
+    sigma_zero.make("V2.4")
+    os.system("make")
+    print("Calculating baseline score against V2.4...")
+    best_score_against_V2_4 = tournament(executable("sigma-zero"), executable("old"))
+    
     # Clear log file
     with open("optimize_constants.log", "w") as log_file:
         log_file.write("=== Optimize Constants Log ===\n")
