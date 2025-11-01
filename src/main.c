@@ -1777,22 +1777,21 @@ int compare_moves(const void* a, const void* b) {
     return mb->score - ma->score;
 }
 
-// Only sort the first k moves
-void partial_sort_moves(Move* moves, size_t n_moves, size_t k) {
-    k = k > n_moves ? n_moves : k;
-
-    for (int i = 0; i < k; i++) {
-        int best_idx = i;
-        for (int j = i + 1; j < n_moves; j++) {
-            if (moves[j].score > moves[best_idx].score) {
-                best_idx = j;
-            }
+// Find and swap the best move to the front
+static inline void select_best_move(Move* moves, size_t start, size_t n_moves) {
+    if (start >= n_moves) return;
+    
+    size_t best = start;
+    for (size_t i = start + 1; i < n_moves; i++) {
+        if (moves[i].score > moves[best].score) {
+            best = i;
         }
-        if (best_idx != i) {
-            Move tmp = moves[i];
-            moves[i] = moves[best_idx];
-            moves[best_idx] = tmp;
-        }
+    }
+    
+    if (best != start) {
+        Move tmp = moves[start];
+        moves[start] = moves[best];
+        moves[best] = tmp;
     }
 }
 
@@ -1807,7 +1806,6 @@ size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
 
     // C lib sort
     // qsort(moves, n_moves, sizeof(Move), compare_moves);
-    partial_sort_moves(moves, n_moves, n_moves > 10 ? 10 : n_moves);
 
     return n_moves;
 }
@@ -1938,7 +1936,7 @@ class {
 TTItem;
 
 // Will give ~100MB array
-#define TT_LENGTH (1 << 22)
+#define TT_LENGTH (1 << 22) // constant
 
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
@@ -2033,19 +2031,10 @@ int moves(char* fen, int depth) {
     return 0;
 }
 
-bitboard_t Chess_king_perimiter(int pos) {
-    int col = index_col(pos);
-    int row = index_row(pos);
-
-    bitboard_t mask = 0x0000001F1F1F1F1FULL;
-    mask <<= (col - 2);
-    mask <<= (row - 2) * 8;
-    return mask;
-}
-
 int eval(Chess* chess) {
     int e = 0;
-    uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves;
+    // constant number of full moves until endgame
+    uint8_t fullmoves = chess->fullmoves > 50 ? 50 : chess->fullmoves; 
 
     for (int i = 0; i < 64; i++) {
         Piece piece = chess->board[i];
@@ -2071,6 +2060,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     size_t n_moves = Chess_legal_moves_sorted(chess, moves, true);
 
     for (int i = 0; i < n_moves; i++) {
+        select_best_move(moves, i, n_moves);  // Find best remaining move
         Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
         Piece capture = Chess_make_move(chess, move);
@@ -2087,8 +2077,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     return best_score;
 }
 
-#define QUIES_DEPTH 5
-// bool is_endgame = false;
+#define QUIES_DEPTH 5 // constant
 
 int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last_capture,
             int extensions) {
@@ -2147,6 +2136,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int original_b = b;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
+        select_best_move(moves, i, n_moves);  // Find best remaining move
         Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
         Piece capture = Chess_make_move(chess, move);
