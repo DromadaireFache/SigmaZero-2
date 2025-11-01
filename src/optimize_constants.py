@@ -117,12 +117,12 @@ def mutated_consts(consts: dict) -> dict:
     for key in consts.keys():
         if isinstance(consts[key], list):
             for i in range(len(consts[key])):
-                if random.randint(1, 5) == 1:
+                if random.randint(1, 10) == 1:
                     change_percent = random.uniform(-0.1, 0.1)
                     change_amount = round_up(consts[key][i] * change_percent)
                     new_consts[key][i] = consts[key][i] + change_amount
                     
-        elif random.randint(1, 5) == 1:
+        elif random.randint(1, 10) == 1:
             change_percent = random.uniform(-0.1, 0.1)
             change_amount = round_up(consts[key] * change_percent)
             new_consts[key] = max(consts[key] + change_amount, 0)
@@ -250,7 +250,7 @@ def log(message: str):
 # 8. Run 100 games between sigma-zero-mutated and V2.4
 # 9. If score <= best_score_against_V2_4, discard mutated constants and go back to step 1
 # 10. If score > best_score_against_V2_4, keep mutated constants as best_consts and go back to step 1
-best_score_against_V2_4 = 0  # initially zero
+best_score_against_V2_4 = 25  # initially 25 wins over losses against V2.4
 def training_step():
     global best_consts, best_score_against_V2_4
     
