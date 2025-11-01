@@ -107,11 +107,11 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
             // give a bonus for higher rank in the endgame
             a = index_row(i);
             b = ((a - 1) * (int)fullmoves) / 8;
-            return 100 + PS_WHITE_PAWN[i] + b;
+            return 100 + PS_WHITE_PAWN[i] + b;  // constant
         case BLACK_PAWN:
             a = index_row(i);
             b = ((a - 6) * (int)fullmoves) / 8;
-            return -100 + PS_BLACK_PAWN[i] + b;
+            return -100 + PS_BLACK_PAWN[i] + b;  // constant
         case WHITE_KNIGHT:
             return 320 + PS_WHITE_KNIGHT[i];
         case BLACK_KNIGHT:
@@ -1737,12 +1737,12 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     return n_moves;
 }
 
-#define SCORE_VICTIM_MULTIPLIER 1
+#define SCORE_VICTIM_MULTIPLIER 64  // constant
 
 void Chess_score_move(Chess* chess, Move* move) {
     // Give very high scores to promotions
     if (move->promotion == PROMOTE_QUEEN) {
-        move->score = 100;
+        move->score = 100;  // constant
         return;
     }
 
@@ -1753,7 +1753,8 @@ void Chess_score_move(Chess* chess, Move* move) {
 
     // MVV - LVA
     if (victim != EMPTY) {
-        move->score += abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) - Piece_value(aggressor));
+        move->score +=
+            abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) / 64 - Piece_value(aggressor));
     } else {
         // Deduct points if attacked by enemy pawns
 #define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
@@ -1776,6 +1777,19 @@ int compare_moves(const void* a, const void* b) {
     return mb->score - ma->score;
 }
 
+void insertion_sort_moves(Move* moves, size_t n_moves) {
+    for (int i = 1; i < n_moves; i++) {
+        Move key = moves[i];
+        int j = i - 1;
+        
+        while (j >= 0 && moves[j].score < key.score) {
+            moves[j + 1] = moves[j];
+            j--;
+        }
+        moves[j + 1] = key;
+    }
+}
+
 size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
     size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
 
@@ -1786,7 +1800,8 @@ size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
     }
 
     // C lib sort
-    qsort(moves, n_moves, sizeof(Move), compare_moves);
+    // qsort(moves, n_moves, sizeof(Move), compare_moves);
+    insertion_sort_moves(moves, n_moves);
 
     return n_moves;
 }
@@ -2033,55 +2048,8 @@ int eval(Chess* chess) {
         if (piece == EMPTY) continue;
 
         e += Piece_value_at(piece, i, fullmoves);
-
-        switch (piece) {
-            case WHITE_PAWN:
-                white_pawns[index_col(i)]++;
-                break;
-            case BLACK_PAWN:
-                black_pawns[index_col(i)]++;
-                break;
-            default:
-                break;
-        }
     }
-
-    if (chess->fullmoves > 40 || chess->fullmoves < 10) return e;
-
-    int white_king_col = index_col(chess->king_white);
-    int black_king_col = index_col(chess->king_black);
-    for (int i = 0; i < 8; i++) {
-        // remove points for isolated pawns
-        if (i == 0) {
-            if (white_pawns[1] == 0) e -= 10 * white_pawns[0];
-            if (black_pawns[1] == 0) e += 10 * black_pawns[0];
-        } else if (i == 7) {
-            if (white_pawns[6] == 0) e -= 10 * white_pawns[7];
-            if (black_pawns[6] == 0) e += 10 * black_pawns[7];
-        } else {
-            if (white_pawns[i - 1] == 0 && white_pawns[i + 1] == 0) e -= 10 * white_pawns[i];
-            if (black_pawns[i - 1] == 0 && black_pawns[i + 1] == 0) e += 10 * black_pawns[i];
-        }
-
-        // pawn shield to protect the king
-        if (white_king_col - 1 <= i && i <= white_king_col + 1) {
-            if (white_pawns[i] == 0) {
-                e -= 25;
-                if (black_pawns[i] == 0) {
-                    e -= 15;
-                }
-            }
-        }
-        if (black_king_col - 1 <= i && i <= black_king_col + 1) {
-            if (black_pawns[i] == 0) {
-                e += 25;
-                if (white_pawns[i] == 0) {
-                    e += 15;
-                }
-            }
-        }
-    }
-
+    
     return e;
 }
 
