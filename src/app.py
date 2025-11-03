@@ -4,6 +4,7 @@ import sys
 import webview
 import chess
 import sigma_zero
+import nnue
 
 
 # Collect old bot versions from src/versions
@@ -31,6 +32,7 @@ class PreviousState:
 
 move_index = 0
 previous_states = [PreviousState.current()]
+evaluator = nnue.load_model("nnue_evaluator.pth")
 
 
 def capture_diff() -> int:
@@ -117,7 +119,7 @@ class Api:
         from_square = chess.square(from_col, 7 - from_row)
         to_square = chess.square(to_col, 7 - to_row)
         move = chess.Move(from_square, to_square)
-
+        
         # auto-promote to queen for simplicity
         if board.piece_at(from_square) and board.piece_at(from_square).piece_type == chess.PAWN:
             if (board.piece_at(from_square).color == chess.WHITE and to_row == 0) or (
@@ -139,6 +141,7 @@ class Api:
             board.push(move)
             previous_states = previous_states[: move_index + 1] + [PreviousState.current()]
             move_index += 1
+            print("NNUE Eval:", evaluator(nnue.fen_to_tensor(board.fen()).unsqueeze(0)).item())
             return True
         return False
 

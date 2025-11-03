@@ -31,13 +31,16 @@ def fen_to_tensor(fen: str) -> torch.Tensor:
 class NNUEEvaluator(nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc1 = nn.Linear(12 * 8 * 8, 64)
-        self.fc2 = nn.Linear(64, 1)
+        # Much smaller first layer, but efficiently updated incrementally
+        self.fc1 = nn.Linear(768, 32)  # Only 32 neurons instead of 256
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, 1)
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x.view(x.size(0), -1)  # Flatten the input
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
         x = torch.relu(self.fc1(x))
-        x = self.fc2(x)
+        x = torch.relu(self.fc2(x))
+        x = torch.tanh(self.fc3(x)) * 10
         return x
     
 
@@ -63,6 +66,9 @@ class ChessDataset(Dataset):
                         continue
                     try:
                         score_val = float(score) / 100.0
+                        # Skip extreme evaluations during training
+                        if abs(score_val) > 15:
+                            continue
                         # Convert to tensor immediately during loading
                         tensor = fen_to_tensor(fen)
                         self.data.append((tensor, score_val))
@@ -129,6 +135,14 @@ def train_loop(num_epochs: int, n_positions: int = None):
         
         # Save the trained model (every epoch in case it crashes)
         torch.save(evaluator.state_dict(), "nnue_evaluator.pth")
-        
 
-train_loop(num_epochs=5, n_positions=10000)
+
+def load_model(model_path: str) -> NNUEEvaluator:
+    evaluator = NNUEEvaluator()
+    evaluator.load_state_dict(torch.load(model_path))
+    evaluator.eval()
+    return evaluator
+
+
+if __name__ == "__main__":
+    train_loop(num_epochs=5, n_positions=10000)
