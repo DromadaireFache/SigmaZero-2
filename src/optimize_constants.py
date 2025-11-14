@@ -204,7 +204,7 @@ def play_game(fen: str, is_white: bool) -> dict:
     return results
 
 
-def tournament(exec1: str, exec2: str) -> int:
+def tournament(exec1: str, exec2: str, required_score: int) -> int:
     sigma_zero.EXE_FILE = exec1
     sigma_zero.OLD_EXE_FILE = exec2
     sigma_zero._COMPILED = {"make"}
@@ -227,10 +227,17 @@ def tournament(exec1: str, exec2: str) -> int:
             results["draws"] += 1
             print("Result: Draw", end=" ")
         print(f"({results['wins']}W/{results['losses']}L/{results['draws']}D)\n")
+
+        best_possible_score = 100 - i + results['wins'] - results['losses']
+        if best_possible_score <= required_score:
+            print("Stopping tournament, impossible to achieve required score at this point.")
+            return False, 0
+
     print(f"Tournament completed in {time.perf_counter() - start:.2f} seconds.")
     print("Tournament Results:")
     print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}")
-    return results['wins'] - results['losses']
+    score = results['wins'] - results['losses']
+    return score > required_score, score
 
 
 def log(message: str):
@@ -251,7 +258,7 @@ def log(message: str):
 # 8. Run 100 games between sigma-zero-mutated and V2.4
 # 9. If score <= best_score_against_V2_4, discard mutated constants and go back to step 1
 # 10. If score > best_score_against_V2_4, keep mutated constants as best_consts and go back to step 1
-best_score_against_V2_4 = 25  # initially 25 wins over losses against V2.4
+best_score_against_V2_4 = 0
 def training_step():
     global best_consts, best_score_against_V2_4
     
@@ -272,20 +279,20 @@ def training_step():
     
     # Step 5 and 6
     print("Playing tournament between best and mutated constants...")
-    score = tournament(executable("sigma-zero-mutated"), executable("sigma-zero-best"))
+    won, score = tournament(executable("sigma-zero-mutated"), executable("sigma-zero-best"), 0)
 
     # Step 7
-    if score <= 0:
+    if not won:
         log("Mutated constants did not outperform best constants. Discarding mutations.")
         return 0
     
     # Step 8
     log("Mutated constants outperformed best constants. Now testing against V2.4...")
     sigma_zero.make("V2.4")
-    score = tournament(executable("sigma-zero-mutated"), executable("old"))
+    won, score = tournament(executable("sigma-zero-mutated"), executable("old"), best_score_against_V2_4)
     
     # Step 9
-    if score <= best_score_against_V2_4:
+    if not won:
         log("Mutated constants did not outperform best constants against V2.4. Discarding mutations.")
         return 0
     
@@ -303,7 +310,7 @@ if __name__ == "__main__":
     sigma_zero.make("V2.4")
     os.system("make")
     print("Calculating baseline score against V2.4...")
-    best_score_against_V2_4 = tournament(executable("sigma-zero"), executable("old"))
+    won, best_score_against_V2_4 = tournament(executable("sigma-zero"), executable("old"), 0)
     
     # Clear log file
     with open("optimize_constants.log", "w") as log_file:

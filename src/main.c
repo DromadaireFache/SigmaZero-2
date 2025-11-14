@@ -380,7 +380,7 @@ class {
     int n_checks;
     // n_checks=1: tells pieces where to move to protect the king
     bitboard_t block_attack_map;
-    // xor this with the location of a pinned to check if it's pinned
+    // xor this with the location of a piece to check if it's pinned
     bitboard_t pinned_piece_map;
     // once you know a piece is pinned, loop through to find its legal moves map
     struct ValidMap {
@@ -2011,6 +2011,42 @@ int moves(char* fen, int depth) {
     return 0;
 }
 
+int king_safety(Chess* chess, int king_i, bool white, uint8_t fullmoves) {
+    static const int pawn_shield_bonus = 12;
+    static const int open_file_penalty = 18;
+    static const int attacked_ring_penalty = 8;
+
+    int safety = 0;
+    int dir = white ? 1 : -1;
+    Position king = Position_from_index(king_i);
+
+    // pawn shield (three squares in front)
+    for (int dc = -1; dc <= 1; ++dc) {
+        int col = king.col + dc;
+        int row = king.row + dir;
+        if (col < 0 || col > 7 || row < 0 || row > 7) continue;
+        int idx = row * 8 + col;
+        Piece p = chess->board[idx];
+        if (white && p == WHITE_PAWN) safety += pawn_shield_bonus;
+        else if (!white && p == BLACK_PAWN) safety += pawn_shield_bonus;
+        else if (p == EMPTY) safety -= open_file_penalty;
+    }
+
+    // enemy attacks on king ring
+    bitboard_t attacks = chess->enemy_attack_map.block_attack_map;
+    bitboard_t ring = 0;
+    for (int dr = -1; dr <= 1; ++dr)
+        for (int dc = -1; dc <= 1; ++dc) {
+            if (!dr && !dc) continue;
+            int r = king.row + dr, c = king.col + dc;
+            if (r < 0 || r > 7 || c < 0 || c > 7) continue;
+            ring |= bitboard_from_index(r * 8 + c);
+        }
+    safety -= attacked_ring_penalty * __builtin_popcountll(attacks & ring);
+
+    return safety;
+}
+
 int eval(Chess* chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > FULLMOVES_ENDGAME ? FULLMOVES_ENDGAME : chess->fullmoves;
@@ -2022,6 +2058,8 @@ int eval(Chess* chess) {
         e += Piece_value_at(piece, i, fullmoves);
     }
 
+    e += king_safety(chess, chess->king_white, true, fullmoves);
+    e -= king_safety(chess, chess->king_black, false, fullmoves);
     return e;
 }
 
