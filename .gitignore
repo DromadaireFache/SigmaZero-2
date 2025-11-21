@@ -14,3 +14,4 @@ consts_backup.c
 consts_best.c
 *.log
 chessData.csv
+cachegrind.*

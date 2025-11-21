@@ -2011,85 +2011,6 @@ int moves(char* fen, int depth) {
     return 0;
 }
 
-static inline Piece Chess_piece_at(const Chess* chess, int row, int col) {
-    if (row < 0 || row >= 8 || col < 0 || col >= 8) return EMPTY;
-    return chess->board[row * 8 + col];
-}
-
-int king_safety(Chess* chess, int king_i, bool white) {
-    static const int pawn_shield_bonus = 12;
-    static const int missing_shield_penalty = 8;
-    static const int enemy_front_penalty = 12;
-    static const int file_pressure_penalty = 15;
-    static const int open_file_penalty = 6;
-
-    int score = 0;
-    int row = index_row(king_i);
-    int col = index_col(king_i);
-    int forward = white ? 1 : -1;
-
-    int front_row = row + forward;
-    if (front_row >= 0 && front_row < 8) {
-        for (int dc = -1; dc <= 1; ++dc) {
-            int c = col + dc;
-            Piece p = Chess_piece_at(chess, front_row, c);
-            if (white) {
-                if (p == WHITE_PAWN)
-                    score += pawn_shield_bonus;
-                else if (p == EMPTY)
-                    score -= missing_shield_penalty;
-                else if (Piece_is_black(p))
-                    score -= enemy_front_penalty;
-            } else {
-                if (p == BLACK_PAWN)
-                    score += pawn_shield_bonus;
-                else if (p == EMPTY)
-                    score -= missing_shield_penalty;
-                else if (Piece_is_white(p))
-                    score -= enemy_front_penalty;
-            }
-        }
-    }
-
-    int second_row = row + 2 * forward;
-    if (second_row >= 0 && second_row < 8) {
-        Piece p = Chess_piece_at(chess, second_row, col);
-        if (white) {
-            if (p == WHITE_PAWN)
-                score += pawn_shield_bonus / 2;
-            else if (p == EMPTY)
-                score -= open_file_penalty;
-        } else {
-            if (p == BLACK_PAWN)
-                score += pawn_shield_bonus / 2;
-            else if (p == EMPTY)
-                score -= open_file_penalty;
-        }
-    }
-
-    for (int dc = -1; dc <= 1; ++dc) {
-        int c = col + dc;
-        int r = row + forward;
-        bool friendly_block = false;
-        while (r >= 0 && r < 8) {
-            Piece p = Chess_piece_at(chess, r, c);
-            if (p != EMPTY) {
-                if (white ? Piece_is_white(p) : Piece_is_black(p)) {
-                    friendly_block = true;
-                } else if ((white && (p == BLACK_ROOK || p == BLACK_QUEEN)) ||
-                           (!white && (p == WHITE_ROOK || p == WHITE_QUEEN))) {
-                    score -= file_pressure_penalty;
-                }
-                break;
-            }
-            r += forward;
-        }
-        if (!friendly_block && dc == 0) score -= open_file_penalty;
-    }
-
-    return score;
-}
-
 int eval(Chess* chess) {
     int e = 0;
     uint8_t fullmoves = chess->fullmoves > FULLMOVES_ENDGAME ? FULLMOVES_ENDGAME : chess->fullmoves;
@@ -2101,8 +2022,6 @@ int eval(Chess* chess) {
         e += Piece_value_at(piece, i, fullmoves);
     }
 
-    e += king_safety(chess, chess->king_white, true);
-    e -= king_safety(chess, chess->king_black, false);
     return e;
 }
 
