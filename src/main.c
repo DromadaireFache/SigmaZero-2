@@ -400,6 +400,7 @@ class {
     uint8_t king_white;     // Position of white king
     uint8_t king_black;     // Position of black king
     ZHashStack zhstack;     // Stack to store zobrist hash of previous positions
+    uint64_t zhash;         // Current zobrist hash of the position
     EnemyAttackMap enemy_attack_map;
 }
 Chess;
@@ -730,6 +731,15 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     Piece moving_piece = chess->board[move->from];
     Piece target_piece = chess->board[move->to];
 
+    // Remove piece from source square
+    chess->zhash ^= Piece_zhash_at(moving_piece, move->from);
+
+    // Remove captured piece (if any)
+    chess->zhash ^= Piece_zhash_at(target_piece, move->to);
+
+    // Update gamestate hash
+    chess->zhash ^= ZHASH_STATE[chess->gamestate];
+
     // Update halfmove clock
     // Reset if a pawn moved or a capture was made
     if (!Piece_is_pawn(moving_piece) && target_piece == EMPTY) {
@@ -794,28 +804,38 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         // White kingside
         chess->board[5] = WHITE_ROOK;
         chess->board[7] = EMPTY;
+        chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 7);
+        chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 5);
     } else if (moving_piece == WHITE_KING && move->from == 4 && move->to == 2) {
         // White queenside
         chess->board[3] = WHITE_ROOK;
         chess->board[0] = EMPTY;
+        chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 0);
+        chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 3);
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 62) {
         // Black kingside
         chess->board[61] = BLACK_ROOK;
         chess->board[63] = EMPTY;
+        chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 63);
+        chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 61);
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 58) {
         // Black queenside
         chess->board[59] = BLACK_ROOK;
         chess->board[56] = EMPTY;
+        chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 56);
+        chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 59);
     }
 
     // Handle en passant capture
     if (moving_piece == WHITE_PAWN && index_col(move->from) != index_col(move->to) &&
         target_piece == EMPTY) {
         // White pawn capturing en passant
+        chess->zhash ^= Piece_zhash_at(BLACK_PAWN, move->to - 8);
         chess->board[move->to - 8] = EMPTY;
     } else if (moving_piece == BLACK_PAWN && index_col(move->from) != index_col(move->to) &&
                target_piece == EMPTY) {
         // Black pawn capturing en passant
+        chess->zhash ^= Piece_zhash_at(WHITE_PAWN, move->to + 8);
         chess->board[move->to + 8] = EMPTY;
     }
 
@@ -859,12 +879,24 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     }
 
     // Switch turn
+    chess->zhash ^= ZHASH_WHITE ^ ZHASH_BLACK;
     chess->turn = !chess->turn;
 
     chess->board[move->to] = moving_piece;
     chess->board[move->from] = EMPTY;
-    uint64_t hash = Chess_zhash(chess);
-    ZHashStack_push(&chess->zhstack, hash);
+
+    // Update gamestate in hash
+    chess->zhash ^= ZHASH_STATE[chess->gamestate];
+
+    // Add piece to destination square
+    chess->zhash ^= Piece_zhash_at(moving_piece, move->to);
+
+    // uint64_t hash = Chess_zhash(chess);
+    ZHashStack_push(&chess->zhstack, chess->zhash);
+    // if (chess->zhash != Chess_zhash(chess)) {
+    //     printf("Different zhash! %" PRIx64 " %" PRIx64 "\n", chess->zhash, Chess_zhash(chess));
+    //     exit(1);
+    // }
     return target_piece;
 }
 
@@ -1101,6 +1133,7 @@ Chess* Chess_from_fen(char* fen_arg) {
     }
     board->fullmoves = (uint8_t)fullmoves;
     Chess_find_kings(board);
+    board->zhash = Chess_zhash(board);
     return board;
 }
 
@@ -1607,12 +1640,14 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     move->to = from + (offset);                   \
     move->promotion = NO_PROMOTION;               \
     gamestate_t gamestate = chess->gamestate;     \
+    uint64_t hash = chess->zhash;                 \
     Piece capture = Chess_make_move(chess, move); \
     chess->turn = !chess->turn;                   \
     bool in_check = Chess_friendly_check(chess);  \
     chess->turn = !chess->turn;                   \
     Chess_unmake_move(chess, move, capture);      \
     chess->gamestate = gamestate;                 \
+    chess->zhash = hash;                          \
     if (!in_check) {                              \
         move++;                                   \
         n_moves++;                                \
@@ -1775,6 +1810,25 @@ int compare_moves(const void* a, const void* b) {
     return mb->score - ma->score;
 }
 
+// Partial sort - only find N best moves
+void partial_sort_moves(Move* moves, size_t n_moves, size_t n_best) {
+    if (n_best > n_moves) n_best = n_moves;
+
+    for (int i = 0; i < n_best; i++) {
+        int best_idx = i;
+        for (int j = i + 1; j < n_moves; j++) {
+            if (moves[j].score > moves[best_idx].score) {
+                best_idx = j;
+            }
+        }
+        if (best_idx != i) {
+            Move temp = moves[i];
+            moves[i] = moves[best_idx];
+            moves[best_idx] = temp;
+        }
+    }
+}
+
 size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
     size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
 
@@ -1785,7 +1839,8 @@ size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
     }
 
     // C lib sort
-    qsort(moves, n_moves, sizeof(Move), compare_moves);
+    // qsort(moves, n_moves, sizeof(Move), compare_moves);
+    partial_sort_moves(moves, n_moves, 5);
 
     return n_moves;
 }
@@ -1813,10 +1868,12 @@ size_t Chess_count_moves(Chess* chess, int depth) {
     size_t nodes = 0;
     for (int i = 0; i < n_moves; i++) {
         gamestate_t gamestate = chess->gamestate;
+        uint64_t hash = chess->zhash;
         Piece capture = Chess_make_move(chess, &moves[i]);
         nodes += Chess_count_moves(chess, depth - 1);
         Chess_unmake_move(chess, &moves[i], capture);
         chess->gamestate = gamestate;
+        chess->zhash = hash;
     }
 
     return nodes;
@@ -1933,7 +1990,7 @@ void TT_init() {
     }
 
     // Initialize your TT array if needed
-    memset(tt, 0, sizeof(tt));
+    // memset(tt, 0, sizeof(tt));
 }
 
 // Get the appropriate lock for a hash
@@ -2041,12 +2098,14 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
+        uint64_t hash = chess->zhash;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax_captures_only(chess, endtime, depth - 1, -b, -a);
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
+        chess->zhash = hash;
 
         if (score >= b) return score;
         if (score > best_score) best_score = score;
@@ -2114,12 +2173,14 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
+        uint64_t hash = chess->zhash;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
+        chess->zhash = hash;
 
         if (score > best_score) {
             best_score = score;
@@ -2348,13 +2409,18 @@ void help(void) {
 }
 
 int test() {
-    Chess* chess = Chess_from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    Chess* chess = Chess_from_fen("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
     if (!chess) return 1;
 
-    uint64_t hash = Chess_zhash(chess);
-    char s[100];
-    sprintf(s, "%" PRIx64, hash);
-    printf("%s\n", s);
+    Move move = (Move){.from=36, .to=43};
+    Piece piece = Chess_make_move(chess, &move);
+    printf("sp=%d\n", chess->zhstack.sp);
+    printf("%" PRIx64 " %" PRIx64 "\n", chess->zhash, Chess_zhash(chess));
+    printf("%" PRIx64 "\n", ZHashStack_peek(&chess->zhstack));
+
+    Chess_unmake_move(chess, &move, piece);
+    printf("sp=%d\n", chess->zhstack.sp);
+    printf("%" PRIx64 " %" PRIx64 "\n", chess->zhash, Chess_zhash(chess));
 
     return 0;
 }
