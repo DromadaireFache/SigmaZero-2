@@ -1,4 +1,5 @@
 import copy
+import math
 import os
 from pprint import pprint
 import random
@@ -114,15 +115,15 @@ def round_up(n: float) -> int:
 
 def mutated_consts(consts: dict) -> dict:
     new_consts = copy.deepcopy(consts)
-    for key in consts.keys():
+    for key in constants_to_optimize:
         if isinstance(consts[key], list):
             for i in range(len(consts[key])):
-                if random.randint(1, 10) == 1:
+                if random.randint(1, math.floor(len(constants_to_optimize) / 3)) == 1:
                     change_percent = random.uniform(-0.1, 0.1)
                     change_amount = round_up(consts[key][i] * change_percent)
                     new_consts[key][i] = consts[key][i] + change_amount
                     
-        elif random.randint(1, 5) == 1:
+        elif random.randint(1, math.floor(len(constants_to_optimize) / 5)) == 1:
             change_percent = random.uniform(-0.1, 0.1)
             change_amount = round_up(consts[key] * change_percent)
             new_consts[key] = max(consts[key] + change_amount, 0)
@@ -306,6 +307,12 @@ def training_step():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        constants_to_optimize = list(best_consts.keys())
+    else:
+        constants_to_optimize = [key for key in sys.argv[1:] if key in best_consts]
+        print("Optimizing only the following constants:", ", ".join(constants_to_optimize))
+    
     # Calculate baseline score against V2.4
     sigma_zero.make("V2.4")
     os.system("make")
