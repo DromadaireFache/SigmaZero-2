@@ -118,12 +118,12 @@ def mutated_consts(consts: dict) -> dict:
     for key in constants_to_optimize:
         if isinstance(consts[key], list):
             for i in range(len(consts[key])):
-                if random.randint(1, math.floor(len(constants_to_optimize) / 3)) == 1:
+                if random.randint(1, math.ceil(len(constants_to_optimize) / 3)) == 1:
                     change_percent = random.uniform(-0.1, 0.1)
                     change_amount = round_up(consts[key][i] * change_percent)
                     new_consts[key][i] = consts[key][i] + change_amount
                     
-        elif random.randint(1, math.floor(len(constants_to_optimize) / 5)) == 1:
+        elif random.randint(1, math.ceil(len(constants_to_optimize) / 5)) == 1:
             change_percent = random.uniform(-0.1, 0.1)
             change_amount = round_up(consts[key] * change_percent)
             new_consts[key] = max(consts[key] + change_amount, 0)
