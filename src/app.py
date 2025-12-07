@@ -9,7 +9,7 @@ import nnue
 
 # Collect old bot versions from src/versions
 VERSIONS_DIR = os.path.join(os.path.dirname(__file__), "versions")
-bot_versions = [f[:-2] for f in os.listdir(VERSIONS_DIR)[::-1] if f.endswith(".c")]
+bot_versions = [f[:-2] for f in os.listdir(VERSIONS_DIR)[::-1] if f.endswith(".c") and "const" not in f]
 
 
 board = chess.Board()
@@ -182,6 +182,8 @@ class Api:
     def bot_move(self, millis: int, version: str, tries: int = 0) -> bool:
         if version.lower() == "latest":
             result = sigma_zero.play(board, millis)
+        elif version.lower() == "aggressive":
+            result = sigma_zero.fancy(board, millis)
         else:
             sigma_zero.make(version)
             result = sigma_zero.old_play(board, millis)

@@ -84,6 +84,15 @@ def play(board: chess.Board, millis: int) -> dict:
     return dict(command(f'play "{board.fen()}" "{millis}"', JSON=True))
 
 
+def fancy(board: chess.Board, millis: int) -> dict:
+    history_str = ",".join(get_history_stack(board))
+    if history_str:
+        result = dict(command(f'fancy "{board.fen()}" "{millis}" "{history_str}"', JSON=True))
+        if result.get("error") is None:
+            return result
+    return dict(command(f'fancy "{board.fen()}" "{millis}"', JSON=True))
+
+
 def old_play(board: chess.Board, millis: int) -> dict:
     history_str = ",".join(get_history_stack(board))
     if history_str:

@@ -338,6 +338,11 @@ char* Move_string(Move* move) {
 
 void Move_print(Move* move) { printf("%s\n", Move_string(move)); }
 
+bool Move_equals(Move* move1, Move* move2) {
+    return move1->from == move2->from && move1->to == move2->to &&
+           move1->promotion == move2->promotion;
+}
+
 #define TURN_BLACK true
 #define TURN_WHITE false
 typedef bool turn_t;
@@ -2303,7 +2308,7 @@ bool openings_db(Chess* chess) {
 
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
-int play(char* fen, int millis, char* game_history) {
+int play(char* fen, int millis, char* game_history, bool fancy) {
     ZHashStack zhstack = {0};
     if (game_history != NULL) {
         ZHashStack_game_history(&zhstack, game_history);
@@ -2322,6 +2327,8 @@ int play(char* fen, int millis, char* game_history) {
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
+    Move moves_at_depth2[MAX_LEGAL_MOVES];
+    int scores_at_depth2[MAX_LEGAL_MOVES];
     size_t n_moves = Chess_legal_moves_sorted(chess, moves, false);
     if (n_moves < 1) return 1;
 
@@ -2356,11 +2363,38 @@ int play(char* fen, int millis, char* game_history) {
             pthread_join(threads[i], NULL);
         }
 
+        if (fancy && depth == 2) {
+            memcpy(scores_at_depth2, scores, sizeof(scores));
+            memcpy(moves_at_depth2, moves, sizeof(moves));
+        }
+
         // If we finished this depth, update best move
         if (TIME_NOW() < endtime) {
             bubble_sort(moves, scores, n_moves);
             best_score = scores[0];
             best_move = &moves[0];
+
+            // Give more points to a move if there is a large difference with depth 2 score
+            if (fancy && depth > 2) {
+                for (int i = 0; i < n_moves / 2; i++) {
+                    if (scores[i] <= 0 || scores[i] > 500) continue;
+                    int score_depth2 = scores[i];
+
+                    for (int j = 0; j < n_moves; j++) {
+                        if (Move_equals(&moves[i], &moves_at_depth2[j])) {
+                            score_depth2 = scores_at_depth2[j];
+                            break;
+                        }
+                    }
+
+                    int improvement = scores[i] - score_depth2;
+                    scores[i] += improvement / 2;
+                }
+
+                bubble_sort(moves, scores, n_moves);
+                best_move = &moves[0];
+            }
+
             depth++;
         }
     }
@@ -2412,7 +2446,7 @@ int test() {
     Chess* chess = Chess_from_fen("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
     if (!chess) return 1;
 
-    Move move = (Move){.from=36, .to=43};
+    Move move = (Move){.from = 36, .to = 43};
     Piece piece = Chess_make_move(chess, &move);
     printf("sp=%d\n", chess->zhstack.sp);
     printf("%" PRIx64 " %" PRIx64 "\n", chess->zhash, Chess_zhash(chess));
@@ -2438,9 +2472,16 @@ int main(int argc, char** argv) {
     } else if ((argc == 4 || argc == 5) && strcmp(argv[1], "play") == 0) {
         int millis = atoi(argv[3]);
         if (argc == 4) {
-            return play(argv[2], millis, NULL);
+            return play(argv[2], millis, NULL, false);
         } else {
-            return play(argv[2], millis, argv[4]);
+            return play(argv[2], millis, argv[4], false);
+        }
+    } else if ((argc == 4 || argc == 5) && strcmp(argv[1], "fancy") == 0) {
+        int millis = atoi(argv[3]);
+        if (argc == 4) {
+            return play(argv[2], millis, NULL, true);
+        } else {
+            return play(argv[2], millis, argv[4], true);
         }
     } else if (argc == 4 && strcmp(argv[1], "moves") == 0) {
         int depth = atoi(argv[3]);
