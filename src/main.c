@@ -143,6 +143,44 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
     }
 }
 
+int Piece_king_proximity(Piece piece, int i, int white_king, int black_king) {
+#define ROW_COL_VALUES(color_king)                       \
+    x = abs(index_row(i) - index_row(color_king));   \
+    tmp = abs(index_col(i) - index_col(color_king)); \
+    y = tmp < x ? tmp : x;                           \
+    x = tmp > x ? tmp : x;
+    int x, tmp, y;
+
+    switch (piece) {
+        // case WHITE_KNIGHT: // TODO
+        //     ROW_COL_VALUES(black_king);
+        //     return 0;
+        // case BLACK_KNIGHT:
+        //     ROW_COL_VALUES(white_king);
+        //     return 0;
+        case WHITE_BISHOP:
+            ROW_COL_VALUES(black_king);
+            return BISHOP_KING_PROX * 2 * y / ((x + y) * (x + y));
+        case BLACK_BISHOP:
+            ROW_COL_VALUES(white_king);
+            return -BISHOP_KING_PROX * 2 * y / ((x + y) * (x + y));
+        case WHITE_ROOK:
+            ROW_COL_VALUES(black_king);
+            return ROOK_KING_PROX * (x - y) / ((x + y) * (x + y));
+        case BLACK_ROOK:
+            ROW_COL_VALUES(white_king);
+            return -ROOK_KING_PROX * (x - y) / ((x + y) * (x + y));
+        case WHITE_QUEEN:
+            ROW_COL_VALUES(black_king);
+            return QUEEN_KING_PROX / (x + y);
+        case BLACK_KING:
+            ROW_COL_VALUES(white_king);
+            return -QUEEN_KING_PROX / (x + y);
+        default:
+            return 0;
+    }
+}
+
 uint64_t Piece_zhash_at(Piece piece, int i) {
     switch (piece) {
         case WHITE_PAWN:
@@ -2082,6 +2120,7 @@ int eval(Chess* chess) {
         if (piece == EMPTY) continue;
 
         e += Piece_value_at(piece, i, fullmoves);
+        e += Piece_king_proximity(piece, i, chess->king_white, chess->king_black);
     }
 
     return e;

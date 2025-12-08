@@ -141,7 +141,7 @@ class Api:
             board.push(move)
             previous_states = previous_states[: move_index + 1] + [PreviousState.current()]
             move_index += 1
-            print("NNUE Eval:", evaluator(nnue.fen_to_tensor(board.fen()).unsqueeze(0)).item())
+            # print("NNUE Eval:", evaluator(nnue.fen_to_tensor(board.fen()).unsqueeze(0)).item())
             return True
         return False
 

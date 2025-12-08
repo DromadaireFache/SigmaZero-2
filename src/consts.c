@@ -1,18 +1,21 @@
 #include <inttypes.h>
 
 // Constant parameters
-#define PAWN_RANK_BONUS 8
+#define PAWN_RANK_BONUS 5
 #define PAWN_VALUE 100
 #define KNIGHT_VALUE 320
 #define BISHOP_VALUE 330
 #define ROOK_VALUE 500
 #define QUEEN_VALUE 900
 #define KING_VALUE 20000
-#define SCORE_VICTIM_MULTIPLIER 64
+#define SCORE_VICTIM_MULTIPLIER 70
 #define PROMOTION_MOVE_SCORE 100
-#define FULLMOVES_ENDGAME 50
-#define QUIES_DEPTH 5
-#define MAX_EXTENSION 3
+#define FULLMOVES_ENDGAME 55
+#define QUIES_DEPTH 7
+#define MAX_EXTENSION 2
+#define BISHOP_KING_PROX 100
+#define ROOK_KING_PROX 100
+#define QUEEN_KING_PROX 100
 
 // Piece square values
 const int PS_BLACK_PAWN[] = {0, 0, 0, 0, 0, 0, 0, 0, -50, -50, -50, -50, -50, -50, -50, -50, -10, -10, -20, -30, -30, -20, -10, -10, -5, -5, -10, -25, -25, -10, -5, -5, 0, 0, 0, -20, -20, 0, 0, 0, -5, 5, 10, 0, 0, 10, 5, -5, -5, -10, -10, 20, 20, -10, -10, -5, 0, 0, 0, 0, 0, 0, 0, 0};
