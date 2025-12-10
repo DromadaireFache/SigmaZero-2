@@ -2120,7 +2120,7 @@ int eval(Chess* chess) {
         if (piece == EMPTY) continue;
 
         e += Piece_value_at(piece, i, fullmoves);
-        e += Piece_king_proximity(piece, i, chess->king_white, chess->king_black);
+        // e += Piece_king_proximity(piece, i, chess->king_white, chess->king_black);
     }
 
     return e;

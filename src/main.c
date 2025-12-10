@@ -100,18 +100,12 @@ int Piece_value(Piece piece) {
     }
 }
 
-int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
-    int a, b, c;
+int Piece_value_at(Piece piece, int i) {
     switch (piece) {
         case WHITE_PAWN:
-            // give a bonus for higher rank in the endgame
-            a = index_row(i);
-            b = ((a - 1) * (int)fullmoves) / PAWN_RANK_BONUS;
-            return PAWN_VALUE + PS_WHITE_PAWN[i] + b;
+            return PAWN_VALUE + PS_WHITE_PAWN[i];
         case BLACK_PAWN:
-            a = index_row(i);
-            b = ((a - 6) * (int)fullmoves) / PAWN_RANK_BONUS;
-            return -PAWN_VALUE + PS_BLACK_PAWN[i] + b;
+            return -PAWN_VALUE + PS_BLACK_PAWN[i];
         case WHITE_KNIGHT:
             return KNIGHT_VALUE + PS_WHITE_KNIGHT[i];
         case BLACK_KNIGHT:
@@ -128,16 +122,6 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
             return QUEEN_VALUE + PS_WHITE_QUEEN[i];
         case BLACK_QUEEN:
             return -QUEEN_VALUE + PS_BLACK_QUEEN[i];
-        case WHITE_KING:
-            a = PS_WHITE_KING[i] * (FULLMOVES_ENDGAME - fullmoves);
-            b = PS_WHITE_KING_ENDGAME[i] * fullmoves;
-            c = (a + b) / FULLMOVES_ENDGAME;
-            return KING_VALUE + c;
-        case BLACK_KING:
-            a = PS_BLACK_KING[i] * (FULLMOVES_ENDGAME - fullmoves);
-            b = PS_BLACK_KING_ENDGAME[i] * fullmoves;
-            c = (a + b) / FULLMOVES_ENDGAME;
-            return -KING_VALUE + c;
         default:
             return 0;
     }
@@ -445,6 +429,8 @@ class {
     ZHashStack zhstack;     // Stack to store zobrist hash of previous positions
     uint64_t zhash;         // Current zobrist hash of the position
     EnemyAttackMap enemy_attack_map;
+    int eval;          // Cache a partial value of the eval that doesn't depend on fullmoves
+    int pawn_row_sum;  // Sum pawn rows to use in final eval calculation
 }
 Chess;
 
@@ -776,9 +762,11 @@ Piece Chess_make_move(Chess* chess, Move* move) {
 
     // Remove piece from source square
     chess->zhash ^= Piece_zhash_at(moving_piece, move->from);
+    chess->eval -= Piece_value_at(moving_piece, move->from);
 
     // Remove captured piece (if any)
     chess->zhash ^= Piece_zhash_at(target_piece, move->to);
+    chess->eval -= Piece_value_at(target_piece, move->to);
 
     // Update gamestate hash
     chess->zhash ^= ZHASH_STATE[chess->gamestate];
@@ -789,6 +777,18 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->halfmoves++;
     } else {
         chess->halfmoves = 0;
+    }
+
+    // Update pawn row sum number
+    if (moving_piece == WHITE_PAWN) {
+        chess->pawn_row_sum += index_row(move->to - move->from + 1);
+    } else if (moving_piece == BLACK_PAWN) {
+        chess->pawn_row_sum += index_row(move->to - move->from - 1);
+    }
+    if (target_piece == WHITE_PAWN) {
+        chess->pawn_row_sum -= index_row(move->to) - 1;
+    } else if (target_piece == BLACK_PAWN) {
+        chess->pawn_row_sum -= index_row(move->to) - 6;
     }
 
     // Update fullmove number
@@ -849,24 +849,32 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->board[7] = EMPTY;
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 7);
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 5);
+        chess->eval -= Piece_value_at(WHITE_ROOK, 7);
+        chess->eval += Piece_value_at(WHITE_ROOK, 5);
     } else if (moving_piece == WHITE_KING && move->from == 4 && move->to == 2) {
         // White queenside
         chess->board[3] = WHITE_ROOK;
         chess->board[0] = EMPTY;
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 0);
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 3);
+        chess->eval -= Piece_value_at(WHITE_ROOK, 0);
+        chess->eval += Piece_value_at(WHITE_ROOK, 3);
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 62) {
         // Black kingside
         chess->board[61] = BLACK_ROOK;
         chess->board[63] = EMPTY;
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 63);
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 61);
+        chess->eval -= Piece_value_at(BLACK_ROOK, 63);
+        chess->eval += Piece_value_at(BLACK_ROOK, 61);
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 58) {
         // Black queenside
         chess->board[59] = BLACK_ROOK;
         chess->board[56] = EMPTY;
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 56);
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 59);
+        chess->eval -= Piece_value_at(BLACK_ROOK, 56);
+        chess->eval += Piece_value_at(BLACK_ROOK, 59);
     }
 
     // Handle en passant capture
@@ -874,12 +882,16 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         target_piece == EMPTY) {
         // White pawn capturing en passant
         chess->zhash ^= Piece_zhash_at(BLACK_PAWN, move->to - 8);
+        chess->eval -= Piece_value_at(BLACK_PAWN, move->to - 8);
         chess->board[move->to - 8] = EMPTY;
+        chess->pawn_row_sum += 2;
     } else if (moving_piece == BLACK_PAWN && index_col(move->from) != index_col(move->to) &&
                target_piece == EMPTY) {
         // Black pawn capturing en passant
         chess->zhash ^= Piece_zhash_at(WHITE_PAWN, move->to + 8);
+        chess->eval -= Piece_value_at(WHITE_PAWN, move->to + 8);
         chess->board[move->to + 8] = EMPTY;
+        chess->pawn_row_sum -= 2;
     }
 
     // Handle promotion
@@ -888,15 +900,19 @@ Piece Chess_make_move(Chess* chess, Move* move) {
             switch (move->promotion) {
                 case PROMOTE_QUEEN:
                     moving_piece = WHITE_QUEEN;
+                    chess->pawn_row_sum -= index_row(move->to) - 1;
                     break;
                 case PROMOTE_ROOK:
                     moving_piece = WHITE_ROOK;
+                    chess->pawn_row_sum -= index_row(move->to) - 1;
                     break;
                 case PROMOTE_BISHOP:
                     moving_piece = WHITE_BISHOP;
+                    chess->pawn_row_sum -= index_row(move->to) - 1;
                     break;
                 case PROMOTE_KNIGHT:
                     moving_piece = WHITE_KNIGHT;
+                    chess->pawn_row_sum -= index_row(move->to) - 1;
                     break;
                 default:
                     break;
@@ -905,15 +921,19 @@ Piece Chess_make_move(Chess* chess, Move* move) {
             switch (move->promotion) {
                 case PROMOTE_QUEEN:
                     moving_piece = BLACK_QUEEN;
+                    chess->pawn_row_sum -= index_row(move->to) - 6;
                     break;
                 case PROMOTE_ROOK:
                     moving_piece = BLACK_ROOK;
+                    chess->pawn_row_sum -= index_row(move->to) - 6;
                     break;
                 case PROMOTE_BISHOP:
                     moving_piece = BLACK_BISHOP;
+                    chess->pawn_row_sum -= index_row(move->to) - 6;
                     break;
                 case PROMOTE_KNIGHT:
                     moving_piece = BLACK_KNIGHT;
+                    chess->pawn_row_sum -= index_row(move->to) - 6;
                     break;
                 default:
                     break;
@@ -933,6 +953,7 @@ Piece Chess_make_move(Chess* chess, Move* move) {
 
     // Add piece to destination square
     chess->zhash ^= Piece_zhash_at(moving_piece, move->to);
+    chess->eval += Piece_value_at(moving_piece, move->to);
 
     // uint64_t hash = Chess_zhash(chess);
     ZHashStack_push(&chess->zhstack, chess->zhash);
@@ -1077,6 +1098,24 @@ typedef enum {
     FEN_END
 } FENField;
 
+void Chess_init_eval(Chess* chess) {
+    chess->eval = 0;
+    chess->pawn_row_sum = 0;
+
+    for (int i = 0; i < 64; i++) {
+        Piece piece = chess->board[i];
+        if (piece == EMPTY) continue;
+
+        chess->eval += Piece_value_at(piece, i);
+
+        if (piece == WHITE_PAWN) {
+            chess->pawn_row_sum += index_row(i) - 1;
+        } else if (piece == BLACK_PAWN) {
+            chess->pawn_row_sum += index_row(i) - 6;
+        }
+    }
+}
+
 Chess* Chess_from_fen(char* fen_arg) {
 #define FEN_PARSING_ERROR(details)                                \
     fprintf(stderr, "FEN Parsing error: " details ": %s\n", fen); \
@@ -1176,6 +1215,7 @@ Chess* Chess_from_fen(char* fen_arg) {
     }
     board->fullmoves = (uint8_t)fullmoves;
     Chess_find_kings(board);
+    Chess_init_eval(board);
     board->zhash = Chess_zhash(board);
     return board;
 }
@@ -1684,6 +1724,8 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     move->promotion = NO_PROMOTION;               \
     gamestate_t gamestate = chess->gamestate;     \
     uint64_t hash = chess->zhash;                 \
+    int e = chess->eval;                          \
+    int pawn_row_sum = chess->pawn_row_sum;       \
     Piece capture = Chess_make_move(chess, move); \
     chess->turn = !chess->turn;                   \
     bool in_check = Chess_friendly_check(chess);  \
@@ -1691,6 +1733,8 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     Chess_unmake_move(chess, move, capture);      \
     chess->gamestate = gamestate;                 \
     chess->zhash = hash;                          \
+    chess->eval = e;                              \
+    chess->pawn_row_sum = pawn_row_sum;           \
     if (!in_check) {                              \
         move++;                                   \
         n_moves++;                                \
@@ -2085,16 +2129,20 @@ int moves(char* fen, int depth) {
 }
 
 int eval(Chess* chess) {
-    int e = 0;
     uint8_t fullmoves = chess->fullmoves > FULLMOVES_ENDGAME ? FULLMOVES_ENDGAME : chess->fullmoves;
+    int e = chess->eval;
 
-    for (int i = 0; i < 64; i++) {
-        Piece piece = chess->board[i];
-        if (piece == EMPTY) continue;
+    // Pawn rank bonus
+    e += chess->pawn_row_sum * fullmoves / PAWN_RANK_BONUS;
 
-        e += Piece_value_at(piece, i, fullmoves);
-        e += Piece_king_proximity(piece, i, chess->king_white, chess->king_black);
-    }
+    // King square value
+    int white_king_value = PS_WHITE_KING[chess->king_white] * (FULLMOVES_ENDGAME - fullmoves);
+    white_king_value += PS_WHITE_KING_ENDGAME[chess->king_white] * fullmoves;
+    e += white_king_value / FULLMOVES_ENDGAME;
+
+    int black_king_value = PS_BLACK_KING[chess->king_black] * (FULLMOVES_ENDGAME - fullmoves);
+    black_king_value += PS_BLACK_KING_ENDGAME[chess->king_black] * fullmoves;
+    e += black_king_value / FULLMOVES_ENDGAME;
 
     return e;
 }
@@ -2116,6 +2164,8 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
         Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
+        int e = chess->eval;
+        int pawn_row_sum = chess->pawn_row_sum;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax_captures_only(chess, endtime, depth - 1, -b, -a);
@@ -2123,6 +2173,8 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
+        chess->eval = e;
+        chess->pawn_row_sum = pawn_row_sum;
 
         if (score >= b) return score;
         if (score > best_score) best_score = score;
@@ -2191,6 +2243,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         Move* move = &moves[i];
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
+        int e = chess->eval;
+        int pawn_row_sum = chess->pawn_row_sum;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
@@ -2198,6 +2252,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
+        chess->eval = e;
+        chess->pawn_row_sum = pawn_row_sum;
 
         if (score > best_score) {
             best_score = score;
@@ -2473,18 +2529,19 @@ int king_safety_command(Chess* chess) {
 }
 
 int test() {
-    Chess* chess = Chess_from_fen("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
+    Chess* chess = Chess_from_fen("4k3/8/8/4n3/2N5/8/8/4K3 b - - 0 1");
     if (!chess) return 1;
 
-    Move move = (Move){.from = 36, .to = 43};
-    Piece piece = Chess_make_move(chess, &move);
-    printf("sp=%d\n", chess->zhstack.sp);
-    printf("%" PRIx64 " %" PRIx64 "\n", chess->zhash, Chess_zhash(chess));
-    printf("%" PRIx64 "\n", ZHashStack_peek(&chess->zhstack));
+    int eval = chess->eval;
+    Chess_init_eval(chess);
+    printf("%d %d\n", eval, chess->eval);
 
-    Chess_unmake_move(chess, &move, piece);
-    printf("sp=%d\n", chess->zhstack.sp);
-    printf("%" PRIx64 " %" PRIx64 "\n", chess->zhash, Chess_zhash(chess));
+    Chess_user_move(chess, "e5c4");
+    Chess_print(chess);
+
+    eval = chess->eval;
+    Chess_init_eval(chess);
+    printf("%d %d\n", eval, chess->eval);
 
     return 0;
 }
