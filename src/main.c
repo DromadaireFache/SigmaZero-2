@@ -1814,6 +1814,15 @@ size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) 
     return n_moves;
 }
 
+typedef size_t (*MoveFn)(Chess*, Move*, int, bool);
+
+const MoveFn move_functions[256] = {
+    ['P'] = Chess_pawn_moves,   ['p'] = Chess_pawn_moves,   ['N'] = Chess_knight_moves,
+    ['n'] = Chess_knight_moves, ['B'] = Chess_bishop_moves, ['b'] = Chess_bishop_moves,
+    ['R'] = Chess_rook_moves,   ['r'] = Chess_rook_moves,   ['Q'] = Chess_queen_moves,
+    ['q'] = Chess_queen_moves,  ['K'] = Chess_king_moves,   ['k'] = Chess_king_moves,
+};
+
 size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     // make the enemy attack map to check legality
     Chess_fill_attack_map(chess);
@@ -1826,22 +1835,14 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     }
 
     for (int i = 0; i < 64; i++) {
-        if (!Chess_friendly_piece_at(chess, i)) continue;
         Piece piece = chess->board[i];
-        Move* move_p = &moves[n_moves];
+        if (!((chess)->turn == TURN_WHITE ? (piece >= 'A' && piece <= 'Z')
+                                          : piece >= 'a' && piece <= 'z'))
+            continue;
 
-        if (Piece_is_pawn(piece)) {
-            n_moves += Chess_pawn_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_knight(piece)) {
-            n_moves += Chess_knight_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_bishop(piece)) {
-            n_moves += Chess_bishop_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_rook(piece)) {
-            n_moves += Chess_rook_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_king(piece)) {
-            n_moves += Chess_king_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_queen(piece)) {
-            n_moves += Chess_queen_moves(chess, move_p, i, captures_only);
+        MoveFn fn = move_functions[(unsigned char)piece];
+        if (fn) {
+            n_moves += fn(chess, &moves[n_moves], i, captures_only);
         }
     }
     return n_moves;
@@ -1913,9 +1914,9 @@ size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
         Chess_score_move(chess, move);
     }
 
-    // C lib sort
-    // qsort(moves, n_moves, sizeof(Move), compare_moves);
-    partial_sort_moves(moves, n_moves, 5);
+    if (n_moves > 8) {
+        partial_sort_moves(moves, n_moves, 5);
+    }
 
     return n_moves;
 }

@@ -17,3 +17,4 @@ chessData.csv
 cachegrind.*
 gmon.out
 profile*
+*.er
