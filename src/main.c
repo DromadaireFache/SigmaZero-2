@@ -1814,15 +1814,6 @@ size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) 
     return n_moves;
 }
 
-typedef size_t (*MoveFn)(Chess*, Move*, int, bool);
-
-const MoveFn move_functions[256] = {
-    ['P'] = Chess_pawn_moves,   ['p'] = Chess_pawn_moves,   ['N'] = Chess_knight_moves,
-    ['n'] = Chess_knight_moves, ['B'] = Chess_bishop_moves, ['b'] = Chess_bishop_moves,
-    ['R'] = Chess_rook_moves,   ['r'] = Chess_rook_moves,   ['Q'] = Chess_queen_moves,
-    ['q'] = Chess_queen_moves,  ['K'] = Chess_king_moves,   ['k'] = Chess_king_moves,
-};
-
 size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     // make the enemy attack map to check legality
     Chess_fill_attack_map(chess);
@@ -1839,10 +1830,20 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
         if (!((chess)->turn == TURN_WHITE ? (piece >= 'A' && piece <= 'Z')
                                           : piece >= 'a' && piece <= 'z'))
             continue;
+        Move* move_p = &moves[n_moves];
 
-        MoveFn fn = move_functions[(unsigned char)piece];
-        if (fn) {
-            n_moves += fn(chess, &moves[n_moves], i, captures_only);
+        if (Piece_is_pawn(piece)) {
+            n_moves += Chess_pawn_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_knight(piece)) {
+            n_moves += Chess_knight_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_bishop(piece)) {
+            n_moves += Chess_bishop_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_rook(piece)) {
+            n_moves += Chess_rook_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_king(piece)) {
+            n_moves += Chess_king_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_queen(piece)) {
+            n_moves += Chess_queen_moves(chess, move_p, i, captures_only);
         }
     }
     return n_moves;
@@ -1905,20 +1906,32 @@ void partial_sort_moves(Move* moves, size_t n_moves, size_t n_best) {
     }
 }
 
-size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
+size_t Chess_legal_moves_scored(Chess* chess, Move* moves, bool captures_only) {
     size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
 
     // Give a score to each move
     for (int i = 0; i < n_moves; i++) {
-        Move* move = &moves[i];
-        Chess_score_move(chess, move);
-    }
-
-    if (n_moves > 8) {
-        partial_sort_moves(moves, n_moves, 5);
+        Chess_score_move(chess, &moves[i]);
     }
 
     return n_moves;
+}
+
+static inline void select_best_move(Move* moves, int start, int n_moves) {
+    if (start >= n_moves) return;
+
+    int best = start;
+    for (int i = start + 1; i < n_moves; i++) {
+        if (moves[i].score > moves[best].score) {
+            best = i;
+        }
+    }
+
+    if (best != start) {
+        Move temp = moves[start];
+        moves[start] = moves[best];
+        moves[best] = temp;
+    }
 }
 
 bool Chess_equal(Chess* chess, char* board_fen) {
@@ -2146,10 +2159,12 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_sorted(chess, moves, true);
+    size_t n_moves = Chess_legal_moves_scored(chess, moves, true);
 
     for (int i = 0; i < n_moves; i++) {
+        select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
+
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
         int e = chess->eval;
@@ -2211,7 +2226,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     }
 
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_sorted(chess, moves, false);
+    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
 
     if (n_moves == 0) {
         bool in_check = chess->enemy_attack_map.n_checks > 0;
@@ -2228,7 +2243,9 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int original_b = b;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
+        select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
+
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
         int e = chess->eval;
@@ -2385,7 +2402,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     int scores[MAX_LEGAL_MOVES];
     Move moves_at_depth2[MAX_LEGAL_MOVES];
     int scores_at_depth2[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_sorted(chess, moves, false);
+    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
     if (n_moves < 1) return 1;
 
     Move* best_move = NULL;
