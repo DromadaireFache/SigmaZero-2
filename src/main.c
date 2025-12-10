@@ -2020,49 +2020,23 @@ TTItem;
 
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
-size_t n_transposition = 0;
-
-// Define a smaller number of locks (power of 2 works well)
-// #define TT_LOCKS_COUNT 1024
-// pthread_mutex_t tt_locks[TT_LOCKS_COUNT];
-
-// Initialize all locks
-void TT_init() {
-    // for (int i = 0; i < TT_LOCKS_COUNT; i++) {
-    //     pthread_mutex_init(&tt_locks[i], NULL);
-    // }
-
-    // Initialize your TT array if needed
-    // memset(tt, 0, sizeof(tt));
-}
-
-// Get the appropriate lock for a hash
-// static inline pthread_mutex_t* get_lock(uint64_t key) {
-//     // Use lower bits of the hash to select a lock
-//     return &tt_locks[key & (TT_LOCKS_COUNT - 1)];
-// }
 
 // Store an entry with fine-grained locking
 void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
-    // pthread_mutex_t* lock = get_lock(key);
 
-    // pthread_mutex_lock(lock);
     if (depth > tt[i].depth) {
         tt[i].key = key;
         tt[i].eval = eval;
         tt[i].depth = depth;
         tt[i].type = node_type;
     }
-    // pthread_mutex_unlock(lock);
 }
 
 // Retrieve an entry with fine-grained locking
 bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
-    // pthread_mutex_t* lock = get_lock(key);
 
-    // pthread_mutex_lock(lock);
     bool hit = tt[i].key == key && depth <= tt[i].depth;
     if (hit) {
         if ((tt[i].type == TT_EXACT) || (tt[i].type == TT_LOWER && tt[i].eval >= b) ||
@@ -2072,7 +2046,6 @@ bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
             hit = false;
         }
     }
-    // pthread_mutex_unlock(lock);
 
     return hit;
 }
@@ -2374,7 +2347,6 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     Move* best_move = NULL;
     int best_score = -INF;
     int depth = 1;
-    TT_init();
 
     pthread_t* threads = calloc(n_moves, sizeof(pthread_t));
     ChessThread* args = calloc(n_moves, sizeof(ChessThread));
@@ -2481,7 +2453,7 @@ void help(void) {
     printf(HELP_WIDTH "Bot plays a move based on the given position\n", "play <FEN> <millis>");
 }
 
-int king_safety_command(Chess *chess) {
+int king_safety_command(Chess* chess) {
     int white_score = 0, black_score = 0;
 
     for (int i = 0; i < 64; i++) {
