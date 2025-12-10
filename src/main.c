@@ -144,7 +144,7 @@ int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
 }
 
 int Piece_king_proximity(Piece piece, int i, int white_king, int black_king) {
-#define ROW_COL_VALUES(color_king)                       \
+#define ROW_COL_VALUES(color_king)                   \
     x = abs(index_row(i) - index_row(color_king));   \
     tmp = abs(index_col(i) - index_col(color_king)); \
     y = tmp < x ? tmp : x;                           \
@@ -173,7 +173,7 @@ int Piece_king_proximity(Piece piece, int i, int white_king, int black_king) {
         case WHITE_QUEEN:
             ROW_COL_VALUES(black_king);
             return QUEEN_KING_PROX / (x + y);
-        case BLACK_KING:
+        case BLACK_QUEEN:
             ROW_COL_VALUES(white_king);
             return -QUEEN_KING_PROX / (x + y);
         default:
@@ -2481,6 +2481,25 @@ void help(void) {
     printf(HELP_WIDTH "Bot plays a move based on the given position\n", "play <FEN> <millis>");
 }
 
+int king_safety_command(Chess *chess) {
+    int white_score = 0, black_score = 0;
+
+    for (int i = 0; i < 64; i++) {
+        Piece piece = chess->board[i];
+        if (piece == EMPTY) continue;
+
+        if (Piece_is_white(piece)) {
+            white_score += Piece_king_proximity(piece, i, chess->king_white, chess->king_black);
+        } else {
+            black_score -= Piece_king_proximity(piece, i, chess->king_white, chess->king_black);
+        }
+    }
+
+    printf("White king danger score: %d\n", black_score);
+    printf("Black king danger score: %d\n", white_score);
+    return 0;
+}
+
 int test() {
     Chess* chess = Chess_from_fen("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
     if (!chess) return 1;
@@ -2535,6 +2554,10 @@ int main(int argc, char** argv) {
         if (!chess) return 1;
         printf("%" PRIx64 "\n", Chess_zhash(chess));
         return 0;
+    } else if (argc == 3 && strcmp(argv[1], "kingsafety") == 0) {
+        Chess* chess = Chess_from_fen(argv[2]);
+        if (!chess) return 1;
+        return king_safety_command(chess);
     } else {
         help();
         return 1;

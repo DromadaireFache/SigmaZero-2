@@ -15,3 +15,5 @@ consts_best.c
 *.log
 chessData.csv
 cachegrind.*
+gmon.out
+profile*
