@@ -14,6 +14,8 @@
 
 #define class typedef struct
 #define INF 1000000000
+#define ISLOWER(c) ((c) >= 'a' && (c) <= 'z')
+#define ISUPPER(c) ((c) >= 'A' && (c) <= 'Z')
 
 #ifdef _WIN32
 #define TIME_TYPE clock_t
@@ -196,9 +198,9 @@ uint64_t Piece_zhash_at(Piece piece, int i) {
     }
 }
 
-static inline bool Piece_is_white(Piece piece) { return isupper(piece) && piece != EMPTY; }
+static inline bool Piece_is_white(Piece piece) { return ISUPPER(piece) && piece != EMPTY; }
 
-static inline bool Piece_is_black(Piece piece) { return islower(piece) && piece != EMPTY; }
+static inline bool Piece_is_black(Piece piece) { return ISLOWER(piece) && piece != EMPTY; }
 
 static inline bool Piece_is_pawn(Piece piece) { return piece == WHITE_PAWN || piece == BLACK_PAWN; }
 
@@ -617,25 +619,11 @@ void Chess_print(Chess* board) {
     }
 }
 
-bool Chess_friendly_piece_at(Chess* chess, int index) {
-    Piece piece = chess->board[index];
-    if (piece == EMPTY) return false;
-    if (chess->turn == TURN_WHITE) {
-        return isupper(piece);
-    } else {
-        return islower(piece);
-    }
-}
+#define Chess_friendly_piece_at(chess, index) \
+    ((chess)->turn == TURN_WHITE ? ISUPPER((chess)->board[index]) : ISLOWER((chess)->board[index]))
 
-bool Chess_enemy_piece_at(Chess* chess, int index) {
-    Piece piece = chess->board[index];
-    if (piece == EMPTY) return false;
-    if (chess->turn == TURN_WHITE) {
-        return islower(piece);
-    } else {
-        return isupper(piece);
-    }
-}
+#define Chess_enemy_piece_at(chess, index) \
+    ((chess)->turn == TURN_WHITE ? ISLOWER((chess)->board[index]) : ISUPPER((chess)->board[index]))
 
 bool Chess_friendly_king_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
@@ -2068,30 +2056,29 @@ TTItem tt[TT_LENGTH] = {0};
 // Store an entry with fine-grained locking
 void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
+    TTItem item = tt[i];
 
-    if (depth > tt[i].depth) {
-        tt[i].key = key;
-        tt[i].eval = eval;
-        tt[i].depth = depth;
-        tt[i].type = node_type;
+    if (depth > item.depth) {
+        item.key = key;
+        item.eval = eval;
+        item.depth = depth;
+        item.type = node_type;
     }
 }
 
 // Retrieve an entry with fine-grained locking
 bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
+    TTItem item = tt[i];
 
-    bool hit = tt[i].key == key && depth <= tt[i].depth;
-    if (hit) {
-        if ((tt[i].type == TT_EXACT) || (tt[i].type == TT_LOWER && tt[i].eval >= b) ||
-            (tt[i].type == TT_UPPER && tt[i].eval <= a)) {
-            *eval_p = tt[i].eval;
-        } else {
-            hit = false;
-        }
+    if (item.key == key && depth <= item.depth &&
+        ((item.type == TT_EXACT) || (item.type == TT_LOWER && item.eval >= b) ||
+         (item.type == TT_UPPER && item.eval <= a))) {
+        *eval_p = item.eval;
+        return true;
     }
 
-    return hit;
+    return false;
 }
 
 int moves(char* fen, int depth) {
