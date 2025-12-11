@@ -1891,12 +1891,18 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     size_t n_moves = 0;
 
     // If double check, only consider king moves
-    if (chess->enemy_attack_map.n_checks >= 2) {
+    if (__builtin_expect(chess->enemy_attack_map.n_checks >= 2, 0)) {
         int i = Chess_friendly_king_i(chess);
         return Chess_king_moves(chess, moves, i, captures_only);
     }
 
+    // Process king first since there is always a king
+    int king_i = Chess_friendly_king_i(chess);
+    n_moves += Chess_king_moves(chess, &moves[n_moves], king_i, captures_only);
+
+    // Remove king from bitboard before iterating
     bitboard_t friendly_bb = chess->turn == TURN_WHITE ? chess->bb_white : chess->bb_black;
+    friendly_bb &= ~bitboard_from_index(king_i);
 
     // Iterate over friendly pieces using bitboard
     while (friendly_bb) {
