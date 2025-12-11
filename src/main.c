@@ -51,8 +51,21 @@ void bitboard_print(bitboard_t bb) {
     }
 }
 
+const bitboard_t bb_index_lookup[] = {
+    (1ULL << 0),  (1ULL << 1),  (1ULL << 2),  (1ULL << 3),  (1ULL << 4),  (1ULL << 5),
+    (1ULL << 6),  (1ULL << 7),  (1ULL << 8),  (1ULL << 9),  (1ULL << 10), (1ULL << 11),
+    (1ULL << 12), (1ULL << 13), (1ULL << 14), (1ULL << 15), (1ULL << 16), (1ULL << 17),
+    (1ULL << 18), (1ULL << 19), (1ULL << 20), (1ULL << 21), (1ULL << 22), (1ULL << 23),
+    (1ULL << 24), (1ULL << 25), (1ULL << 26), (1ULL << 27), (1ULL << 28), (1ULL << 29),
+    (1ULL << 30), (1ULL << 31), (1ULL << 32), (1ULL << 33), (1ULL << 34), (1ULL << 35),
+    (1ULL << 36), (1ULL << 37), (1ULL << 38), (1ULL << 39), (1ULL << 40), (1ULL << 41),
+    (1ULL << 42), (1ULL << 43), (1ULL << 44), (1ULL << 45), (1ULL << 46), (1ULL << 47),
+    (1ULL << 48), (1ULL << 49), (1ULL << 50), (1ULL << 51), (1ULL << 52), (1ULL << 53),
+    (1ULL << 54), (1ULL << 55), (1ULL << 56), (1ULL << 57), (1ULL << 58), (1ULL << 59),
+    (1ULL << 60), (1ULL << 61), (1ULL << 62), (1ULL << 63)};
+
 // Convert an index (0-63) to a bitboard with only that bit set
-static inline bitboard_t bitboard_from_index(int i) { return (bitboard_t)(1ULL << i); }
+static inline bitboard_t bitboard_from_index(int i) { return (bitboard_t)bb_index_lookup[i]; }
 
 static inline int index_col(int index) { return index % 8; }
 
@@ -319,7 +332,16 @@ char* Position_to_string(Position* pos) {
 // Convert a position to an index (0-63)
 static inline int Position_to_index(Position* pos) { return pos->row * 8 + pos->col; }
 
-Position Position_from_index(int index) { return (Position){index / 8, index % 8}; }
+// All positions on the board
+const Position positions[] = {
+    {0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}, {0, 5}, {0, 6}, {0, 7}, {1, 0}, {1, 1}, {1, 2},
+    {1, 3}, {1, 4}, {1, 5}, {1, 6}, {1, 7}, {2, 0}, {2, 1}, {2, 2}, {2, 3}, {2, 4}, {2, 5},
+    {2, 6}, {2, 7}, {3, 0}, {3, 1}, {3, 2}, {3, 3}, {3, 4}, {3, 5}, {3, 6}, {3, 7}, {4, 0},
+    {4, 1}, {4, 2}, {4, 3}, {4, 4}, {4, 5}, {4, 6}, {4, 7}, {5, 0}, {5, 1}, {5, 2}, {5, 3},
+    {5, 4}, {5, 5}, {5, 6}, {5, 7}, {6, 0}, {6, 1}, {6, 2}, {6, 3}, {6, 4}, {6, 5}, {6, 6},
+    {6, 7}, {7, 0}, {7, 1}, {7, 2}, {7, 3}, {7, 4}, {7, 5}, {7, 6}, {7, 7}};
+
+Position Position_from_index(int index) { return positions[index]; }
 
 // Print a position
 void Position_print(Position pos) {
@@ -1707,63 +1729,84 @@ size_t Chess_queen_moves(Chess* chess, Move* move, int from, bool captures_only)
 size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) {
     Position pos = Position_from_index(from);
     size_t n_moves = 0;
-    int direction = chess->turn == TURN_WHITE ? 1 : -1;
-    bool at_home_rank = chess->turn == TURN_WHITE ? pos.row == 1 : pos.row == 6;
-    bool at_last_rank = chess->turn == TURN_WHITE ? pos.row == 6 : pos.row == 1;
-    bool at_en_passant_rank = chess->turn == TURN_WHITE ? pos.row == 4 : pos.row == 3;
+    int one_forward, left_capture, right_capture;
+    bool at_home_rank, at_last_rank, at_en_passant_rank;
 
-#define PAWN_ADD_MOVE_PROMOTE(offset, promote_to) \
-    move->from = from;                            \
-    move->to = from + (offset);                   \
-    if (Chess_is_move_legal(chess, move)) {       \
-        move->promotion = (promote_to);           \
-        move++;                                   \
-        n_moves++;                                \
+    if (chess->turn == TURN_WHITE) {
+        one_forward = from + 8, left_capture = from + 7, right_capture = from + 9;
+        at_home_rank = pos.row == 1, at_last_rank = pos.row == 6, at_en_passant_rank = pos.row == 4;
+    } else {
+        one_forward = from - 8, left_capture = from - 9, right_capture = from - 7;
+        at_home_rank = pos.row == 6, at_last_rank = pos.row == 1, at_en_passant_rank = pos.row == 3;
     }
 
-#define PAWN_ADD_MOVE(offset) PAWN_ADD_MOVE_PROMOTE(offset, NO_PROMOTION)
+#define PAWN_ADD_MOVE_PROMOTE(to_square)    \
+    move->from = from;                      \
+    move->to = (to_square);                 \
+    if (Chess_is_move_legal(chess, move)) { \
+        move->promotion = PROMOTE_QUEEN;    \
+        move++;                             \
+        n_moves++;                          \
+        move->from = from;                  \
+        move->to = (to_square);             \
+        move->promotion = PROMOTE_ROOK;     \
+        move++;                             \
+        n_moves++;                          \
+        move->from = from;                  \
+        move->to = (to_square);             \
+        move->promotion = PROMOTE_KNIGHT;   \
+        move++;                             \
+        n_moves++;                          \
+        move->from = from;                  \
+        move->to = (to_square);             \
+        move->promotion = PROMOTE_BISHOP;   \
+        move++;                             \
+        n_moves++;                          \
+    }
+
+#define PAWN_ADD_MOVE(to_square)            \
+    move->from = from;                      \
+    move->to = (to_square);                 \
+    if (Chess_is_move_legal(chess, move)) { \
+        move->promotion = NO_PROMOTION;     \
+        move++;                             \
+        n_moves++;                          \
+    }
+
     // 1 row up
-    if (chess->board[from + 8 * direction] == EMPTY && !captures_only) {
+    if (chess->board[one_forward] == EMPTY && !captures_only) {
         if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_BISHOP)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_KNIGHT)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_QUEEN)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_ROOK)
+            PAWN_ADD_MOVE_PROMOTE(one_forward)
         } else {
-            PAWN_ADD_MOVE(8 * direction)
+            PAWN_ADD_MOVE(one_forward)
 
             // 2 rows up
-            if (at_home_rank && chess->board[from + 16 * direction] == EMPTY) {
-                PAWN_ADD_MOVE(16 * direction)
+            int two_forward = chess->turn == TURN_WHITE ? from + 16 : from - 16;
+            if (at_home_rank && chess->board[two_forward] == EMPTY) {
+                PAWN_ADD_MOVE(two_forward)
             }
         }
     }
 
     // normal captures
-    if (pos.col > 0 && Chess_enemy_piece_at(chess, from + 8 * direction - 1)) {
+    if (pos.col > 0 && Chess_enemy_piece_at(chess, left_capture)) {
         if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(8 * direction - 1, PROMOTE_BISHOP)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction - 1, PROMOTE_KNIGHT)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction - 1, PROMOTE_QUEEN)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction - 1, PROMOTE_ROOK)
+            PAWN_ADD_MOVE_PROMOTE(left_capture)
         } else {
-            PAWN_ADD_MOVE(8 * direction - 1)
+            PAWN_ADD_MOVE(left_capture)
         }
     }
-    if (pos.col < 7 && Chess_enemy_piece_at(chess, from + 8 * direction + 1)) {
+    if (pos.col < 7 && Chess_enemy_piece_at(chess, right_capture)) {
         if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(8 * direction + 1, PROMOTE_BISHOP)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction + 1, PROMOTE_KNIGHT)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction + 1, PROMOTE_QUEEN)
-            PAWN_ADD_MOVE_PROMOTE(8 * direction + 1, PROMOTE_ROOK)
+            PAWN_ADD_MOVE_PROMOTE(right_capture)
         } else {
-            PAWN_ADD_MOVE(8 * direction + 1)
+            PAWN_ADD_MOVE(right_capture)
         }
     }
 
-#define PAWN_EN_PASSANT(offset)                   \
+#define PAWN_EN_PASSANT(to_square)                \
     move->from = from;                            \
-    move->to = from + (offset);                   \
+    move->to = (to_square);                       \
     move->promotion = NO_PROMOTION;               \
     gamestate_t gamestate = chess->gamestate;     \
     uint64_t hash = chess->zhash;                 \
@@ -1791,9 +1834,9 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     uint8_t en_passant_col = Chess_en_passant(chess);
     if (at_en_passant_rank && en_passant_col != -1) {
         if (en_passant_col == pos.col - 1) {
-            PAWN_EN_PASSANT(8 * direction - 1)
+            PAWN_EN_PASSANT(left_capture)
         } else if (en_passant_col == pos.col + 1) {
-            PAWN_EN_PASSANT(8 * direction + 1)
+            PAWN_EN_PASSANT(right_capture)
         }
     }
 
