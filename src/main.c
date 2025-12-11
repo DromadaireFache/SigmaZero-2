@@ -23,9 +23,9 @@
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
 #define TIME_PLUS_OFFSET_MS(start, millis) ((start) + CLOCKS_PER_SEC * (millis) / 1000)
 #else
-uint64_t now_nanos() {
+__attribute__((always_inline)) static inline uint64_t now_nanos() {
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 }
 #define TIME_TYPE uint64_t
@@ -1411,37 +1411,36 @@ void Chess_fill_attack_map(Chess* chess) {
     eam->pinned_piece_map = 0;
     for (int i = 0; i < 8; i++) eam->pins[i].pinned_piece = -1;
 
-#define SLIDING_PIECE_ATTACK(fn, condition, offset, pin_i)                  \
-    attack_map = 0;                                                         \
-    found_pinned_piece = false;                                             \
-    for (i = 0; (condition); i++) {                                         \
-        int square = king_i + (offset);                                     \
-        bitboard_t square_bit = bitboard_from_index(square);                \
-        attack_map |= square_bit;                                           \
-        if (Chess_friendly_piece_at(chess, square)) {            \
-            if (found_pinned_piece) {                                       \
-                break; /* two pieces stack so pin possible*/                \
-            } else {                                                        \
-                /* found a friendly piece, will keep looking for a pin */   \
-                found_pinned_piece = true;                                  \
-                pinned_piece = square;                           \
-            }                                                               \
-        } else if (fn(chess, square) ||                          \
-                   Chess_enemy_queen_at(chess, square)) {        \
-            if (found_pinned_piece) {                                       \
-                /* found an enemy behind friendly, so piece pinned */       \
-                eam->pins[pin_i].valid_map = attack_map;                    \
-                eam->pins[pin_i].pinned_piece = pinned_piece;               \
-                eam->pinned_piece_map |= bitboard_from_index(pinned_piece); \
-            } else {                                                        \
-                /* found an enemy without a pin, so it's a check */         \
-                eam->n_checks++;                                            \
-                if (eam->n_checks == 1) eam->block_attack_map = attack_map; \
-                if (eam->n_checks >= 2) return;                             \
-                break;                                                      \
-            }                                                               \
-        } else if (occupied & square_bit)                                   \
-            break;                                                          \
+#define SLIDING_PIECE_ATTACK(fn, condition, offset, pin_i)                     \
+    attack_map = 0;                                                            \
+    found_pinned_piece = false;                                                \
+    for (i = 0; (condition); i++) {                                            \
+        int square = king_i + (offset);                                        \
+        bitboard_t square_bit = bitboard_from_index(square);                   \
+        attack_map |= square_bit;                                              \
+        if (Chess_friendly_piece_at(chess, square)) {                          \
+            if (found_pinned_piece) {                                          \
+                break; /* two pieces stack so pin possible*/                   \
+            } else {                                                           \
+                /* found a friendly piece, will keep looking for a pin */      \
+                found_pinned_piece = true;                                     \
+                pinned_piece = square;                                         \
+            }                                                                  \
+        } else if (fn(chess, square) || Chess_enemy_queen_at(chess, square)) { \
+            if (found_pinned_piece) {                                          \
+                /* found an enemy behind friendly, so piece pinned */          \
+                eam->pins[pin_i].valid_map = attack_map;                       \
+                eam->pins[pin_i].pinned_piece = pinned_piece;                  \
+                eam->pinned_piece_map |= bitboard_from_index(pinned_piece);    \
+            } else {                                                           \
+                /* found an enemy without a pin, so it's a check */            \
+                eam->n_checks++;                                               \
+                if (eam->n_checks == 1) eam->block_attack_map = attack_map;    \
+                if (eam->n_checks >= 2) return;                                \
+                break;                                                         \
+            }                                                                  \
+        } else if (occupied & square_bit)                                      \
+            break;                                                             \
     }
 #define kp king_pos
 
