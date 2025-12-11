@@ -1814,6 +1814,27 @@ size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) 
     return n_moves;
 }
 
+typedef size_t (*MoveFn)(Chess*, Move*, int, bool);
+
+// Lookup table for move generation functions
+static const MoveFn white_move_fns[256] = {
+    [WHITE_PAWN] = Chess_pawn_moves,
+    [WHITE_KNIGHT] = Chess_knight_moves,
+    [WHITE_BISHOP] = Chess_bishop_moves,
+    [WHITE_ROOK] = Chess_rook_moves,
+    [WHITE_QUEEN] = Chess_queen_moves,
+    [WHITE_KING] = Chess_king_moves,
+};
+
+static const MoveFn black_move_fns[256] = {
+    [BLACK_PAWN] = Chess_pawn_moves,
+    [BLACK_KNIGHT] = Chess_knight_moves,
+    [BLACK_BISHOP] = Chess_bishop_moves,
+    [BLACK_ROOK] = Chess_rook_moves,
+    [BLACK_QUEEN] = Chess_queen_moves,
+    [BLACK_KING] = Chess_king_moves,
+};
+
 size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     // make the enemy attack map to check legality
     Chess_fill_attack_map(chess);
@@ -1825,25 +1846,13 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
         return Chess_king_moves(chess, moves, i, captures_only);
     }
 
+    const MoveFn* move_fns = chess->turn == TURN_WHITE ? white_move_fns : black_move_fns;
+
     for (int i = 0; i < 64; i++) {
         Piece piece = chess->board[i];
-        if (!((chess)->turn == TURN_WHITE ? (piece >= 'A' && piece <= 'Z')
-                                          : piece >= 'a' && piece <= 'z'))
-            continue;
-        Move* move_p = &moves[n_moves];
-
-        if (Piece_is_pawn(piece)) {
-            n_moves += Chess_pawn_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_knight(piece)) {
-            n_moves += Chess_knight_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_bishop(piece)) {
-            n_moves += Chess_bishop_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_rook(piece)) {
-            n_moves += Chess_rook_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_king(piece)) {
-            n_moves += Chess_king_moves(chess, move_p, i, captures_only);
-        } else if (Piece_is_queen(piece)) {
-            n_moves += Chess_queen_moves(chess, move_p, i, captures_only);
+        MoveFn fn = move_fns[(unsigned char)piece];
+        if (fn) {
+            n_moves += fn(chess, &moves[n_moves], i, captures_only);
         }
     }
     return n_moves;
