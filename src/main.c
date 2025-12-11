@@ -41,10 +41,14 @@ typedef uint64_t bitboard_t;
 
 // Print a bitboard as a 64-character string of 0s and 1s
 void bitboard_print(bitboard_t bb) {
-    for (int i = 63; i >= 0; i--) {
-        putchar((bb >> i) & 1 ? '1' : '0');
+    for (int rank = 7; rank >= 0; rank--) {
+        for (int file = 0; file < 8; file++) {
+            int index = rank * 8 + file;
+            putchar((bb >> index) & 1 ? '1' : '0');
+            putchar(' ');
+        }
+        putchar('\n');
     }
-    putchar('\n');
 }
 
 // Convert an index (0-63) to a bitboard with only that bit set
@@ -431,8 +435,10 @@ class {
     ZHashStack zhstack;     // Stack to store zobrist hash of previous positions
     uint64_t zhash;         // Current zobrist hash of the position
     EnemyAttackMap enemy_attack_map;
-    int eval;          // Cache a partial value of the eval that doesn't depend on fullmoves
-    int pawn_row_sum;  // Sum pawn rows to use in final eval calculation
+    int eval;             // Cache a partial value of the eval that doesn't depend on fullmoves
+    int pawn_row_sum;     // Sum pawn rows to use in final eval calculation
+    bitboard_t bb_white;  // Bitboard of all white pieces
+    bitboard_t bb_black;  // Bitboard of all black pieces
 }
 Chess;
 
@@ -748,6 +754,20 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     Piece moving_piece = chess->board[move->from];
     Piece target_piece = chess->board[move->to];
 
+    bitboard_t from_bb = bitboard_from_index(move->from);
+    bitboard_t to_bb = bitboard_from_index(move->to);
+
+    // Update bitboards
+    if (chess->turn == TURN_WHITE) {
+        chess->bb_white &= ~from_bb;  // Remove from source
+        chess->bb_white |= to_bb;     // Add to destination
+        chess->bb_black &= ~to_bb;    // Remove captured piece
+    } else {
+        chess->bb_black &= ~from_bb;
+        chess->bb_black |= to_bb;
+        chess->bb_white &= ~to_bb;
+    }
+
     // Remove piece from source square
     chess->zhash ^= Piece_zhash_at(moving_piece, move->from);
     chess->eval -= Piece_value_at(moving_piece, move->from);
@@ -839,6 +859,8 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 5);
         chess->eval -= Piece_value_at(WHITE_ROOK, 7);
         chess->eval += Piece_value_at(WHITE_ROOK, 5);
+        chess->bb_white &= ~bitboard_from_index(7);  // Remove rook from h1
+        chess->bb_white |= bitboard_from_index(5);   // Add rook to f1
     } else if (moving_piece == WHITE_KING && move->from == 4 && move->to == 2) {
         // White queenside
         chess->board[3] = WHITE_ROOK;
@@ -847,6 +869,8 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 3);
         chess->eval -= Piece_value_at(WHITE_ROOK, 0);
         chess->eval += Piece_value_at(WHITE_ROOK, 3);
+        chess->bb_white &= ~bitboard_from_index(0);  // Remove rook from a1
+        chess->bb_white |= bitboard_from_index(3);   // Add rook to d1
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 62) {
         // Black kingside
         chess->board[61] = BLACK_ROOK;
@@ -855,6 +879,8 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 61);
         chess->eval -= Piece_value_at(BLACK_ROOK, 63);
         chess->eval += Piece_value_at(BLACK_ROOK, 61);
+        chess->bb_black &= ~bitboard_from_index(63);  // Remove rook from h8
+        chess->bb_black |= bitboard_from_index(61);   // Add rook to f8
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 58) {
         // Black queenside
         chess->board[59] = BLACK_ROOK;
@@ -863,6 +889,8 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 59);
         chess->eval -= Piece_value_at(BLACK_ROOK, 56);
         chess->eval += Piece_value_at(BLACK_ROOK, 59);
+        chess->bb_black &= ~bitboard_from_index(56);  // Remove rook from a8
+        chess->bb_black |= bitboard_from_index(59);   // Add rook to d8
     }
 
     // Handle en passant capture
@@ -873,6 +901,7 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->eval -= Piece_value_at(BLACK_PAWN, move->to - 8);
         chess->board[move->to - 8] = EMPTY;
         chess->pawn_row_sum += 2;
+        chess->bb_black &= ~bitboard_from_index(move->to - 8);
     } else if (moving_piece == BLACK_PAWN && index_col(move->from) != index_col(move->to) &&
                target_piece == EMPTY) {
         // Black pawn capturing en passant
@@ -880,6 +909,7 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->eval -= Piece_value_at(WHITE_PAWN, move->to + 8);
         chess->board[move->to + 8] = EMPTY;
         chess->pawn_row_sum -= 2;
+        chess->bb_white &= ~bitboard_from_index(move->to + 8);
     }
 
     // Handle promotion
@@ -1104,6 +1134,23 @@ void Chess_init_eval(Chess* chess) {
     }
 }
 
+void Chess_init_bb(Chess* chess) {
+    chess->bb_white = 0;
+    chess->bb_black = 0;
+
+    for (int i = 0; i < 64; i++) {
+        Piece piece = chess->board[i];
+        if (piece == EMPTY) continue;
+
+        bitboard_t bit = 1ULL << i;
+        if (ISUPPER(piece)) {
+            chess->bb_white |= bit;
+        } else {
+            chess->bb_black |= bit;
+        }
+    }
+}
+
 Chess* Chess_from_fen(char* fen_arg) {
 #define FEN_PARSING_ERROR(details)                                \
     fprintf(stderr, "FEN Parsing error: " details ": %s\n", fen); \
@@ -1204,6 +1251,7 @@ Chess* Chess_from_fen(char* fen_arg) {
     board->fullmoves = (uint8_t)fullmoves;
     Chess_find_kings(board);
     Chess_init_eval(board);
+    Chess_init_bb(board);
     board->zhash = Chess_zhash(board);
     return board;
 }
@@ -1714,6 +1762,8 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     uint64_t hash = chess->zhash;                 \
     int e = chess->eval;                          \
     int pawn_row_sum = chess->pawn_row_sum;       \
+    bitboard_t bb_white = chess->bb_white;        \
+    bitboard_t bb_black = chess->bb_black;        \
     Piece capture = Chess_make_move(chess, move); \
     chess->turn = !chess->turn;                   \
     bool in_check = Chess_friendly_check(chess);  \
@@ -1723,6 +1773,8 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     chess->zhash = hash;                          \
     chess->eval = e;                              \
     chess->pawn_row_sum = pawn_row_sum;           \
+    chess->bb_white = bb_white;                   \
+    chess->bb_black = bb_black;                   \
     if (!in_check) {                              \
         move++;                                   \
         n_moves++;                                \
@@ -1817,22 +1869,13 @@ size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) 
 typedef size_t (*MoveFn)(Chess*, Move*, int, bool);
 
 // Lookup table for move generation functions
-static const MoveFn white_move_fns[256] = {
-    [WHITE_PAWN] = Chess_pawn_moves,
-    [WHITE_KNIGHT] = Chess_knight_moves,
-    [WHITE_BISHOP] = Chess_bishop_moves,
-    [WHITE_ROOK] = Chess_rook_moves,
-    [WHITE_QUEEN] = Chess_queen_moves,
-    [WHITE_KING] = Chess_king_moves,
-};
-
-static const MoveFn black_move_fns[256] = {
-    [BLACK_PAWN] = Chess_pawn_moves,
-    [BLACK_KNIGHT] = Chess_knight_moves,
-    [BLACK_BISHOP] = Chess_bishop_moves,
-    [BLACK_ROOK] = Chess_rook_moves,
-    [BLACK_QUEEN] = Chess_queen_moves,
-    [BLACK_KING] = Chess_king_moves,
+static const MoveFn move_fns[256] = {
+    [WHITE_PAWN] = Chess_pawn_moves,     [WHITE_KNIGHT] = Chess_knight_moves,
+    [WHITE_BISHOP] = Chess_bishop_moves, [WHITE_ROOK] = Chess_rook_moves,
+    [WHITE_QUEEN] = Chess_queen_moves,   [WHITE_KING] = Chess_king_moves,
+    [BLACK_PAWN] = Chess_pawn_moves,     [BLACK_KNIGHT] = Chess_knight_moves,
+    [BLACK_BISHOP] = Chess_bishop_moves, [BLACK_ROOK] = Chess_rook_moves,
+    [BLACK_QUEEN] = Chess_queen_moves,   [BLACK_KING] = Chess_king_moves,
 };
 
 size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
@@ -1846,14 +1889,19 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
         return Chess_king_moves(chess, moves, i, captures_only);
     }
 
-    const MoveFn* move_fns = chess->turn == TURN_WHITE ? white_move_fns : black_move_fns;
+    bitboard_t friendly_bb = chess->turn == TURN_WHITE ? chess->bb_white : chess->bb_black;
 
-    for (int i = 0; i < 64; i++) {
+    // Iterate over friendly pieces using bitboard
+    while (friendly_bb) {
+        int i = __builtin_ctzll(friendly_bb);  // Get the index
+        friendly_bb &= friendly_bb - 1;        // Clear the least significant bit
+
         Piece piece = chess->board[i];
-        MoveFn fn = move_fns[(unsigned char)piece];
-        if (fn) {
-            n_moves += fn(chess, &moves[n_moves], i, captures_only);
-        }
+
+        // A piece is represented by its character in the board array
+        // Grab the move generation function from the lookup table
+        // and generate moves for that piece
+        n_moves += move_fns[piece](chess, &moves[n_moves], i, captures_only);
     }
     return n_moves;
 }
@@ -1967,11 +2015,15 @@ size_t Chess_count_moves(Chess* chess, int depth) {
     for (int i = 0; i < n_moves; i++) {
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
+        bitboard_t bb_white = chess->bb_white;
+        bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, &moves[i]);
         nodes += Chess_count_moves(chess, depth - 1);
         Chess_unmake_move(chess, &moves[i], capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
+        chess->bb_white = bb_white;
+        chess->bb_black = bb_black;
     }
 
     return nodes;
@@ -2171,13 +2223,15 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     size_t n_moves = Chess_legal_moves_scored(chess, moves, true);
 
     for (int i = 0; i < n_moves; i++) {
-        select_best_move(moves, i, n_moves);
+        if (i < 8) select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
         int e = chess->eval;
         int pawn_row_sum = chess->pawn_row_sum;
+        bitboard_t bb_white = chess->bb_white;
+        bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax_captures_only(chess, endtime, depth - 1, -b, -a);
@@ -2187,6 +2241,8 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
         chess->zhash = hash;
         chess->eval = e;
         chess->pawn_row_sum = pawn_row_sum;
+        chess->bb_white = bb_white;
+        chess->bb_black = bb_black;
 
         if (score >= b) return score;
         if (score > best_score) best_score = score;
@@ -2252,13 +2308,15 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int original_b = b;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
-        select_best_move(moves, i, n_moves);
+        if (i < 8) select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
         int e = chess->eval;
         int pawn_row_sum = chess->pawn_row_sum;
+        bitboard_t bb_white = chess->bb_white;
+        bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
@@ -2268,6 +2326,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         chess->zhash = hash;
         chess->eval = e;
         chess->pawn_row_sum = pawn_row_sum;
+        chess->bb_white = bb_white;
+        chess->bb_black = bb_black;
 
         if (score > best_score) {
             best_score = score;
@@ -2546,16 +2606,11 @@ int test() {
     Chess* chess = Chess_from_fen("4k3/8/8/4n3/2N5/8/8/4K3 b - - 0 1");
     if (!chess) return 1;
 
-    int eval = chess->eval;
-    Chess_init_eval(chess);
-    printf("%d %d\n", eval, chess->eval);
-
-    Chess_user_move(chess, "e5c4");
     Chess_print(chess);
-
-    eval = chess->eval;
-    Chess_init_eval(chess);
-    printf("%d %d\n", eval, chess->eval);
+    putchar('\n');
+    bitboard_print(chess->bb_white);
+    putchar('\n');
+    bitboard_print(chess->bb_black);
 
     return 0;
 }
