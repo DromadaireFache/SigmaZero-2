@@ -107,7 +107,7 @@ def play_game(fen: str, is_white: bool) -> dict:
 
 def tournament():
     start = time.perf_counter()
-    results = {"wins": 0, "losses": 0, "draws": 0}
+    results = {"wins": 0, "losses": 0, "draws": 0, "avg_depth_new": 0, "avg_depth_old": 0}
     for i, fen in enumerate(FENS):
         try:
             print(f"Game {i+1}/{len(FENS)}")
@@ -115,6 +115,10 @@ def tournament():
             print("End FEN:", result.get("end_fen", "N/A"))
             print(f"Time SigmaZero: {result['time_new']:.2f}s, Old: {result['time_old']:.2f}s")
             print(f"Avg Depth SigmaZero: {result['avg_depth_new']:.2f}, Old: {result['avg_depth_old']:.2f}")
+
+            results["avg_depth_new"] += result["avg_depth_new"] / len(FENS)
+            results["avg_depth_old"] += result["avg_depth_old"] / len(FENS)
+
             if result["score"] == 1:
                 results["wins"] += 1
                 print("Result: Win", end=" ")
@@ -131,6 +135,12 @@ def tournament():
     print(f"Tournament completed in {time.perf_counter() - start:.2f} seconds.")
     print("Tournament Results:")
     print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}")
+
+    depth_diff = results["avg_depth_new"] - results["avg_depth_old"]
+    depth_diff = ("+" if depth_diff >= 0 else "") + f"{depth_diff:.2f}"
+    print(
+        f"Average Depth SigmaZero: {results['avg_depth_new']:.2f}, Old: {results['avg_depth_old']:.2f} ({depth_diff})"
+    )
 
 
 if __name__ == "__main__":
