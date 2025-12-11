@@ -10,7 +10,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "../consts.c"
+#include "./consts_V2.5.c"
 
 #define class typedef struct
 #define INF 1000000000
