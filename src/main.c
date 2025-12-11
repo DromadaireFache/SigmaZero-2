@@ -202,9 +202,9 @@ uint64_t Piece_zhash_at(Piece piece, int i) {
     }
 }
 
-static inline bool Piece_is_white(Piece piece) { return ISUPPER(piece) && piece != EMPTY; }
+static inline bool Piece_is_white(Piece piece) { return ISUPPER(piece); }
 
-static inline bool Piece_is_black(Piece piece) { return ISLOWER(piece) && piece != EMPTY; }
+static inline bool Piece_is_black(Piece piece) { return ISLOWER(piece); }
 
 static inline bool Piece_is_pawn(Piece piece) { return piece == WHITE_PAWN || piece == BLACK_PAWN; }
 
@@ -625,11 +625,13 @@ void Chess_print(Chess* board) {
     }
 }
 
-#define Chess_friendly_piece_at(chess, index) \
-    ((chess)->turn == TURN_WHITE ? ISUPPER((chess)->board[index]) : ISLOWER((chess)->board[index]))
+#define Chess_friendly_piece_at(chess, index)                            \
+    ((chess)->turn == TURN_WHITE ? Piece_is_white((chess)->board[index]) \
+                                 : Piece_is_black((chess)->board[index]))
 
-#define Chess_enemy_piece_at(chess, index) \
-    ((chess)->turn == TURN_WHITE ? ISLOWER((chess)->board[index]) : ISUPPER((chess)->board[index]))
+#define Chess_enemy_piece_at(chess, index)                               \
+    ((chess)->turn == TURN_WHITE ? Piece_is_black((chess)->board[index]) \
+                                 : Piece_is_white((chess)->board[index]))
 
 bool Chess_friendly_king_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
@@ -1143,7 +1145,7 @@ void Chess_init_bb(Chess* chess) {
         if (piece == EMPTY) continue;
 
         bitboard_t bit = 1ULL << i;
-        if (ISUPPER(piece)) {
+        if (Piece_is_white(piece)) {
             chess->bb_white |= bit;
         } else {
             chess->bb_black |= bit;
@@ -1348,6 +1350,7 @@ void Chess_fill_attack_map(Chess* chess) {
 
     uint8_t king_i = Chess_friendly_king_i(chess);
     Position king_pos = Position_from_index(king_i);
+    bitboard_t occupied = chess->bb_white | chess->bb_black;
 
 #define ENEMY_ATTACK(condition1, condition2, attack_map)              \
     if ((condition1) && (condition2)) {                               \
@@ -1412,17 +1415,19 @@ void Chess_fill_attack_map(Chess* chess) {
     attack_map = 0;                                                         \
     found_pinned_piece = false;                                             \
     for (i = 0; (condition); i++) {                                         \
-        attack_map |= bitboard_from_index(king_i + (offset));               \
-        if (Chess_friendly_piece_at(chess, king_i + (offset))) {            \
+        int square = king_i + (offset);                                     \
+        bitboard_t square_bit = bitboard_from_index(square);                \
+        attack_map |= square_bit;                                           \
+        if (Chess_friendly_piece_at(chess, square)) {            \
             if (found_pinned_piece) {                                       \
                 break; /* two pieces stack so pin possible*/                \
             } else {                                                        \
                 /* found a friendly piece, will keep looking for a pin */   \
                 found_pinned_piece = true;                                  \
-                pinned_piece = king_i + (offset);                           \
+                pinned_piece = square;                           \
             }                                                               \
-        } else if (fn(chess, king_i + (offset)) ||                          \
-                   Chess_enemy_queen_at(chess, king_i + (offset))) {        \
+        } else if (fn(chess, square) ||                          \
+                   Chess_enemy_queen_at(chess, square)) {        \
             if (found_pinned_piece) {                                       \
                 /* found an enemy behind friendly, so piece pinned */       \
                 eam->pins[pin_i].valid_map = attack_map;                    \
@@ -1435,7 +1440,7 @@ void Chess_fill_attack_map(Chess* chess) {
                 if (eam->n_checks >= 2) return;                             \
                 break;                                                      \
             }                                                               \
-        } else if (chess->board[king_i + (offset)] != EMPTY)                \
+        } else if (occupied & square_bit)                                   \
             break;                                                          \
     }
 #define kp king_pos
@@ -1663,12 +1668,14 @@ size_t Chess_knight_moves(Chess* chess, Move* move, int from, bool captures_only
             move++;                                                   \
             n_moves++;                                                \
         }                                                             \
-        if (chess->board[from + (offset)] != EMPTY) break;            \
+        bitboard_t to_bit = bitboard_from_index(from + (offset));     \
+        if (occupied & to_bit) break;                                 \
     }
 
 size_t Chess_bishop_moves(Chess* chess, Move* move, int from, bool captures_only) {
     size_t n_moves = 0;
     Position pos = Position_from_index(from);
+    bitboard_t occupied = chess->bb_white | chess->bb_black;
     int i;
 
     SLIDING_PIECE_ADD_MOVE(pos.col + i < 7 && pos.row + i < 7, (i + 1) * 9)
@@ -1682,6 +1689,7 @@ size_t Chess_bishop_moves(Chess* chess, Move* move, int from, bool captures_only
 size_t Chess_rook_moves(Chess* chess, Move* move, int from, bool captures_only) {
     size_t n_moves = 0;
     Position pos = Position_from_index(from);
+    bitboard_t occupied = chess->bb_white | chess->bb_black;
     int i;
 
     SLIDING_PIECE_ADD_MOVE(pos.row + i < 7, (i + 1) * 8)
@@ -2346,19 +2354,6 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     RETURN_AND_STORE_TT(best_score, node_type)
 }
 
-// If piece count < 38 it is an endgame
-bool Chess_is_endgame(Chess* chess) {
-    int count = 0;
-    for (int i = 0; i < 64; i++) {
-        Piece piece = chess->board[i];
-        if (!Piece_is_king(piece)) {
-            count += Piece_value(piece) / 100;
-            if (count < 38) return true;
-        }
-    }
-    return false;
-}
-
 // if is_white sort in descending order, otherwise ascending
 void bubble_sort(Move* moves, int* scores, size_t n_moves) {
     bool swapped;
@@ -2483,7 +2478,6 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
 
     while (TIME_NOW() < endtime) {
         // nodes_total = 0;
-        // is_endgame = Chess_is_endgame(chess);
 
         for (int i = 0; i < n_moves; i++) {
             ChessThread* arg = &args[i];
