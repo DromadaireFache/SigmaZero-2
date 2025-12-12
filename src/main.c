@@ -2181,9 +2181,9 @@ void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     TTItem* item = &tt[i];
 
     // Read current depth atomically
-    uint8_t current_depth = atomic_load_explicit(&item->depth, memory_order_relaxed);
+    uint8_t stored_depth = atomic_load_explicit(&item->depth, memory_order_relaxed);
     
-    if (depth > current_depth) {
+    if (depth < stored_depth) {
         // Store atomically - order matters!
         atomic_store_explicit(&item->depth, depth, memory_order_relaxed);
         atomic_store_explicit(&item->eval, eval, memory_order_relaxed);
@@ -2198,10 +2198,16 @@ bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
 
     // Read key first with acquire semantics
     uint64_t stored_key = atomic_load_explicit(&item->key, memory_order_acquire);
-    if (stored_key != key) return false;
+    if (stored_key != key) {
+        // atomic_fetch_add_explicit(&tt_misses, 1, memory_order_relaxed);
+        return false;
+    }
 
     uint8_t stored_depth = atomic_load_explicit(&item->depth, memory_order_relaxed);
-    if (depth > stored_depth) return false;
+    if (depth < stored_depth) {
+        // atomic_fetch_add_explicit(&tt_misses, 1, memory_order_relaxed);
+        return false;
+    }
 
     int stored_eval = atomic_load_explicit(&item->eval, memory_order_relaxed);
     TTNodeType stored_type = atomic_load_explicit(&item->type, memory_order_relaxed);
