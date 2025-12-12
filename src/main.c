@@ -2601,7 +2601,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
         }
 
         // Show transposition table occupancy
-        TT_occupancy();
+        // TT_occupancy();
     }
 
     free(threads);
