@@ -2181,14 +2181,9 @@ void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     TTItem* item = &tt[i];
 
     // Read current depth atomically
-    uint64_t stored_key = atomic_load_explicit(&item->key, memory_order_relaxed);
-    uint8_t stored_depth = atomic_load_explicit(&item->depth, memory_order_relaxed);
+    uint8_t current_depth = atomic_load_explicit(&item->depth, memory_order_relaxed);
     
-    // Replace if:
-    // 1. Same position (key match) - always update
-    // 2. Empty slot (key == 0)
-    // 3. New search is deeper by at least 2 ply (prevents constant thrashing)
-    if (stored_key == 0 || (stored_key == key && depth > stored_depth) || depth >= stored_depth + 2) {
+    if (depth > current_depth) {
         // Store atomically - order matters!
         atomic_store_explicit(&item->depth, depth, memory_order_relaxed);
         atomic_store_explicit(&item->eval, eval, memory_order_relaxed);
