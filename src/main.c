@@ -2188,7 +2188,7 @@ void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     // 1. Same position (key match) - always update
     // 2. Empty slot (key == 0)
     // 3. New search is deeper by at least 2 ply (prevents constant thrashing)
-    if (stored_key == key || stored_key == 0 || depth >= stored_depth + 2) {
+    if (stored_key == 0 || (stored_key == key && depth > stored_depth) || depth >= stored_depth + 2) {
         // Store atomically - order matters!
         atomic_store_explicit(&item->depth, depth, memory_order_relaxed);
         atomic_store_explicit(&item->eval, eval, memory_order_relaxed);
