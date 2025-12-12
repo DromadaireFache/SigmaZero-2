@@ -118,8 +118,8 @@ def tournament():
 
             results["avg_depth_new"] *= i / (i + 1)
             results["avg_depth_old"] *= i / (i + 1)
-            results["avg_depth_new"] += result["avg_depth_new"] / i
-            results["avg_depth_old"] += result["avg_depth_old"] / i
+            results["avg_depth_new"] += result["avg_depth_new"] / (i + 1)
+            results["avg_depth_old"] += result["avg_depth_old"] / (i + 1)
 
             if result["score"] == 1:
                 results["wins"] += 1
