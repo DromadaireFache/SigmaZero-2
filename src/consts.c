@@ -1,10 +1,10 @@
 #include <inttypes.h>
 
 // Constant parameters
-#define PAWN_RANK_BONUS 5
-#define PAWN_VALUE 100
-#define KNIGHT_VALUE 320
-#define BISHOP_VALUE 330
+#define PAWN_RANK_BONUS 7
+#define PAWN_VALUE 116
+#define KNIGHT_VALUE 340
+#define BISHOP_VALUE 377
 #define ROOK_VALUE 500
 #define QUEEN_VALUE 958
 #define KING_VALUE 18591

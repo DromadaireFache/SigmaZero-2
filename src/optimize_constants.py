@@ -26,11 +26,11 @@ with open("data/FENs.txt", "r") as f:
             FENS.append(fen)
 
 best_consts = {
-    "PAWN_RANK_BONUS": 5,
-    "PAWN_VALUE": 100,
-    "KNIGHT_VALUE": 320,
-    "BISHOP_VALUE": 332,
-    "ROOK_VALUE": 443,
+    "PAWN_RANK_BONUS": 7,
+    "PAWN_VALUE": 116,
+    "KNIGHT_VALUE": 340,
+    "BISHOP_VALUE": 377,
+    "ROOK_VALUE": 500,
     "QUEEN_VALUE": 958,
     "KING_VALUE": 18591,
     "SCORE_VICTIM_MULTIPLIER": 70,
