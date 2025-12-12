@@ -116,8 +116,10 @@ def tournament():
             print(f"Time SigmaZero: {result['time_new']:.2f}s, Old: {result['time_old']:.2f}s")
             print(f"Avg Depth SigmaZero: {result['avg_depth_new']:.2f}, Old: {result['avg_depth_old']:.2f}")
 
-            results["avg_depth_new"] += result["avg_depth_new"] / len(FENS)
-            results["avg_depth_old"] += result["avg_depth_old"] / len(FENS)
+            results["avg_depth_new"] *= i / (i + 1)
+            results["avg_depth_old"] *= i / (i + 1)
+            results["avg_depth_new"] += result["avg_depth_new"] / i
+            results["avg_depth_old"] += result["avg_depth_old"] / i
 
             if result["score"] == 1:
                 results["wins"] += 1

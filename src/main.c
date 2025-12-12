@@ -2160,10 +2160,10 @@ size_t Chess_count_moves_multi(Chess* chess, int depth) {
 typedef enum { TT_EXACT, TT_LOWER, TT_UPPER } TTNodeType;
 
 class {
-    uint64_t key;
-    int eval;
-    uint8_t depth;
-    uint8_t type;  // TTNodeType
+    _Atomic uint64_t key;
+    _Atomic int eval;
+    _Atomic uint8_t depth;
+    _Atomic uint8_t type;  // TTNodeType
 }
 TTItem;
 
