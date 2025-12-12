@@ -51,21 +51,8 @@ void bitboard_print(bitboard_t bb) {
     }
 }
 
-const bitboard_t bb_index_lookup[] = {
-    (1ULL << 0),  (1ULL << 1),  (1ULL << 2),  (1ULL << 3),  (1ULL << 4),  (1ULL << 5),
-    (1ULL << 6),  (1ULL << 7),  (1ULL << 8),  (1ULL << 9),  (1ULL << 10), (1ULL << 11),
-    (1ULL << 12), (1ULL << 13), (1ULL << 14), (1ULL << 15), (1ULL << 16), (1ULL << 17),
-    (1ULL << 18), (1ULL << 19), (1ULL << 20), (1ULL << 21), (1ULL << 22), (1ULL << 23),
-    (1ULL << 24), (1ULL << 25), (1ULL << 26), (1ULL << 27), (1ULL << 28), (1ULL << 29),
-    (1ULL << 30), (1ULL << 31), (1ULL << 32), (1ULL << 33), (1ULL << 34), (1ULL << 35),
-    (1ULL << 36), (1ULL << 37), (1ULL << 38), (1ULL << 39), (1ULL << 40), (1ULL << 41),
-    (1ULL << 42), (1ULL << 43), (1ULL << 44), (1ULL << 45), (1ULL << 46), (1ULL << 47),
-    (1ULL << 48), (1ULL << 49), (1ULL << 50), (1ULL << 51), (1ULL << 52), (1ULL << 53),
-    (1ULL << 54), (1ULL << 55), (1ULL << 56), (1ULL << 57), (1ULL << 58), (1ULL << 59),
-    (1ULL << 60), (1ULL << 61), (1ULL << 62), (1ULL << 63)};
-
 // Convert an index (0-63) to a bitboard with only that bit set
-static inline bitboard_t bitboard_from_index(int i) { return (bitboard_t)bb_index_lookup[i]; }
+static inline bitboard_t bitboard_from_index(int i) { return (bitboard_t)1ULL << i; }
 
 static inline int index_col(int index) { return index % 8; }
 
@@ -2108,6 +2095,7 @@ class {
     Move move;
     TIME_TYPE endtime;
     int* score;
+    bool* search_cancelled;
 }
 ChessThread;
 
@@ -2430,6 +2418,7 @@ void* play_thread(void* arg_void) {
     Piece capture = Chess_make_move(chess, move);
 
     int score = -minimax(chess, endtime, depth, -INF, INF, capture, 0);
+    *arg->search_cancelled = TIME_NOW() > endtime;
     *arg->score = score;
 
     return NULL;
@@ -2512,6 +2501,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
+    bool search_cancelled[MAX_LEGAL_MOVES];
     Move moves_at_depth2[MAX_LEGAL_MOVES];
     int scores_at_depth2[MAX_LEGAL_MOVES];
     size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
@@ -2534,6 +2524,10 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             arg->endtime = endtime;
             arg->depth = depth;
             arg->score = &scores[i];
+
+            // Use this in case the search stops because of time limit to know if we can use this
+            // score
+            arg->search_cancelled = &search_cancelled[i];
 
             if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
                 perror("pthread_create failed");
@@ -2579,6 +2573,18 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             }
 
             depth++;
+
+        } else if (!search_cancelled[0]) {
+            // In case search was cancelled, try using results from this iteration
+            // Give a null score to moves that didn't complete search
+            for (int i = 1; i < n_moves; i++) {
+                if (search_cancelled[i]) scores[i] = -INF;
+            }
+
+            // Partial sort for the best move at this depth
+            bubble_sort(moves, scores, n_moves);
+            best_score = scores[0];
+            best_move = &moves[0];
         }
     }
 
