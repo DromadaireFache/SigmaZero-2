@@ -10,7 +10,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "../consts.c"
+#include "consts_V2.6.c"
 
 #define class typedef struct
 #define INF 1000000000
@@ -2162,7 +2162,7 @@ class {
     uint64_t key;
     int eval;
     uint8_t depth;
-    TTNodeType type;
+    uint8_t type; // TTNodeType
 }
 TTItem;
 
@@ -2175,29 +2175,42 @@ TTItem tt[TT_LENGTH] = {0};
 // Store an entry with fine-grained locking
 void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
-    TTItem item = tt[i];
+    TTItem *item = &tt[i];
 
-    if (depth > item.depth) {
-        item.key = key;
-        item.eval = eval;
-        item.depth = depth;
-        item.type = node_type;
+    if (depth > item->depth) {
+        item->key = key;
+        item->eval = eval;
+        item->depth = depth;
+        item->type = node_type;
     }
 }
 
 // Retrieve an entry with fine-grained locking
 bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
-    TTItem item = tt[i];
+    TTItem *item = &tt[i];
 
-    if (item.key == key && depth <= item.depth &&
-        ((item.type == TT_EXACT) || (item.type == TT_LOWER && item.eval >= b) ||
-         (item.type == TT_UPPER && item.eval <= a))) {
-        *eval_p = item.eval;
+    if (item->key == key && depth <= item->depth &&
+        ((item->type == TT_EXACT) || (item->type == TT_LOWER && item->eval >= b) ||
+         (item->type == TT_UPPER && item->eval <= a))) {
+        *eval_p = item->eval;
         return true;
     }
 
     return false;
+}
+
+void TT_occupancy(void) {
+    const size_t tt_size = sizeof(tt) / 1024 / 1024;
+    size_t tt_use = 0;
+
+    for (int i = 0; i < TT_LENGTH; i++) {
+        TTItem item = tt[i];
+        if (i == (item.key & (TT_LENGTH - 1))) tt_use++;
+    }
+
+    double tt_use_pc = (double)tt_use * 100.0 / TT_LENGTH;
+    printf("Transposition table (%.2lf%% of %luMB)\n", tt_use_pc, (unsigned long)tt_size);
 }
 
 int moves(char* fen, int depth) {
@@ -2586,6 +2599,9 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             best_score = scores[0];
             best_move = &moves[0];
         }
+
+        // Show transposition table occupancy
+        TT_occupancy();
     }
 
     free(threads);
