@@ -444,10 +444,11 @@ class {
     ZHashStack zhstack;     // Stack to store zobrist hash of previous positions
     uint64_t zhash;         // Current zobrist hash of the position
     EnemyAttackMap enemy_attack_map;
-    int eval;             // Cache a partial value of the eval that doesn't depend on fullmoves
-    int pawn_row_sum;     // Sum pawn rows to use in final eval calculation
-    bitboard_t bb_white;  // Bitboard of all white pieces
-    bitboard_t bb_black;  // Bitboard of all black pieces
+    int eval;               // Cache a partial value of the eval that doesn't depend on fullmoves
+    int pawn_row_sum;       // Sum pawn rows to use in final eval calculation
+    bitboard_t bb_white;    // Bitboard of all white pieces
+    bitboard_t bb_black;    // Bitboard of all black pieces
+    Move killer_moves[64];  // Used for move ordering
 }
 Chess;
 
@@ -1263,6 +1264,7 @@ Chess* Chess_from_fen(char* fen_arg) {
     Chess_find_kings(board);
     Chess_init_eval(board);
     Chess_init_bb(board);
+    memset(board->killer_moves, 0, sizeof(board->killer_moves));
     board->zhash = Chess_zhash(board);
     return board;
 }
@@ -2162,7 +2164,7 @@ class {
     uint64_t key;
     int eval;
     uint8_t depth;
-    uint8_t type; // TTNodeType
+    uint8_t type;  // TTNodeType
 }
 TTItem;
 
@@ -2175,7 +2177,7 @@ TTItem tt[TT_LENGTH] = {0};
 // Store an entry with fine-grained locking
 void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
-    TTItem *item = &tt[i];
+    TTItem* item = &tt[i];
 
     if (depth > item->depth) {
         item->key = key;
@@ -2188,7 +2190,7 @@ void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
 // Retrieve an entry with fine-grained locking
 bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
-    TTItem *item = &tt[i];
+    TTItem* item = &tt[i];
 
     if (item->key == key && depth <= item->depth &&
         ((item->type == TT_EXACT) || (item->type == TT_LOWER && item->eval >= b) ||
@@ -2361,6 +2363,14 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
     }
 
+    // Add score for killer move heuristic
+    for (int i = 0; i < n_moves; i++) {
+        Move* move = &moves[i];
+        if (chess->killer_moves[depth].from == move->from &&
+                chess->killer_moves[depth].to == move->to)
+            move->score += KILLER_MOVE_BONUS;
+    }
+
     int original_a = a;
     int original_b = b;
     int best_score = -INF;
@@ -2390,7 +2400,13 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             best_score = score;
             if (score > a) a = score;
         }
-        if (score >= b) break;
+        if (score >= b) {
+            if (capture == EMPTY) {
+                chess->killer_moves[depth].from = move->from;
+                chess->killer_moves[depth].to = move->to;
+            }
+            break;
+        }
     }
 
     TTNodeType node_type;
@@ -2601,7 +2617,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
         }
 
         // Show transposition table occupancy
-        TT_occupancy();
+        // TT_occupancy();
     }
 
     free(threads);
