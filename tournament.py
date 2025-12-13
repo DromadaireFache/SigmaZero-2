@@ -5,7 +5,7 @@ import chess
 import chess.pgn
 
 TIME = 100  # milliseconds per move
-OLD_BOT = "V2.5"
+OLD_BOT = "V2.6"
 FENS = []
 
 with open("data/FENs.txt", "r") as f:
