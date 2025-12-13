@@ -15,6 +15,7 @@ except ModuleNotFoundError:
     from . import sigma_zero
 
 TIME = 100  # milliseconds per move
+OLD = "V2.6"
 
 # FENs to use for tournament
 FENS = []
@@ -260,7 +261,7 @@ def log(message: str):
 # 5. Run 100 games between the two versions, alternating colors
 # 6. Give score to mutated version: # wins - # losses
 # 7. If score <= 0, discard mutated constants and go back to step 1
-# 8. Run 100 games between sigma-zero-mutated and V2.5
+# 8. Run 100 games between sigma-zero-mutated and old
 # 9. If score <= best_score_against_V2_5, discard mutated constants and go back to step 1
 # 10. If score > best_score_against_V2_5, keep mutated constants as best_consts and go back to step 1
 best_score_against_V2_5 = 0
@@ -292,17 +293,17 @@ def training_step():
         return 0
     
     # Step 8
-    log("Mutated constants outperformed best constants. Now testing against V2.5...")
-    sigma_zero.make("V2.5")
+    log("Mutated constants outperformed best constants. Now testing against old...")
+    sigma_zero.make(OLD)
     won, score = tournament(executable("sigma-zero-mutated"), executable("old"), best_score_against_V2_5)
     
     # Step 9
     if not won:
-        log("Mutated constants did not outperform best constants against V2.5. Discarding mutations.")
+        log(f"Mutated constants did not outperform best constants against {OLD}. Discarding mutations.")
         return 0
     
     # Step 10
-    log("Mutated constants outperformed V2.5! Updating best constants.")
+    log(f"Mutated constants outperformed {OLD}! Updating best constants.")
     best_consts = mut_consts
     best_score_against_V2_5 = score
     with open("src/consts_best.c", "w") as f:
@@ -317,10 +318,10 @@ if __name__ == "__main__":
         constants_to_optimize = [key for key in sys.argv[1:] if key in best_consts]
         print("Optimizing only the following constants:", ", ".join(constants_to_optimize))
     
-    # Calculate baseline score against V2.5
-    sigma_zero.make("V2.5")
+    # Calculate baseline score against old
+    sigma_zero.make(OLD)
     os.system("make")
-    print("Calculating baseline score against V2.5...")
+    print(f"Calculating baseline score against {OLD}...")
     won, best_score_against_V2_5 = tournament(executable("sigma-zero"), executable("old"), 0)
     
     # Clear log file
