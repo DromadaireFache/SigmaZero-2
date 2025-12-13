@@ -2173,8 +2173,14 @@ TTItem;
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
 
-// _Atomic size_t tt_hits = 0;
-// _Atomic size_t tt_misses = 0;
+#define DEBUG
+#ifdef DEBUG
+_Atomic size_t tt_hits = 0;
+_Atomic size_t tt_misses = 0;
+#define ADD_HIT_MISS(var) atomic_fetch_add_explicit(&(var), 1, memory_order_relaxed)
+#else
+#define ADD_HIT_MISS(var)
+#endif
 
 void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
@@ -2182,8 +2188,8 @@ void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
 
     // Read current depth atomically
     uint8_t stored_depth = atomic_load_explicit(&item->depth, memory_order_relaxed);
-    
-    if (depth < stored_depth) {
+
+    if (depth > stored_depth) {
         // Store atomically - order matters!
         atomic_store_explicit(&item->depth, depth, memory_order_relaxed);
         atomic_store_explicit(&item->eval, eval, memory_order_relaxed);
@@ -2199,13 +2205,13 @@ bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     // Read key first with acquire semantics
     uint64_t stored_key = atomic_load_explicit(&item->key, memory_order_acquire);
     if (stored_key != key) {
-        // atomic_fetch_add_explicit(&tt_misses, 1, memory_order_relaxed);
+        ADD_HIT_MISS(tt_misses);
         return false;
     }
 
     uint8_t stored_depth = atomic_load_explicit(&item->depth, memory_order_relaxed);
-    if (depth < stored_depth) {
-        // atomic_fetch_add_explicit(&tt_misses, 1, memory_order_relaxed);
+    if (depth > stored_depth) {
+        ADD_HIT_MISS(tt_misses);
         return false;
     }
 
@@ -2215,11 +2221,11 @@ bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     if ((stored_type == TT_EXACT) || (stored_type == TT_LOWER && stored_eval >= b) ||
         (stored_type == TT_UPPER && stored_eval <= a)) {
         *eval_p = stored_eval;
-        // atomic_fetch_add_explicit(&tt_hits, 1, memory_order_relaxed);
+        ADD_HIT_MISS(tt_hits);
         return true;
     }
 
-    // atomic_fetch_add_explicit(&tt_misses, 1, memory_order_relaxed);
+    ADD_HIT_MISS(tt_misses);
     return false;
 }
 
@@ -2235,15 +2241,17 @@ void TT_occupancy(void) {
     double tt_use_pc = (double)tt_use * 100.0 / TT_LENGTH;
     printf("Transposition table (%.2lf%% of %luMB)\n", tt_use_pc, (unsigned long)tt_size);
 
-    // size_t hits = atomic_load_explicit(&tt_hits, memory_order_relaxed);
-    // size_t misses = atomic_load_explicit(&tt_misses, memory_order_relaxed);
-    // size_t total = hits + misses;
+#ifdef DEBUG
+    size_t hits = atomic_load_explicit(&tt_hits, memory_order_relaxed);
+    size_t misses = atomic_load_explicit(&tt_misses, memory_order_relaxed);
+    size_t total = hits + misses;
 
-    // if (total > 0) {
-    //     double hit_rate = (double)hits * 100.0 / total;
-    //     printf("TT hits: %lu, misses: %lu, hit rate: %.2f%%\n", (unsigned long)hits,
-    //            (unsigned long)misses, hit_rate);
-    // }
+    if (total > 0) {
+        double hit_rate = (double)hits * 100.0 / total;
+        printf("TT hits: %lu, misses: %lu, hit rate: %.2f%%\n", (unsigned long)hits,
+               (unsigned long)misses, hit_rate);
+    }
+#endif
 }
 
 int moves(char* fen, int depth) {
@@ -2633,8 +2641,10 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             best_move = &moves[0];
         }
 
+#ifdef DEBUG
         // Show transposition table occupancy
-        // TT_occupancy();
+        TT_occupancy();
+#endif
     }
 
     free(threads);
