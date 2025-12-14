@@ -18,7 +18,7 @@ TIME = 100          # milliseconds per move
 OLD = "V2.6"        # Old engine version to compete against
 RAND_NOISE = 0.1    # Random noise to add to constant mutations
 
-TIME_CUTOFF = 100   # milliseconds per move for cutoff training
+TIME_CUTOFF = 1000  # milliseconds per move for cutoff training
 CUTOFF_CONSTS = [
     "PROMOTION_MOVE_SCORE",
     "KILLER_MOVE_BONUS",
@@ -61,7 +61,7 @@ best_consts = {
     "ROOK_VALUE": 500,
     "QUEEN_VALUE": 958,
     "KING_VALUE": 400,
-    "PROMOTION_MOVE_SCORE": 10430,
+    "PROMOTION_MOVE_SCORE": 24516,
     "FULLMOVES_ENDGAME": 57,
     "QUIES_DEPTH": 7,
     "MAX_EXTENSION": 2,
@@ -69,18 +69,18 @@ best_consts = {
     "ROOK_KING_PROX": 126,
     "QUEEN_KING_PROX": 122,
     "KILLER_MOVE_BONUS": 107,
-    "PAWN_VICTIM_SCORE": 108,
-    "KNIGHT_VICTIM_SCORE": 106,
-    "BISHOP_VICTIM_SCORE": 90,
-    "ROOK_VICTIM_SCORE": 109,
-    "QUEEN_VICTIM_SCORE": 108,
-    "KING_VICTIM_SCORE": 107,
-    "PAWN_AGGRO_SCORE": 109,
-    "KNIGHT_AGGRO_SCORE": 88,
-    "BISHOP_AGGRO_SCORE": 109,
-    "ROOK_AGGRO_SCORE": 100,
-    "QUEEN_AGGRO_SCORE": 107,
-    "KING_AGGRO_SCORE": 100,
+    "PAWN_VICTIM_SCORE": 113,
+    "KNIGHT_VICTIM_SCORE": 116,
+    "BISHOP_VICTIM_SCORE": 104,
+    "ROOK_VICTIM_SCORE": 128,
+    "QUEEN_VICTIM_SCORE": 214,
+    "KING_VICTIM_SCORE": 98,
+    "PAWN_AGGRO_SCORE": 55,
+    "KNIGHT_AGGRO_SCORE": 71,
+    "BISHOP_AGGRO_SCORE": 98,
+    "ROOK_AGGRO_SCORE": 63,
+    "QUEEN_AGGRO_SCORE": 72,
+    "KING_AGGRO_SCORE": 57,
     "PS_BLACK_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, -50, -50, -50, -50, -50, -50, -50, -50, -10, -10, -20, -30, -30, -20, -10, -10, -5, -5, -10, -25, -25, -10, -5, -5, 0, 0, 0, -20, -20, 0, 0, 0, -5, 5, 10, 0, 0, 10, 5, -5, -5, -10, -10, 20, 20, -10, -10, -5, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_WHITE_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, 5, 10, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 10, 25, 25, 10, 5, 5, 10, 10, 20, 30, 30, 20, 10, 10, 50, 50, 50, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_BLACK_KNIGHT": [50, 40, 30, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 40, 30, 0, -10, -15, -15, -10, 0, 30, 30, -5, -15, -20, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 30, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 40, 50, 40, 30, 30, 30, 30, 40, 50],

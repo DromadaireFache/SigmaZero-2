@@ -2741,15 +2741,15 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     best_score *= chess->turn == TURN_WHITE ? 1 : -1;
 
     puts("{");
-    printf("  \"scores\": {\n");
-    for (int i = 0; i < n_moves; i++) {
-        if (i >= n_moves - 1) {
-            printf("    \"%s\": %.2f\n", Move_string(moves + i), (double)scores[i] / 100);
-        } else {
-            printf("    \"%s\": %.2f,\n", Move_string(moves + i), (double)scores[i] / 100);
-        }
-    }
-    printf("  },\n");
+    // printf("  \"scores\": {\n");
+    // for (int i = 0; i < n_moves; i++) {
+    //     if (i >= n_moves - 1) {
+    //         printf("    \"%s\": %.2f\n", Move_string(moves + i), (double)scores[i] / 100);
+    //     } else {
+    //         printf("    \"%s\": %.2f,\n", Move_string(moves + i), (double)scores[i] / 100);
+    //     }
+    // }
+    // printf("  },\n");
     printf("  \"millis\": %d,\n", millis);
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
@@ -2773,19 +2773,37 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.0 (2025-09-06)\n");
+    printf("SigmaZero Chess Engine 2.7.2 (2025-12-14)\n");
     return 0;
 }
 
 void help(void) {
-    printf("Usage: sigma-zero <command>\n");
+    printf("SigmaZero Chess Engine - Command Line Interface\n\n");
+    printf("Usage: sigma-zero <command> [arguments]\n\n");
     printf("Commands:\n");
-#define HELP_WIDTH "  %-20s "
-    printf(HELP_WIDTH "Show this help message\n", "help");
-    printf(HELP_WIDTH "Show version information\n", "version");
-    printf(HELP_WIDTH "Show legal moves for the given position\n", "moves <FEN> <depth>");
-    printf(HELP_WIDTH "Get the evaluation of the given position\n", "eval <FEN>");
-    printf(HELP_WIDTH "Bot plays a move based on the given position\n", "play <FEN> <millis>");
+#define HELP_WIDTH "  %-30s"
+    printf(HELP_WIDTH " %s\n", "help, -h, --help", "Show this help message");
+    printf(HELP_WIDTH " %s\n", "version, -v, --version", "Show version information");
+    printf("\n");
+    printf(HELP_WIDTH " %s\n", "play <FEN> <millis> [history]", "Play best move for position");
+    printf(HELP_WIDTH " %s\n", "", "  FEN: Position in FEN notation");
+    printf(HELP_WIDTH " %s\n", "", "  millis: Time limit in milliseconds");
+    printf(HELP_WIDTH " %s\n", "", "  history: Optional game history");
+    printf("\n");
+    printf(HELP_WIDTH " %s\n", "fancy <FEN> <millis> [history]", "Play with enhanced scoring");
+    printf("\n");
+    printf(HELP_WIDTH " %s\n", "moves <FEN> <depth>", "Count legal moves at depth");
+    printf(HELP_WIDTH " %s\n", "", "  depth: Search depth (perft)");
+    printf("\n");
+    printf(HELP_WIDTH " %s\n", "eval <FEN>", "Evaluate position");
+    printf(HELP_WIDTH " %s\n", "hash <FEN>", "Show zobrist hash");
+    printf(HELP_WIDTH " %s\n", "scores <FEN>", "Show move scores");
+    printf(HELP_WIDTH " %s\n", "kingsafety <FEN>", "Show king danger scores");
+    printf("\n");
+    printf("Examples:\n");
+    printf("  sigma-zero play \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 1000\n");
+    printf("  sigma-zero moves \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 5\n");
+    printf("  sigma-zero eval \"8/8/8/4k3/8/8/4K3/8 w - - 0 1\"\n");
 }
 
 int king_safety_command(Chess* chess) {
