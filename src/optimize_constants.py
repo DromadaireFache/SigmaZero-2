@@ -292,7 +292,7 @@ def log(message: str):
 
 def log_diff(old_consts: dict, new_consts: dict):
     for key in old_consts.keys():
-        if type(old_consts[key]) is not list or old_consts[key] != new_consts[key]:
+        if type(old_consts[key]) is not list and old_consts[key] != new_consts[key]:
             log(f"  {key}: {old_consts[key]} -> {new_consts[key]}")
 
 
@@ -378,7 +378,7 @@ def get_average_cutoff() -> float:
 # 7. If average beta cutoff index is not improved, discard mutated constants and go back to step 3
 # 8. If average beta cutoff index is improved, keep mutated constants as best_consts and go back to step 3
 def train_cutoff():
-    global best_consts
+    global best_consts, RAND_NOISE
     with open("src/main.c", "rt") as f:
         main_c = f.read()
     with open("src/main.c", "wt") as f:
@@ -390,9 +390,11 @@ def train_cutoff():
     
     n_mutations = 0
     n_steps = 0
+    og_rand_noise = 0.5
     
     try:
         while True:
+            RAND_NOISE = max(0.1, og_rand_noise * (0.92 ** n_mutations))
             n_steps += 1
             log(f"=== Beta Cutoff Training Step {n_steps} ===")
             log(f"{n_mutations} successful mutations so far.")
@@ -435,8 +437,6 @@ def train_cutoff():
     print("Final best constants written to src/consts.c")
     
     # Cleanup
-    os.remove(executable("sigma-zero-best"))
-    os.remove(executable("sigma-zero-mutated"))
     if os.path.exists("src/consts_best.c"):
         os.remove("src/consts_best.c")
 
