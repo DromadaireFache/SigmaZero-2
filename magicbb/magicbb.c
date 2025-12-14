@@ -157,20 +157,20 @@ int ROOK_MAGIC_SHIFTS[64] = {[0 ... 63] = 44};
 bitboard_t BISHOP_MAGIC_NUMS[64];
 int BISHOP_MAGIC_SHIFTS[64] = {[0 ... 63] = 44};
 bitboard_t encountered[1 << 20];
-bitboard_t* ROOK_MOVES[64];
-bitboard_t* BISHOP_MOVES[64];
+bitboard_t ROOK_MOVES[64][1 << 20];
+bitboard_t BISHOP_MOVES[64][1 << 20];
 
 size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_NUMS[64],
                              bitboard_t (*bitboard_piece_mask)(int),
                              bitboard_t (*piece_move_bb)(bitboard_t, int),
-                             bitboard_t* MAGIC_MOVES[64]) {
+                             bitboard_t MAGIC_MOVES[64][1 << 20]) {
     int magic_shift = MAGIC_SHIFTS[square] + 1;
     bitboard_t bb = bitboard_piece_mask(square);
     int num_targets = 1 << bitboard_bit_count(bb);
     bitboard_t magic_num = random_uint64();
 
     // Moves array to determine uniqueness
-    memset(encountered, 0, sizeof(encountered));
+    memset(encountered, 0, sizeof(bitboard_t) * (1 << (64 - magic_shift)));
     bool unique = true;
 
     for (int i = 0; i < num_targets; i++) {
@@ -181,8 +181,8 @@ size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_
         if (magic_shift == 45) {
             moves = piece_move_bb(target_mask, square);
         } else {
-            int index = (target_mask * MAGIC_NUMS[square]) >> MAGIC_SHIFTS[square];
-            moves = MAGIC_MOVES[square][index];
+            int old_index = (target_mask * MAGIC_NUMS[square]) >> MAGIC_SHIFTS[square];
+            moves = MAGIC_MOVES[square][old_index];
         }
 
         if (encountered[index] != 0 && encountered[index] != moves) {
@@ -197,8 +197,6 @@ size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_
     if (unique) {
         MAGIC_NUMS[square] = magic_num;
         MAGIC_SHIFTS[square]++;
-        if (magic_shift > 45) free(MAGIC_MOVES[square]);
-        MAGIC_MOVES[square] = malloc(sizeof(bitboard_t) * (1 << (64 - magic_shift)));
 
         for (int i = 0; i < num_targets; i++) {
             bitboard_t target_mask = bitboard_target_mask(bb, i);
