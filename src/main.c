@@ -2389,10 +2389,12 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     // Add score for killer move heuristic
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
-        move->score += chess->history_table[move->from][move->to] / 16;
+        int bonus = 4 * chess->history_table[move->from][move->to];
         if (chess->killer_moves[depth].from == move->from &&
             chess->killer_moves[depth].to == move->to)
-            move->score += KILLER_MOVE_BONUS;
+            bonus += KILLER_MOVE_BONUS;
+        // if (bonus != 0) printf("bonus: %d\n", bonus);
+        move->score += bonus;
     }
 
     int original_a = a;
