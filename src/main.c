@@ -463,6 +463,7 @@ class {
     bitboard_t bb_white;    // Bitboard of all white pieces
     bitboard_t bb_black;    // Bitboard of all black pieces
     Move killer_moves[64];  // Used for move ordering
+    int history_table[64][64];  // Also used for move ordering
 }
 Chess;
 
@@ -1271,6 +1272,7 @@ Chess* Chess_from_fen(char* fen_arg) {
     Chess_init_eval(board);
     Chess_init_bb(board);
     memset(board->killer_moves, 0, sizeof(board->killer_moves));
+    memset(board->history_table, 0, sizeof(board->history_table));
     board->zhash = Chess_zhash(board);
     return board;
 }
@@ -2352,7 +2354,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int evaluation = (e);                         \
     TT_store(hash, evaluation, depth, node_type); \
     return evaluation;
-    
+
     // Extend search if in check, otherwise don't
     if (depth == 0) {
         if (extensions < MAX_EXTENSION && Chess_friendly_check(chess)) {
@@ -2389,6 +2391,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     // Add score for killer move heuristic
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
+        move->score += chess->history_table[move->from][move->to] / 128;
         if (chess->killer_moves[depth].from == move->from &&
             chess->killer_moves[depth].to == move->to)
             move->score += KILLER_MOVE_BONUS;
@@ -2427,6 +2430,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             if (capture == EMPTY) {
                 chess->killer_moves[depth].from = move->from;
                 chess->killer_moves[depth].to = move->to;
+                chess->history_table[move->from][move->to] += depth * depth;
             }
             break;
         }
