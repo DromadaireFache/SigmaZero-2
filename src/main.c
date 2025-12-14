@@ -2299,7 +2299,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
-    if (depth == 0 || best_score >= b || TIME_NOW() > endtime) {
+    if (depth == 0 || best_score >= b) {
         // nodes_total++;
         return best_score;
     }
@@ -2356,9 +2356,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     return evaluation;
 
     // Time cutoff
-    if (TIME_NOW() > endtime) {
-        RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
-    }
+    if (depth > 3 && TIME_NOW() > endtime) return 0;
 
     // Extend search if in check, otherwise don't
     if (depth == 0) {
