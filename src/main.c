@@ -458,12 +458,12 @@ class {
     ZHashStack zhstack;     // Stack to store zobrist hash of previous positions
     uint64_t zhash;         // Current zobrist hash of the position
     EnemyAttackMap enemy_attack_map;
-    int eval;               // Cache a partial value of the eval that doesn't depend on fullmoves
-    int pawn_row_sum;       // Sum pawn rows to use in final eval calculation
-    bitboard_t bb_white;    // Bitboard of all white pieces
-    bitboard_t bb_black;    // Bitboard of all black pieces
-    Move killer_moves[64];  // Used for move ordering
-    int history_table[64][64];  // Also used for move ordering
+    int eval;                  // Cache a partial value of the eval that doesn't depend on fullmoves
+    int pawn_row_sum;          // Sum pawn rows to use in final eval calculation
+    bitboard_t bb_white;       // Bitboard of all white pieces
+    bitboard_t bb_black;       // Bitboard of all black pieces
+    Move killer_moves[2][64];  // Used for move ordering [id][depth]
+    int history_table[2][64][64];  // Also used for move ordering [turn][from][to]
 }
 Chess;
 
@@ -1992,8 +1992,11 @@ void Chess_score_move(Chess* chess, Move* move) {
 
     // MVV - LVA
     if (victim != EMPTY) {
-        move->score +=
-            abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) / 64 - Piece_value(aggressor));
+        if (chess->turn == TURN_WHITE) {
+            move->score -= Piece_value(aggressor) + Piece_value(victim);
+        } else {
+            move->score += Piece_value(aggressor) + Piece_value(victim);
+        }
     } else {
         // Deduct points if attacked by enemy pawns
 #define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
@@ -2364,7 +2367,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     }
 
     // Time cutoff
-    if (depth > 3 && TIME_NOW() > endtime) return 0;
+    if (TIME_NOW() > endtime) return 0;
 
     // Check for 3 fold repetition
     if (Chess_3fold_repetition(chess) >= 3) {
@@ -2389,10 +2392,16 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     // Add score for killer move heuristic
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
-        int bonus = 4 * chess->history_table[move->from][move->to];
-        if (chess->killer_moves[depth].from == move->from &&
-            chess->killer_moves[depth].to == move->to)
+        int bonus = chess->history_table[chess->turn][move->from][move->to];
+
+        // Check both killer slots
+        if ((chess->killer_moves[0][depth].from == move->from &&
+             chess->killer_moves[0][depth].to == move->to) ||
+            (chess->killer_moves[1][depth].from == move->from &&
+             chess->killer_moves[1][depth].to == move->to)) {
             bonus += KILLER_MOVE_BONUS;
+        }
+
         // if (bonus != 0) printf("bonus: %d\n", bonus);
         move->score += bonus;
     }
@@ -2428,12 +2437,16 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
         if (score >= b) {
             if (capture == EMPTY) {
-                chess->killer_moves[depth].from = move->from;
-                chess->killer_moves[depth].to = move->to;
+                // Shift killers: move primary to secondary, new move to primary
+                if (!(chess->killer_moves[0][depth].from == move->from &&
+                      chess->killer_moves[0][depth].to == move->to)) {
+                    chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
+                    chess->killer_moves[0][depth] = *move;
+                }
 
                 // Cap history table to prevent overflow
-                if (chess->history_table[move->from][move->to] < 10000) {
-                    chess->history_table[move->from][move->to] += depth * depth;
+                if (chess->history_table[chess->turn][move->from][move->to] < 10000) {
+                    chess->history_table[chess->turn][move->from][move->to] += depth * depth;
                 }
             }
             break;

@@ -7,16 +7,16 @@
 #define BISHOP_VALUE 377
 #define ROOK_VALUE 500
 #define QUEEN_VALUE 958
-#define KING_VALUE 18591
+#define KING_VALUE 400
 #define SCORE_VICTIM_MULTIPLIER 70
-#define PROMOTION_MOVE_SCORE 100
+#define PROMOTION_MOVE_SCORE 10000
 #define FULLMOVES_ENDGAME 57
 #define QUIES_DEPTH 7
 #define MAX_EXTENSION 2
 #define BISHOP_KING_PROX 97
 #define ROOK_KING_PROX 126
 #define QUEEN_KING_PROX 122
-#define KILLER_MOVE_BONUS 102
+#define KILLER_MOVE_BONUS 100
 
 // Piece square values
 const int PS_BLACK_PAWN[] = {0, 0, 0, 0, 0, 0, 0, 0, -50, -50, -50, -50, -50, -50, -50, -50, -10, -10, -20, -30, -30, -20, -10, -10, -5, -5, -10, -25, -25, -10, -5, -5, 0, 0, 0, -20, -20, 0, 0, 0, -5, 5, 10, 0, 0, 10, 5, -5, -5, -10, -10, 20, 20, -10, -10, -5, 0, 0, 0, 0, 0, 0, 0, 0};
