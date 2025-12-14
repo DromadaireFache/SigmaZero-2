@@ -2047,8 +2047,6 @@ size_t Chess_legal_moves_scored(Chess* chess, Move* moves, bool captures_only) {
 }
 
 static inline void select_best_move(Move* moves, int start, int n_moves) {
-    if (start >= n_moves) return;
-
     int best = start;
     for (int i = start + 1; i < n_moves; i++) {
         if (moves[i].score > moves[best].score) {
@@ -2354,10 +2352,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int evaluation = (e);                         \
     TT_store(hash, evaluation, depth, node_type); \
     return evaluation;
-
-    // Time cutoff
-    if (depth > 3 && TIME_NOW() > endtime) return 0;
-
+    
     // Extend search if in check, otherwise don't
     if (depth == 0) {
         if (extensions < MAX_EXTENSION && Chess_friendly_check(chess)) {
@@ -2367,6 +2362,9 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
         }
     }
+
+    // Time cutoff
+    if (depth > 3 && TIME_NOW() > endtime) return 0;
 
     // Check for 3 fold repetition
     if (Chess_3fold_repetition(chess) >= 3) {
