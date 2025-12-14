@@ -6,7 +6,7 @@
 #include <string.h>
 #include <time.h>
 
-#define MAX_STALL 1  // Number of seconds until stop stall
+#define MAX_STALL 600  // Number of seconds until stop stall
 
 // A bitboard is a 64-bit integer where each bit represents a square on the
 // chessboard (from a1 to h8). The least significant bit (LSB) represents a1,
@@ -119,8 +119,8 @@ bitboard_t bishop_move_bb(bitboard_t target_mask, int pos) {
 
     SLIDING_PIECE_ADD_MOVE(col + i < 8 && row + i < 8, 9 * i);
     SLIDING_PIECE_ADD_MOVE(col - i >= 0 && row + i < 8, 7 * i);
-    SLIDING_PIECE_ADD_MOVE(col + i < 8 && col - i >= 0, -7 * i);
-    SLIDING_PIECE_ADD_MOVE(row - i >= 0 && col - i >= 0, -9 * i);
+    SLIDING_PIECE_ADD_MOVE(col + i < 8 && row - i >= 0, -7 * i);
+    SLIDING_PIECE_ADD_MOVE(col - i >= 0 && row - i >= 0, -9 * i);
 
     return bb;
 }
@@ -156,29 +156,31 @@ bitboard_t ROOK_MAGIC_NUMS[64];
 int ROOK_MAGIC_SHIFTS[64] = {[0 ... 63] = 44};
 bitboard_t BISHOP_MAGIC_NUMS[64];
 int BISHOP_MAGIC_SHIFTS[64] = {[0 ... 63] = 44};
-bool encountered[1 << 20];
+bitboard_t encountered[1 << 20];
 
 size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_NUMS[64],
-                             bitboard_t (*bitboard_piece_mask)(int)) {
+                             bitboard_t (*bitboard_piece_mask)(int),
+                             bitboard_t (*piece_move_bb)(bitboard_t, int)) {
     int magic_shift = MAGIC_SHIFTS[square] + 1;
     bitboard_t bb = bitboard_piece_mask(square);
     int num_targets = 1 << bitboard_bit_count(bb);
     bitboard_t magic_num = random_uint64();
 
-    // Bool array to determine uniqueness
+    // Moves array to determine uniqueness
     memset(encountered, 0, sizeof(encountered));
     bool unique = true;
 
     for (int i = 0; i < num_targets; i++) {
         bitboard_t target_mask = bitboard_target_mask(bb, i);
         int index = (target_mask * magic_num) >> magic_shift;
+        bitboard_t moves = piece_move_bb(target_mask, square);
 
-        if (encountered[index]) {
+        if (encountered[index] != 0 && encountered[index] != moves) {
             unique = false;
             break;
         }
 
-        encountered[index] = true;
+        encountered[index] = moves;
     }
 
     // if we found a magic number that works return
@@ -198,27 +200,32 @@ void piece_write_iteration(FILE* f, char* piece_name, int square, int MAGIC_SHIF
     bitboard_t magic_num = MAGIC_NUMS[square];
     bitboard_t bb = bitboard_piece_mask(square);
     int num_targets = 1 << bitboard_bit_count(bb);
+    memset(encountered, 0, sizeof(encountered));
 
     fprintf(f, "const bitboard_t %s_MOVES_%d[%d] = {", piece_name, square, 1 << (64 - magic_shift));
 
     for (int i = 0; i < num_targets; i++) {
         bitboard_t target_mask = bitboard_target_mask(bb, i);
         int index = (target_mask * magic_num) >> magic_shift;
-        bitboard_t moves = piece_move_bb(target_mask, square);
 
-        fprintf(f, "[%d]=0x%" PRIx64 "ULL,", index, moves);
+        if (!encountered[index]) {
+            bitboard_t moves = piece_move_bb(target_mask, square);
+            fprintf(f, "[%d]=0x%" PRIx64 "ULL,", index, moves);
+            encountered[index] = moves;
+        }
     }
 
     fprintf(f, "};\n");
 }
 
 size_t rook_magic_iteration(int square) {
-    return piece_magic_iteration(square, ROOK_MAGIC_SHIFTS, ROOK_MAGIC_NUMS, bitboard_rook_mask);
+    return piece_magic_iteration(square, ROOK_MAGIC_SHIFTS, ROOK_MAGIC_NUMS, bitboard_rook_mask,
+                                 rook_move_bb);
 }
 
 size_t bishop_magic_iteration(int square) {
     return piece_magic_iteration(square, BISHOP_MAGIC_SHIFTS, BISHOP_MAGIC_NUMS,
-                                 bitboard_bishop_mask);
+                                 bitboard_bishop_mask, bishop_move_bb);
 }
 
 void rook_write_iteration(FILE* f, int square) {
