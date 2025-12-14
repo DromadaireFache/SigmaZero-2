@@ -18,7 +18,7 @@ TIME = 100          # milliseconds per move
 OLD = "V2.6"        # Old engine version to compete against
 RAND_NOISE = 0.1    # Random noise to add to constant mutations
 
-TIME_CUTOFF = 1000  # milliseconds per move for cutoff training
+TIME_CUTOFF = 100   # milliseconds per move for cutoff training
 CUTOFF_CONSTS = [
     "PROMOTION_MOVE_SCORE",
     "KILLER_MOVE_BONUS",
@@ -35,6 +35,7 @@ CUTOFF_CONSTS = [
     "QUEEN_AGGRO_SCORE",
     "KING_AGGRO_SCORE",
 ]
+MINMAX_VALUES = ["depth", "nodes", "first_move_cutoff_%", "beta_cutoff_%", "avg_cutoff_index"]
 
 # FENs to use for tournament
 FENS = []
@@ -354,18 +355,18 @@ def training_step():
         f.write(make_const_file(best_consts))
     return 1
 
-def get_average_cutoff() -> float:
+def get_average_cutoff(value_name: str) -> float:
     total_cutoff_index = 0
     
     for fen in CUTOFF_FENS:
         board = chess.Board(fen)
         result = sigma_zero.play(board, TIME_CUTOFF)
-        cutoff_index = result.get("avg_cutoff_index", 0)
-        # print(f"FEN: {fen} -> Beta cutoff index: {cutoff_index}")
+        cutoff_index = result[value_name]
+        # print(f"FEN: {fen} -> {value_name}: {cutoff_index}")
         total_cutoff_index += cutoff_index
     
     average_cutoff = total_cutoff_index / len(CUTOFF_FENS)
-    print(f"Average beta cutoff index: {average_cutoff:.2f}")
+    print(f"Average {value_name}: {average_cutoff:.2f}")
     return average_cutoff
 
 # Training loop for beta cutoff constants only
@@ -377,16 +378,16 @@ def get_average_cutoff() -> float:
 # 6. Run over the set of fens and calculate average beta cutoff index
 # 7. If average beta cutoff index is not improved, discard mutated constants and go back to step 3
 # 8. If average beta cutoff index is improved, keep mutated constants as best_consts and go back to step 3
-def train_cutoff():
+def train_cutoff(value_name: str, maximize: bool):
     global best_consts, RAND_NOISE
     with open("src/main.c", "rt") as f:
         main_c = f.read()
     with open("src/main.c", "wt") as f:
         f.write(main_c.replace("// #define TRACK_BETA_CUTOFFS", "#define TRACK_BETA_CUTOFFS"))
     
-    best_average_cutoff = get_average_cutoff()
-    log(f"=== Training beta cutoff constants ===")
-    log(f"Initial average beta cutoff index: {best_average_cutoff:.2f}")
+    best_value = get_average_cutoff(value_name)
+    log(f"=== Training {value_name} constants ===")
+    log(f"Initial average {value_name}: {best_value:.2f}")
     
     n_mutations = 0
     n_steps = 0
@@ -396,7 +397,7 @@ def train_cutoff():
         while True:
             RAND_NOISE = max(0.1, og_rand_noise * (0.92 ** n_mutations))
             n_steps += 1
-            log(f"=== Beta Cutoff Training Step {n_steps} ===")
+            log(f"=== {value_name} Training Step {n_steps} ===")
             log(f"{n_mutations} successful mutations so far.")
             
             # Step 3 and 4
@@ -408,26 +409,26 @@ def train_cutoff():
             os.system("make")
             
             # Step 6
-            average_cutoff = get_average_cutoff()
+            average_cutoff = get_average_cutoff(value_name)
             
             # Step 7
-            if average_cutoff >= best_average_cutoff:
-                log("Mutated constants did not improve average beta cutoff index. Discarding mutations.")
+            if (maximize and average_cutoff <= best_value) or (not maximize and average_cutoff >= best_value):
+                log(f"Mutated constants did not improve average {value_name}. Discarding mutations.")
                 continue
             
             # Step 8
-            log(f"Mutated constants improved average beta cutoff index: {average_cutoff:.2f} < {best_average_cutoff:.2f}. Updating best constants.")
+            log(f"Mutated constants improved average {value_name}: {average_cutoff:.2f} < {best_value:.2f}. Updating best constants.")
             log_diff(best_consts, mut_consts)
             best_consts = mut_consts
-            best_average_cutoff = average_cutoff
+            best_value = average_cutoff
             n_mutations += 1
             
     except KeyboardInterrupt:
-        log("Beta cutoff training interrupted.")
+        log(f"{value_name} training interrupted.")
     except Exception as e:
-        log(f"Error during beta cutoff training: {e}")
+        log(f"Error during {value_name} training: {e}")
     
-    log(f"Final average beta cutoff index: {best_average_cutoff:.2f} after {n_mutations} successful mutations in {n_steps} steps.")
+    log(f"Final average {value_name}: {best_value:.2f} after {n_mutations} successful mutations in {n_steps} steps.")
     
     with open("src/main.c", "wt") as f:
         f.write(main_c)
@@ -444,10 +445,23 @@ def train_cutoff():
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         constants_to_optimize = list(best_consts.keys())
-    elif len(sys.argv) == 2 and sys.argv[1] == "--cutoff":
-        # Train a predefined set of constants for beta cutoff
+    elif len(sys.argv) == 3 and sys.argv[1] == "--maximize":
+        # Train a predefined set of constants to maximize a value
+        value_name = sys.argv[2]
+        if value_name not in MINMAX_VALUES:
+            print(f"Value '{value_name}' is not recognized. Available values: {', '.join(MINMAX_VALUES)}")
+            sys.exit(1)
         constants_to_optimize = CUTOFF_CONSTS
-        train_cutoff()
+        train_cutoff(value_name, True)
+        sys.exit(0)
+    elif len(sys.argv) == 3 and sys.argv[1] == "--minimize":
+        # Train a predefined set of constants to minimize a value        
+        value_name = sys.argv[2]
+        if value_name not in MINMAX_VALUES:
+            print(f"Value '{value_name}' is not recognized. Available values: {', '.join(MINMAX_VALUES)}")
+            sys.exit(1)
+        constants_to_optimize = CUTOFF_CONSTS
+        train_cutoff(value_name, False)
         sys.exit(0)
     else:
         constants_to_optimize = [key for key in sys.argv[1:] if key in best_consts]
