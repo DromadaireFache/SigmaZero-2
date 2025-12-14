@@ -14,8 +14,9 @@ try:
 except ModuleNotFoundError:
     from . import sigma_zero
 
-TIME = 100  # milliseconds per move
-OLD = "V2.6"
+TIME = 100          # milliseconds per move
+OLD = "V2.6"        # Old engine version to compete against
+RAND_NOISE = 0.1    # Random noise to add to constant mutations
 
 # FENs to use for tournament
 FENS = []
@@ -124,12 +125,12 @@ def mutated_consts(consts: dict) -> dict:
         if isinstance(consts[key], list):
             for i in range(len(consts[key])):
                 if random.randint(1, math.ceil(len(constants_to_optimize) / 3)) == 1:
-                    change_percent = random.uniform(-0.1, 0.1)
+                    change_percent = random.uniform(-RAND_NOISE, RAND_NOISE)
                     change_amount = round_up(consts[key][i] * change_percent)
                     new_consts[key][i] = consts[key][i] + change_amount
                     
         elif random.randint(1, math.ceil(len(constants_to_optimize) / 5)) == 1:
-            change_percent = random.uniform(-0.1, 0.1)
+            change_percent = random.uniform(-RAND_NOISE, RAND_NOISE)
             change_amount = round_up(consts[key] * change_percent)
             new_consts[key] = max(consts[key] + change_amount, 0)
     
@@ -172,7 +173,7 @@ def play_game(fen: str, is_white: bool) -> dict:
     results = {"score": 0, "time_old": 0, "time_new": 0, "avg_depth_new": 0, "avg_depth_old": 0}
     board = chess.Board(fen)
     number_of_moves = 0
-    print(sigma_zero.EXE_FILE, "v", sigma_zero.OLD_EXE_FILE, f"({best_score_against_V2_5})")
+    print(sigma_zero.EXE_FILE, "v", sigma_zero.OLD_EXE_FILE, f"({best_score_against_old})")
 
     while not board.is_game_over(claim_draw=True):
         if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
@@ -252,6 +253,11 @@ def log(message: str):
     print(message)
 
 
+def log_diff(old_consts: dict, new_consts: dict):
+    for key in old_consts.keys():
+        if type(old_consts[key]) is not list or old_consts[key] != new_consts[key]:
+            log(f"  {key}: {old_consts[key]} -> {new_consts[key]}")
+
 
 # Training loop:
 # 1. Take the dict of constants 'best_consts' and select 1 in 5 for mutation
@@ -262,11 +268,11 @@ def log(message: str):
 # 6. Give score to mutated version: # wins - # losses
 # 7. If score <= 0, discard mutated constants and go back to step 1
 # 8. Run 100 games between sigma-zero-mutated and old
-# 9. If score <= best_score_against_V2_5, discard mutated constants and go back to step 1
-# 10. If score > best_score_against_V2_5, keep mutated constants as best_consts and go back to step 1
-best_score_against_V2_5 = 0
+# 9. If score <= best_score_against_old, discard mutated constants and go back to step 1
+# 10. If score > best_score_against_old, keep mutated constants as best_consts and go back to step 1
+best_score_against_old = 0
 def training_step():
-    global best_consts, best_score_against_V2_5
+    global best_consts, best_score_against_old
     
     # Step 1 and 2
     mut_consts = mutated_consts(best_consts)
@@ -295,7 +301,7 @@ def training_step():
     # Step 8
     log("Mutated constants outperformed best constants. Now testing against old...")
     sigma_zero.make(OLD)
-    won, score = tournament(executable("sigma-zero-mutated"), executable("old"), best_score_against_V2_5)
+    won, score = tournament(executable("sigma-zero-mutated"), executable("old"), best_score_against_old)
     
     # Step 9
     if not won:
@@ -304,8 +310,9 @@ def training_step():
     
     # Step 10
     log(f"Mutated constants outperformed {OLD}! Updating best constants.")
+    log_diff(best_consts, mut_consts)
     best_consts = mut_consts
-    best_score_against_V2_5 = score
+    best_score_against_old = score
     with open("src/consts_best.c", "w") as f:
         f.write(make_const_file(best_consts))
     return 1
@@ -322,7 +329,7 @@ if __name__ == "__main__":
     sigma_zero.make(OLD)
     os.system("make")
     print(f"Calculating baseline score against {OLD}...")
-    won, best_score_against_V2_5 = tournament(executable("sigma-zero"), executable("old"), 0)
+    won, best_score_against_old = tournament(executable("sigma-zero"), executable("old"), 0)
     
     # Clear log file
     with open("optimize_constants.log", "w") as log_file:
@@ -332,7 +339,7 @@ if __name__ == "__main__":
     n_steps = 0
     while True:
         n_steps += 1
-        log(f"=== Training Step {n_steps} ===")
+        log(f"\n=== Training Step {n_steps} ===")
         log(f"{n_mutations} successful mutations so far.")
         try:
             n_mutations += training_step()

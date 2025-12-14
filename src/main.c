@@ -799,18 +799,6 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->halfmoves = 0;
     }
 
-    // Update pawn row sum number
-    if (moving_piece == WHITE_PAWN) {
-        chess->pawn_row_sum += index_row(move->to - move->from + 1);
-    } else if (moving_piece == BLACK_PAWN) {
-        chess->pawn_row_sum += index_row(move->to - move->from - 1);
-    }
-    if (target_piece == WHITE_PAWN) {
-        chess->pawn_row_sum -= index_row(move->to) - 1;
-    } else if (target_piece == BLACK_PAWN) {
-        chess->pawn_row_sum -= index_row(move->to) - 6;
-    }
-
     // Update fullmove number
     if (chess->turn == TURN_BLACK) {
         chess->fullmoves++;
@@ -924,50 +912,54 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->bb_white &= ~bitboard_from_index(move->to + 8);
     }
 
-    // Handle promotion
-    if (move->promotion) {
-        if (chess->turn == TURN_WHITE) {
-            switch (move->promotion) {
-                case PROMOTE_QUEEN:
-                    moving_piece = WHITE_QUEEN;
-                    chess->pawn_row_sum -= index_row(move->to) - 1;
-                    break;
-                case PROMOTE_ROOK:
-                    moving_piece = WHITE_ROOK;
-                    chess->pawn_row_sum -= index_row(move->to) - 1;
-                    break;
-                case PROMOTE_BISHOP:
-                    moving_piece = WHITE_BISHOP;
-                    chess->pawn_row_sum -= index_row(move->to) - 1;
-                    break;
-                case PROMOTE_KNIGHT:
-                    moving_piece = WHITE_KNIGHT;
-                    chess->pawn_row_sum -= index_row(move->to) - 1;
-                    break;
-                default:
-                    break;
-            }
-        } else {
-            switch (move->promotion) {
-                case PROMOTE_QUEEN:
-                    moving_piece = BLACK_QUEEN;
-                    chess->pawn_row_sum -= index_row(move->to) - 6;
-                    break;
-                case PROMOTE_ROOK:
-                    moving_piece = BLACK_ROOK;
-                    chess->pawn_row_sum -= index_row(move->to) - 6;
-                    break;
-                case PROMOTE_BISHOP:
-                    moving_piece = BLACK_BISHOP;
-                    chess->pawn_row_sum -= index_row(move->to) - 6;
-                    break;
-                case PROMOTE_KNIGHT:
-                    moving_piece = BLACK_KNIGHT;
-                    chess->pawn_row_sum -= index_row(move->to) - 6;
-                    break;
-                default:
-                    break;
-            }
+    // Handle promotion and update pawn row sum number
+    if (moving_piece == WHITE_PAWN) {
+        chess->pawn_row_sum += index_row(move->to - move->from + 1);
+        if (target_piece == BLACK_PAWN) chess->pawn_row_sum -= index_row(move->to) - 6;
+
+        switch (move->promotion) {
+            case PROMOTE_QUEEN:
+                moving_piece = WHITE_QUEEN;
+                chess->pawn_row_sum -= index_row(move->to) - 1;
+                break;
+            case PROMOTE_ROOK:
+                moving_piece = WHITE_ROOK;
+                chess->pawn_row_sum -= index_row(move->to) - 1;
+                break;
+            case PROMOTE_BISHOP:
+                moving_piece = WHITE_BISHOP;
+                chess->pawn_row_sum -= index_row(move->to) - 1;
+                break;
+            case PROMOTE_KNIGHT:
+                moving_piece = WHITE_KNIGHT;
+                chess->pawn_row_sum -= index_row(move->to) - 1;
+                break;
+            default:
+                break;
+        }
+    } else if (moving_piece == BLACK_PAWN) {
+        chess->pawn_row_sum += index_row(move->to - move->from - 1);
+        if (target_piece == WHITE_PAWN) chess->pawn_row_sum -= index_row(move->to) - 1;
+
+        switch (move->promotion) {
+            case PROMOTE_QUEEN:
+                moving_piece = BLACK_QUEEN;
+                chess->pawn_row_sum -= index_row(move->to) - 6;
+                break;
+            case PROMOTE_ROOK:
+                moving_piece = BLACK_ROOK;
+                chess->pawn_row_sum -= index_row(move->to) - 6;
+                break;
+            case PROMOTE_BISHOP:
+                moving_piece = BLACK_BISHOP;
+                chess->pawn_row_sum -= index_row(move->to) - 6;
+                break;
+            case PROMOTE_KNIGHT:
+                moving_piece = BLACK_KNIGHT;
+                chess->pawn_row_sum -= index_row(move->to) - 6;
+                break;
+            default:
+                break;
         }
     }
 
@@ -2367,7 +2359,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
         if (chess->killer_moves[depth].from == move->from &&
-                chess->killer_moves[depth].to == move->to)
+            chess->killer_moves[depth].to == move->to)
             move->score += KILLER_MOVE_BONUS;
     }
 
