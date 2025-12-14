@@ -1985,15 +1985,16 @@ void Chess_score_move(Chess* chess, Move* move) {
         return;
     }
 
-    Position pos = Position_from_index(move->to);
     Piece aggressor = chess->board[move->from];
     Piece victim = chess->board[move->to];
 
     // MVV - LVA
     if (victim != EMPTY) {
-        int victim_value = abs(Piece_value(victim));
-        int aggressor_value = abs(Piece_value(aggressor));
-        move->score = victim_value * 10 - aggressor_value;
+        if (chess->turn == TURN_WHITE) {
+            move->score = -Piece_value(aggressor) - Piece_value(victim);
+        } else {
+            move->score = Piece_value(aggressor) + Piece_value(victim);
+        }
     } else {
         // Deduct points if attacked by enemy pawns
 #define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)               \
@@ -2001,6 +2002,7 @@ void Chess_score_move(Chess* chess, Move* move) {
         move->score = -abs(Piece_value(aggressor));                   \
         return;                                                       \
     }
+        Position pos = Position_from_index(move->to);
 
         if (chess->turn == TURN_WHITE && aggressor != WHITE_PAWN) {
             ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col < 7, 9, BLACK_PAWN)
@@ -2009,6 +2011,9 @@ void Chess_score_move(Chess* chess, Move* move) {
             ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col < 7, -7, WHITE_PAWN)
             ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col > 0, -9, WHITE_PAWN)
         }
+
+        // Not attacked by enemy pawns
+        move->score = 0;
     }
 }
 
@@ -2389,21 +2394,21 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     }
 
     // Add score for killer move heuristic
-    for (int i = 0; i < n_moves; i++) {
-        Move* move = &moves[i];
-        int bonus = chess->history_table[chess->turn][move->from][move->to];
+    // for (int i = 0; i < n_moves; i++) {
+    //     Move* move = &moves[i];
+    //     int bonus = chess->history_table[chess->turn][move->from][move->to];
 
-        // Check both killer slots
-        if ((chess->killer_moves[0][depth].from == move->from &&
-             chess->killer_moves[0][depth].to == move->to) ||
-            (chess->killer_moves[1][depth].from == move->from &&
-             chess->killer_moves[1][depth].to == move->to)) {
-            bonus += KILLER_MOVE_BONUS;
-        }
+    //     // Check both killer slots
+    //     if ((chess->killer_moves[0][depth].from == move->from &&
+    //          chess->killer_moves[0][depth].to == move->to) ||
+    //         (chess->killer_moves[1][depth].from == move->from &&
+    //          chess->killer_moves[1][depth].to == move->to)) {
+    //         bonus += KILLER_MOVE_BONUS;
+    //     }
 
-        // if (bonus != 0) printf("bonus: %d\n", bonus);
-        move->score += bonus;
-    }
+    //     // if (bonus != 0) printf("bonus: %d\n", bonus);
+    //     move->score += bonus;
+    // }
 
     int original_a = a;
     int original_b = b;
@@ -2435,19 +2440,19 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             if (score > a) a = score;
         }
         if (score >= b) {
-            if (capture == EMPTY) {
-                // Shift killers: move primary to secondary, new move to primary
-                if (!(chess->killer_moves[0][depth].from == move->from &&
-                      chess->killer_moves[0][depth].to == move->to)) {
-                    chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
-                    chess->killer_moves[0][depth] = *move;
-                }
+            // if (capture == EMPTY) {
+            //     // Shift killers: move primary to secondary, new move to primary
+            //     if (!(chess->killer_moves[0][depth].from == move->from &&
+            //           chess->killer_moves[0][depth].to == move->to)) {
+            //         chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
+            //         chess->killer_moves[0][depth] = *move;
+            //     }
 
-                // Cap history table to prevent overflow
-                if (chess->history_table[chess->turn][move->from][move->to] < 10000) {
-                    chess->history_table[chess->turn][move->from][move->to] += depth * depth;
-                }
-            }
+            //     // Cap history table to prevent overflow
+            //     if (chess->history_table[chess->turn][move->from][move->to] < 10000) {
+            //         chess->history_table[chess->turn][move->from][move->to] += depth * depth;
+            //     }
+            // }
             break;
         }
     }
@@ -2727,6 +2732,23 @@ int king_safety_command(Chess* chess) {
     return 0;
 }
 
+int move_scores_command(Chess* chess) {
+    Move moves[MAX_LEGAL_MOVES];
+    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
+    bool elipses = false;
+
+    for (int i = 0; i < n_moves; i++) {
+        select_best_move(moves, i, n_moves);
+        if (moves[i].score != 0) {
+            printf("%-5s %6d\n", Move_string(moves + i), moves[i].score);
+        } else if (!elipses) {
+            printf("...   %6d\n", 0);
+            elipses = true;
+        }
+    }
+    return 0;
+}
+
 int test() {
     Chess* chess = Chess_from_fen("8/1k6/8/4R3/8/8/4K3/8 w - - 0 1");
     if (!chess) return 1;
@@ -2785,6 +2807,10 @@ int main(int argc, char** argv) {
         Chess* chess = Chess_from_fen(argv[2]);
         if (!chess) return 1;
         return king_safety_command(chess);
+    } else if (argc == 3 && strcmp(argv[1], "scores") == 0) {
+        Chess* chess = Chess_from_fen(argv[2]);
+        if (!chess) return 1;
+        return move_scores_command(chess);
     } else {
         help();
         return 1;
