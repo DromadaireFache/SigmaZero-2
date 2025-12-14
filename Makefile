@@ -15,8 +15,8 @@ sigma-zero: src/main.c src/consts.c magicbb/moves.o
 %: src/versions/%.c magicbb/moves.o
 	$(CC) $(CFLAGS) $(OPTIMIZE) -o old magicbb/moves.o $<
 
-magicbb: magicbb/magicbb.c
-	$(CC) $(CFLAGS) $(OPTIMIZE) -o magicbb magicbb/magicbb.c
+magicbb_generator: magicbb/magicbb.c
+	$(CC) $(CFLAGS) $(OPTIMIZE) -o magicbb_generator magicbb/magicbb.c
 
 magicbb/moves.o: magicbb/moves.c_no_format
 	$(CC) -x c -c magicbb/moves.c_no_format -o magicbb/moves.o
