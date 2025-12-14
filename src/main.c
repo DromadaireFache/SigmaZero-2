@@ -14,6 +14,17 @@
 
 #define class typedef struct
 #define INF 1000000000
+
+// Uncomment to enable beta cutoff tracking (has performance cost)
+#define TRACK_BETA_CUTOFFS
+
+#ifdef TRACK_BETA_CUTOFFS
+#include <stdatomic.h>
+static atomic_size_t total_nodes = 0;
+static atomic_size_t beta_cutoffs = 0;
+static atomic_size_t first_move_cutoffs = 0;
+static atomic_size_t total_cutoff_index = 0;
+#endif
 #define ISLOWER(c) ((c) >= 'a' && (c) <= 'z')
 #define ISUPPER(c) ((c) >= 'A' && (c) <= 'Z')
 
@@ -2396,21 +2407,23 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     }
 
     // Add score for killer move heuristic
-    // for (int i = 0; i < n_moves; i++) {
-    //     Move* move = &moves[i];
-    //     int bonus = chess->history_table[chess->turn][move->from][move->to];
+    for (int i = 0; i < n_moves; i++) {
+        Move* move = &moves[i];
 
-    //     // Check both killer slots
-    //     if ((chess->killer_moves[0][depth].from == move->from &&
-    //          chess->killer_moves[0][depth].to == move->to) ||
-    //         (chess->killer_moves[1][depth].from == move->from &&
-    //          chess->killer_moves[1][depth].to == move->to)) {
-    //         bonus += KILLER_MOVE_BONUS;
-    //     }
+        if (chess->board[move->to] == EMPTY) {
+            // Check both killer slots
+            if ((chess->killer_moves[0][depth].from == move->from &&
+                 chess->killer_moves[0][depth].to == move->to) ||
+                (chess->killer_moves[1][depth].from == move->from &&
+                 chess->killer_moves[1][depth].to == move->to)) {
+                move->score += KILLER_MOVE_BONUS;
+            }
+        }
+    }
 
-    //     // if (bonus != 0) printf("bonus: %d\n", bonus);
-    //     move->score += bonus;
-    // }
+#ifdef TRACK_BETA_CUTOFFS
+    atomic_fetch_add(&total_nodes, 1);
+#endif
 
     int original_a = a;
     int best_score = -INF;
@@ -2441,19 +2454,19 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             if (score > a) a = score;
         }
         if (score >= b) {
-            // if (capture == EMPTY) {
-            //     // Shift killers: move primary to secondary, new move to primary
-            //     if (!(chess->killer_moves[0][depth].from == move->from &&
-            //           chess->killer_moves[0][depth].to == move->to)) {
-            //         chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
-            //         chess->killer_moves[0][depth] = *move;
-            //     }
-
-            //     // Cap history table to prevent overflow
-            //     if (chess->history_table[chess->turn][move->from][move->to] < 10000) {
-            //         chess->history_table[chess->turn][move->from][move->to] += depth * depth;
-            //     }
-            // }
+#ifdef TRACK_BETA_CUTOFFS
+            atomic_fetch_add(&beta_cutoffs, 1);
+            atomic_fetch_add(&total_cutoff_index, i);
+            if (i == 0) atomic_fetch_add(&first_move_cutoffs, 1);
+#endif
+            if (capture == EMPTY) {
+                // Shift killers: move primary to secondary, new move to primary
+                if (!(chess->killer_moves[0][depth].from == move->from &&
+                      chess->killer_moves[0][depth].to == move->to)) {
+                    chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
+                    chess->killer_moves[0][depth] = *move;
+                }
+            }
             RETURN_AND_STORE_TT(best_score, TT_LOWER)  // Failed high
         }
     }
@@ -2568,6 +2581,13 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     if (!chess) return 1;
     if (millis < 1) return 1;
     memcpy(&chess->zhstack, &zhstack, sizeof(ZHashStack));
+
+#ifdef TRACK_BETA_CUTOFFS
+    atomic_store(&total_nodes, 0);
+    atomic_store(&beta_cutoffs, 0);
+    atomic_store(&first_move_cutoffs, 0);
+    atomic_store(&total_cutoff_index, 0);
+#endif
 
     if (chess->fullmoves <= 5 && openings_db(chess)) {
         return 0;
@@ -2687,7 +2707,19 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     printf("  \"millis\": %d,\n", millis);
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
-    // printf("  \"nodes\": %lu,\n", (unsigned long)nodes_total);
+#ifdef TRACK_BETA_CUTOFFS
+    size_t nodes = atomic_load(&total_nodes);
+    size_t cutoffs = atomic_load(&beta_cutoffs);
+    size_t first_cutoffs = atomic_load(&first_move_cutoffs);
+    size_t cutoff_idx = atomic_load(&total_cutoff_index);
+    double cutoff_rate = nodes > 0 ? (double)cutoffs * 100.0 / nodes : 0;
+    double first_move_rate = cutoffs > 0 ? (double)first_cutoffs * 100.0 / cutoffs : 0;
+    double avg_cutoff_index = cutoffs > 0 ? (double)cutoff_idx / cutoffs : 0;
+    printf("  \"nodes\": %lu,\n", (unsigned long)nodes);
+    printf("  \"beta_cutoff_%%\": %.2f,\n", cutoff_rate);
+    printf("  \"first_move_cutoff_%%\": %.2f,\n", first_move_rate);
+    printf("  \"avg_cutoff_index\": %.2f,\n", avg_cutoff_index);
+#endif
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
     printf("  \"move\": \"%s\"\n", Move_string(best_move));
     puts("}");
