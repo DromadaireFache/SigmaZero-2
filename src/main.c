@@ -1985,23 +1985,22 @@ void Chess_score_move(Chess* chess, Move* move) {
         return;
     }
 
-    move->score = 0;
     Position pos = Position_from_index(move->to);
     Piece aggressor = chess->board[move->from];
     Piece victim = chess->board[move->to];
 
     // MVV - LVA
     if (victim != EMPTY) {
-        if (chess->turn == TURN_WHITE) {
-            move->score -= Piece_value(aggressor) + Piece_value(victim);
-        } else {
-            move->score += Piece_value(aggressor) + Piece_value(victim);
-        }
+        int victim_value = abs(Piece_value(victim));
+        int aggressor_value = abs(Piece_value(aggressor));
+        move->score = victim_value * 10 - aggressor_value;
     } else {
         // Deduct points if attacked by enemy pawns
-#define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
-    if ((condition) && chess->board[move->to + (offset)] == (pawn)) \
-        move->score -= abs(Piece_value(aggressor));
+#define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)               \
+    if ((condition) && chess->board[move->to + (offset)] == (pawn)) { \
+        move->score = -abs(Piece_value(aggressor));                   \
+        return;                                                       \
+    }
 
         if (chess->turn == TURN_WHITE && aggressor != WHITE_PAWN) {
             ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col < 7, 9, BLACK_PAWN)
