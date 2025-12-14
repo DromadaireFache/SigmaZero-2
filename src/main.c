@@ -2335,9 +2335,11 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
         chess->bb_white = bb_white;
         chess->bb_black = bb_black;
 
-        if (score >= b) return score;
-        if (score > best_score) best_score = score;
-        if (score > a) a = score;
+        if (score > best_score) {
+            best_score = score;
+            if (score > a) a = score;
+        }
+        if (score >= b) return best_score;
     }
     return best_score;
 }
@@ -2411,7 +2413,6 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     // }
 
     int original_a = a;
-    int original_b = b;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
         if (i < 8) select_best_move(moves, i, n_moves);
@@ -2453,18 +2454,14 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             //         chess->history_table[chess->turn][move->from][move->to] += depth * depth;
             //     }
             // }
-            break;
+            RETURN_AND_STORE_TT(best_score, TT_LOWER)  // Failed high
         }
     }
 
-    TTNodeType node_type;
-    if (best_score <= original_a)
-        node_type = TT_UPPER;  // Failed low
-    else if (best_score >= original_b)
-        node_type = TT_LOWER;  // Failed high
-    else
-        node_type = TT_EXACT;
-    RETURN_AND_STORE_TT(best_score, node_type)
+    if (best_score <= original_a) {
+        RETURN_AND_STORE_TT(best_score, TT_UPPER)  // Failed low
+    }
+    RETURN_AND_STORE_TT(best_score, TT_EXACT)
 }
 
 // if is_white sort in descending order, otherwise ascending
