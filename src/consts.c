@@ -28,6 +28,7 @@
 #define ROOK_AGGRO_SCORE 63
 #define QUEEN_AGGRO_SCORE 72
 #define KING_AGGRO_SCORE 57
+#define SELECT_MOVE_CUTOFF 8
 
 // Piece square values
 const int PS_BLACK_PAWN[] = {0, 0, 0, 0, 0, 0, 0, 0, -50, -50, -50, -50, -50, -50, -50, -50, -10, -10, -20, -30, -30, -20, -10, -10, -5, -5, -10, -25, -25, -10, -5, -5, 0, 0, 0, -20, -20, 0, 0, 0, -5, 5, 10, 0, 0, 10, 5, -5, -5, -10, -10, 20, 20, -10, -10, -5, 0, 0, 0, 0, 0, 0, 0, 0};

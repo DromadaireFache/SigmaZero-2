@@ -2371,7 +2371,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     size_t n_moves = Chess_legal_moves_scored(chess, moves, true);
 
     for (int i = 0; i < n_moves; i++) {
-        if (i < 8) select_best_move(moves, i, n_moves);
+        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
@@ -2474,7 +2474,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int original_a = a;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
-        if (i < 8) select_best_move(moves, i, n_moves);
+        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
