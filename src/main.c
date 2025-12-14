@@ -2510,7 +2510,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
                 if (!(chess->killer_moves[0][depth].from == move->from &&
                       chess->killer_moves[0][depth].to == move->to)) {
                     chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
-                    chess->killer_moves[0][depth] = *move;
+                    chess->killer_moves[0][depth].from = move->from;
+                    chess->killer_moves[0][depth].to = move->to;
                 }
             }
             RETURN_AND_STORE_TT(best_score, TT_LOWER)  // Failed high
