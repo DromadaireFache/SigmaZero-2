@@ -159,6 +159,8 @@ int BISHOP_MAGIC_SHIFTS[64] = {[0 ... 63] = 44};
 bitboard_t encountered[1 << 20];
 bitboard_t ROOK_MOVES[64][1 << 20];
 bitboard_t BISHOP_MOVES[64][1 << 20];
+uint32_t encounter_gen[1 << 20];  // Add generation counter
+uint32_t current_gen = 1;  // Global generation
 
 size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_NUMS[64],
                              bitboard_t (*bitboard_piece_mask)(int),
@@ -169,8 +171,7 @@ size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_
     int num_targets = 1 << bitboard_bit_count(bb);
     bitboard_t magic_num = random_uint64();
 
-    // Moves array to determine uniqueness
-    memset(encountered, 0, sizeof(bitboard_t) * (1 << (64 - magic_shift)));
+    current_gen++;  // No memset needed!
     bool unique = true;
 
     for (int i = 0; i < num_targets; i++) {
@@ -185,11 +186,13 @@ size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_
             moves = MAGIC_MOVES[square][old_index];
         }
 
-        if (encountered[index] != 0 && encountered[index] != moves) {
+        // Check if this index was used in current generation
+        if (encounter_gen[index] == current_gen && encountered[index] != moves) {
             unique = false;
             break;
         }
 
+        encounter_gen[index] = current_gen;
         encountered[index] = moves;
     }
 
