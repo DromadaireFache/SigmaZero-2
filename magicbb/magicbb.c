@@ -157,10 +157,13 @@ int ROOK_MAGIC_SHIFTS[64] = {[0 ... 63] = 44};
 bitboard_t BISHOP_MAGIC_NUMS[64];
 int BISHOP_MAGIC_SHIFTS[64] = {[0 ... 63] = 44};
 bitboard_t encountered[1 << 20];
+bitboard_t* ROOK_MOVES[64];
+bitboard_t* BISHOP_MOVES[64];
 
 size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_NUMS[64],
                              bitboard_t (*bitboard_piece_mask)(int),
-                             bitboard_t (*piece_move_bb)(bitboard_t, int)) {
+                             bitboard_t (*piece_move_bb)(bitboard_t, int),
+                             bitboard_t* MAGIC_MOVES[64]) {
     int magic_shift = MAGIC_SHIFTS[square] + 1;
     bitboard_t bb = bitboard_piece_mask(square);
     int num_targets = 1 << bitboard_bit_count(bb);
@@ -173,7 +176,14 @@ size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_
     for (int i = 0; i < num_targets; i++) {
         bitboard_t target_mask = bitboard_target_mask(bb, i);
         int index = (target_mask * magic_num) >> magic_shift;
-        bitboard_t moves = piece_move_bb(target_mask, square);
+        bitboard_t moves;
+
+        if (magic_shift == 45) {
+            moves = piece_move_bb(target_mask, square);
+        } else {
+            int index = (target_mask * MAGIC_NUMS[square]) >> MAGIC_SHIFTS[square];
+            moves = MAGIC_MOVES[square][index];
+        }
 
         if (encountered[index] != 0 && encountered[index] != moves) {
             unique = false;
@@ -187,6 +197,16 @@ size_t piece_magic_iteration(int square, int MAGIC_SHIFTS[64], bitboard_t MAGIC_
     if (unique) {
         MAGIC_NUMS[square] = magic_num;
         MAGIC_SHIFTS[square]++;
+        if (magic_shift > 45) free(MAGIC_MOVES[square]);
+        MAGIC_MOVES[square] = malloc(sizeof(bitboard_t) * (1 << (64 - magic_shift)));
+
+        for (int i = 0; i < num_targets; i++) {
+            bitboard_t target_mask = bitboard_target_mask(bb, i);
+            int index = (target_mask * MAGIC_NUMS[square]) >> MAGIC_SHIFTS[square];
+            bitboard_t moves = piece_move_bb(target_mask, square);
+            MAGIC_MOVES[square][index] = moves;
+        }
+
         return sizeof(bitboard_t) * (1 << (64 - magic_shift));
     }
 
@@ -220,12 +240,12 @@ void piece_write_iteration(FILE* f, char* piece_name, int square, int MAGIC_SHIF
 
 size_t rook_magic_iteration(int square) {
     return piece_magic_iteration(square, ROOK_MAGIC_SHIFTS, ROOK_MAGIC_NUMS, bitboard_rook_mask,
-                                 rook_move_bb);
+                                 rook_move_bb, ROOK_MOVES);
 }
 
 size_t bishop_magic_iteration(int square) {
     return piece_magic_iteration(square, BISHOP_MAGIC_SHIFTS, BISHOP_MAGIC_NUMS,
-                                 bitboard_bishop_mask, bishop_move_bb);
+                                 bitboard_bishop_mask, bishop_move_bb, BISHOP_MOVES);
 }
 
 void rook_write_iteration(FILE* f, int square) {
