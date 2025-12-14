@@ -1271,8 +1271,6 @@ Chess* Chess_from_fen(char* fen_arg) {
     Chess_find_kings(board);
     Chess_init_eval(board);
     Chess_init_bb(board);
-    memset(board->killer_moves, 0, sizeof(board->killer_moves));
-    memset(board->history_table, 0, sizeof(board->history_table));
     board->zhash = Chess_zhash(board);
     return board;
 }
@@ -2391,7 +2389,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     // Add score for killer move heuristic
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
-        move->score += chess->history_table[move->from][move->to] / 128;
+        move->score += chess->history_table[move->from][move->to] / 16;
         if (chess->killer_moves[depth].from == move->from &&
             chess->killer_moves[depth].to == move->to)
             move->score += KILLER_MOVE_BONUS;
@@ -2430,7 +2428,11 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             if (capture == EMPTY) {
                 chess->killer_moves[depth].from = move->from;
                 chess->killer_moves[depth].to = move->to;
-                chess->history_table[move->from][move->to] += depth * depth;
+
+                // Cap history table to prevent overflow
+                if (chess->history_table[move->from][move->to] < 10000) {
+                    chess->history_table[move->from][move->to] += depth * depth;
+                }
             }
             break;
         }
@@ -2471,6 +2473,8 @@ void* play_thread(void* arg_void) {
     TIME_TYPE endtime = arg->endtime;
     Move* move = &arg->move;
     int depth = arg->depth;
+    memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
+    memset(chess->history_table, 0, sizeof(chess->history_table));
     Piece capture = Chess_make_move(chess, move);
 
     int score = -minimax(chess, endtime, depth, -INF, INF, capture, 0);
