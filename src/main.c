@@ -103,7 +103,57 @@ typedef enum {
     BLACK_KING = 'k',
 } Piece;
 
-int Piece_value(Piece piece) {
+static inline int Piece_victim_score(Piece piece) {
+    switch (piece) {
+        case WHITE_PAWN:
+        case BLACK_PAWN:
+            return PAWN_VICTIM_SCORE;
+        case WHITE_KNIGHT:
+        case BLACK_KNIGHT:
+            return KNIGHT_VICTIM_SCORE;
+        case WHITE_BISHOP:
+        case BLACK_BISHOP:
+            return BISHOP_VICTIM_SCORE;
+        case WHITE_ROOK:
+        case BLACK_ROOK:
+            return ROOK_VICTIM_SCORE;
+        case WHITE_QUEEN:
+        case BLACK_QUEEN:
+            return QUEEN_VICTIM_SCORE;
+        case WHITE_KING:
+        case BLACK_KING:
+            return KING_VICTIM_SCORE;
+        default:
+            return 0;
+    }
+}
+
+static inline int Piece_aggro_score(Piece piece) {
+    switch (piece) {
+        case WHITE_PAWN:
+        case BLACK_PAWN:
+            return PAWN_AGGRO_SCORE;
+        case WHITE_KNIGHT:
+        case BLACK_KNIGHT:
+            return KNIGHT_AGGRO_SCORE;
+        case WHITE_BISHOP:
+        case BLACK_BISHOP:
+            return BISHOP_AGGRO_SCORE;
+        case WHITE_ROOK:
+        case BLACK_ROOK:
+            return ROOK_AGGRO_SCORE;
+        case WHITE_QUEEN:
+        case BLACK_QUEEN:
+            return QUEEN_AGGRO_SCORE;
+        case WHITE_KING:
+        case BLACK_KING:
+            return KING_AGGRO_SCORE;
+        default:
+            return 0;
+    }
+}
+
+static inline int Piece_value(Piece piece) {
     switch (piece) {
         case WHITE_PAWN:
             return PAWN_VALUE;
@@ -2001,11 +2051,7 @@ void Chess_score_move(Chess* chess, Move* move) {
 
     // MVV - LVA
     if (victim != EMPTY) {
-        if (chess->turn == TURN_WHITE) {
-            move->score = -Piece_value(aggressor) - Piece_value(victim);
-        } else {
-            move->score = Piece_value(aggressor) + Piece_value(victim);
-        }
+        move->score = Piece_victim_score(victim) - Piece_aggro_score(aggressor);
     } else {
         // Deduct points if attacked by enemy pawns
 #define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)               \

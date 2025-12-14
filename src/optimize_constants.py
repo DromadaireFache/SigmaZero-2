@@ -18,6 +18,24 @@ TIME = 100          # milliseconds per move
 OLD = "V2.6"        # Old engine version to compete against
 RAND_NOISE = 0.1    # Random noise to add to constant mutations
 
+TIME_CUTOFF = 100   # milliseconds per move for cutoff training
+CUTOFF_CONSTS = [
+    "PROMOTION_MOVE_SCORE",
+    "KILLER_MOVE_BONUS",
+    "PAWN_VICTIM_SCORE",
+    "KNIGHT_VICTIM_SCORE",
+    "BISHOP_VICTIM_SCORE",
+    "ROOK_VICTIM_SCORE",
+    "QUEEN_VICTIM_SCORE",
+    "KING_VICTIM_SCORE",
+    "PAWN_AGGRO_SCORE",
+    "KNIGHT_AGGRO_SCORE",
+    "BISHOP_AGGRO_SCORE",
+    "ROOK_AGGRO_SCORE",
+    "QUEEN_AGGRO_SCORE",
+    "KING_AGGRO_SCORE",
+]
+
 # FENs to use for tournament
 FENS = []
 with open("data/FENs.txt", "r") as f:
@@ -27,6 +45,14 @@ with open("data/FENs.txt", "r") as f:
             FENS.append(fen)
             FENS.append(fen)
 
+# FENs to use for cutoff training
+CUTOFF_FENS = []
+with open("data/puzzles.txt", "r") as f:
+    for line in f:
+        fen = line.strip().split(",", 1)[0]
+        if fen:
+            CUTOFF_FENS.append(fen)
+
 best_consts = {
     "PAWN_RANK_BONUS": 7,
     "PAWN_VALUE": 116,
@@ -34,16 +60,27 @@ best_consts = {
     "BISHOP_VALUE": 377,
     "ROOK_VALUE": 500,
     "QUEEN_VALUE": 958,
-    "KING_VALUE": 18591,
-    "SCORE_VICTIM_MULTIPLIER": 70,
-    "PROMOTION_MOVE_SCORE": 100,
+    "KING_VALUE": 400,
+    "PROMOTION_MOVE_SCORE": 10430,
     "FULLMOVES_ENDGAME": 57,
     "QUIES_DEPTH": 7,
     "MAX_EXTENSION": 2,
     "BISHOP_KING_PROX": 97,
     "ROOK_KING_PROX": 126,
     "QUEEN_KING_PROX": 122,
-    "KILLER_MOVE_BONUS": 102,
+    "KILLER_MOVE_BONUS": 107,
+    "PAWN_VICTIM_SCORE": 108,
+    "KNIGHT_VICTIM_SCORE": 106,
+    "BISHOP_VICTIM_SCORE": 90,
+    "ROOK_VICTIM_SCORE": 109,
+    "QUEEN_VICTIM_SCORE": 108,
+    "KING_VICTIM_SCORE": 107,
+    "PAWN_AGGRO_SCORE": 109,
+    "KNIGHT_AGGRO_SCORE": 88,
+    "BISHOP_AGGRO_SCORE": 109,
+    "ROOK_AGGRO_SCORE": 100,
+    "QUEEN_AGGRO_SCORE": 107,
+    "KING_AGGRO_SCORE": 100,
     "PS_BLACK_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, -50, -50, -50, -50, -50, -50, -50, -50, -10, -10, -20, -30, -30, -20, -10, -10, -5, -5, -10, -25, -25, -10, -5, -5, 0, 0, 0, -20, -20, 0, 0, 0, -5, 5, 10, 0, 0, 10, 5, -5, -5, -10, -10, 20, 20, -10, -10, -5, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_WHITE_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, 5, 10, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 10, 25, 25, 10, 5, 5, 10, 10, 20, 30, 30, 20, 10, 10, 50, 50, 50, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_BLACK_KNIGHT": [50, 40, 30, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 40, 30, 0, -10, -15, -15, -10, 0, 30, 30, -5, -15, -20, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 30, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 40, 50, 40, 30, 30, 30, 30, 40, 50],
@@ -317,10 +354,101 @@ def training_step():
         f.write(make_const_file(best_consts))
     return 1
 
+def get_average_cutoff() -> float:
+    total_cutoff_index = 0
+    
+    for fen in CUTOFF_FENS:
+        board = chess.Board(fen)
+        result = sigma_zero.play(board, TIME_CUTOFF)
+        cutoff_index = result.get("avg_cutoff_index", 0)
+        # print(f"FEN: {fen} -> Beta cutoff index: {cutoff_index}")
+        total_cutoff_index += cutoff_index
+    
+    average_cutoff = total_cutoff_index / len(CUTOFF_FENS)
+    print(f"Average beta cutoff index: {average_cutoff:.2f}")
+    return average_cutoff
+
+# Training loop for beta cutoff constants only
+# 1. Enable TRACK_BETA_CUTOFFS in main.c
+# 2. Make an average of beta cutoff index over set of fens in data/puzzles.txt
+# 3. Take the dict of constants 'best_consts' and select 1 in 5 for mutation (only those related to beta cutoffs)
+# 4. For each selected constant, randomly increase or decrease it by up to 10% (rounded to nearest non-zero integer)
+# 5. Make sigma-zero with mutated constants
+# 6. Run over the set of fens and calculate average beta cutoff index
+# 7. If average beta cutoff index is not improved, discard mutated constants and go back to step 3
+# 8. If average beta cutoff index is improved, keep mutated constants as best_consts and go back to step 3
+def train_cutoff():
+    global best_consts
+    with open("src/main.c", "rt") as f:
+        main_c = f.read()
+    with open("src/main.c", "wt") as f:
+        f.write(main_c.replace("// #define TRACK_BETA_CUTOFFS", "#define TRACK_BETA_CUTOFFS"))
+    
+    best_average_cutoff = get_average_cutoff()
+    log(f"=== Training beta cutoff constants ===")
+    log(f"Initial average beta cutoff index: {best_average_cutoff:.2f}")
+    
+    n_mutations = 0
+    n_steps = 0
+    
+    try:
+        while True:
+            n_steps += 1
+            log(f"=== Beta Cutoff Training Step {n_steps} ===")
+            log(f"{n_mutations} successful mutations so far.")
+            
+            # Step 3 and 4
+            mut_consts = mutated_consts(best_consts)
+            
+            # Step 5
+            with open("src/consts.c", "w") as f:
+                f.write(make_const_file(mut_consts))
+            os.system("make")
+            
+            # Step 6
+            average_cutoff = get_average_cutoff()
+            
+            # Step 7
+            if average_cutoff >= best_average_cutoff:
+                log("Mutated constants did not improve average beta cutoff index. Discarding mutations.")
+                continue
+            
+            # Step 8
+            log(f"Mutated constants improved average beta cutoff index: {average_cutoff:.2f} < {best_average_cutoff:.2f}. Updating best constants.")
+            log_diff(best_consts, mut_consts)
+            best_consts = mut_consts
+            best_average_cutoff = average_cutoff
+            n_mutations += 1
+            
+    except KeyboardInterrupt:
+        log("Beta cutoff training interrupted.")
+    except Exception as e:
+        log(f"Error during beta cutoff training: {e}")
+    
+    log(f"Final average beta cutoff index: {best_average_cutoff:.2f} after {n_mutations} successful mutations in {n_steps} steps.")
+    
+    with open("src/main.c", "wt") as f:
+        f.write(main_c)
+    
+    with open("src/consts.c", "w") as f:
+        f.write(make_const_file(best_consts))
+    print("Final best constants written to src/consts.c")
+    
+    # Cleanup
+    os.remove(executable("sigma-zero-best"))
+    os.remove(executable("sigma-zero-mutated"))
+    if os.path.exists("src/consts_best.c"):
+        os.remove("src/consts_best.c")
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
         constants_to_optimize = list(best_consts.keys())
+    elif len(sys.argv) == 2 and sys.argv[1] == "--cutoff":
+        # Train a predefined set of constants for beta cutoff
+        constants_to_optimize = CUTOFF_CONSTS
+        train_cutoff()
+        sys.exit(0)
     else:
         constants_to_optimize = [key for key in sys.argv[1:] if key in best_consts]
         print("Optimizing only the following constants:", ", ".join(constants_to_optimize))
@@ -333,13 +461,13 @@ if __name__ == "__main__":
     
     # Clear log file
     with open("optimize_constants.log", "w") as log_file:
-        log_file.write("=== Optimize Constants Log ===\n")
+        log_file.write("=== Optimize Constants Log ===")
     
     n_mutations = 0
     n_steps = 0
     while True:
         n_steps += 1
-        log(f"\n=== Training Step {n_steps} ===")
+        log(f"=== Training Step {n_steps} ===")
         log(f"{n_mutations} successful mutations so far.")
         try:
             n_mutations += training_step()
