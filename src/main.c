@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdatomic.h>
 
 #include "consts.c"
 
@@ -16,10 +17,9 @@
 #define INF 1000000000
 
 // Uncomment to enable beta cutoff tracking (has performance cost)
-#define TRACK_BETA_CUTOFFS
+// #define TRACK_BETA_CUTOFFS
 
 #ifdef TRACK_BETA_CUTOFFS
-#include <stdatomic.h>
 static atomic_size_t total_nodes = 0;
 static atomic_size_t beta_cutoffs = 0;
 static atomic_size_t first_move_cutoffs = 0;
@@ -2554,6 +2554,7 @@ void* play_thread(void* arg_void) {
     int score = -minimax(chess, endtime, depth, -INF, INF, capture, 0);
     *arg->search_cancelled = TIME_NOW() > endtime;
     *arg->score = score;
+    arg->endtime = TIME_NOW();
 
     return NULL;
 }
@@ -2640,6 +2641,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
 
     TIME_TYPE start = TIME_NOW();
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
+    double time_wasted = 0.0;
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
     bool search_cancelled[MAX_LEGAL_MOVES];
@@ -2678,6 +2680,12 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
         // Wait for threads to finish
         for (int i = 0; i < n_moves; i++) {
             pthread_join(threads[i], NULL);
+        }
+
+        // Compute time wasted
+        TIME_TYPE now = TIME_NOW();
+        for (int i = 0; i < n_moves; i++) {
+            time_wasted += TIME_DIFF_S(now, args[i].endtime) / n_moves;
         }
 
         if (fancy && depth == 2) {
@@ -2751,6 +2759,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     printf("  \"millis\": %d,\n", millis);
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
+    printf("  \"time_wasted\": \"%.1lf%%\",\n", time_wasted / cpu_time * 100);
 #ifdef TRACK_BETA_CUTOFFS
     size_t nodes = atomic_load(&total_nodes);
     size_t cutoffs = atomic_load(&beta_cutoffs);

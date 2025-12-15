@@ -208,11 +208,20 @@ class Api:
                 return self.bot_move(millis, version, tries + 1)
             sys.exit(1)
         
+        # TODO fix this bullshit
         eval = result.get("eval", 0)
         if eval > 9000:
-            eval = "Mate for white"
+            mate = result.get("depth", 0) - int((eval - 10000) * 101)
+            if mate > 0:
+                eval = f"Mate for white in {mate - 1 if board.turn == chess.WHITE else mate}"
+            else:
+                eval = "Checkmate for white"
         elif eval < -9000:
-            eval = "Mate for black"
+            mate = result.get("depth", 0) - int((-eval - 10000) * 101)
+            if mate > 0:
+                eval = f"Mate for black in {mate - 1 if board.turn == chess.BLACK else mate}"
+            else:
+                eval = "Checkmate for black"
         
         return {
             "depth": result.get("depth", 0),
