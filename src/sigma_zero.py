@@ -47,7 +47,7 @@ def command(cmd: str, JSON: bool = False, exe: str = None) -> str | Any:
             return json.loads(result.stdout)
         except:
             # print(result.stdout)
-            return {"error": "Failed to parse JSON", "raw": result.stdout}
+            return {"error": "Failed to parse JSON", "raw": result.stdout, "cmd": cmd}
     else:
         return result.stdout.strip()
 

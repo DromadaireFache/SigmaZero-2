@@ -363,6 +363,7 @@ def get_average_cutoff(value_name: str) -> float:
     for fen in CUTOFF_FENS:
         board = chess.Board(fen)
         result = sigma_zero.play(board, TIME_CUTOFF)
+        print(result)
         cutoff_index = result[value_name]
         # print(f"FEN: {fen} -> {value_name}: {cutoff_index}")
         total_cutoff_index += cutoff_index
