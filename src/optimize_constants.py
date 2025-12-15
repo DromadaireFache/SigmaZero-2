@@ -49,7 +49,7 @@ with open("data/FENs.txt", "r") as f:
 
 # FENs to use for cutoff training
 CUTOFF_FENS = []
-with open("data/puzzles.txt", "r") as f:
+with open("data/training.txt", "r") as f:
     for line in f:
         fen = line.strip().split(",", 1)[0]
         if fen:
@@ -63,27 +63,27 @@ best_consts = {
     "ROOK_VALUE": 500,
     "QUEEN_VALUE": 958,
     "KING_VALUE": 400,
-    "PROMOTION_MOVE_SCORE": 24516,
+    "PROMOTION_MOVE_SCORE": 21363,
     "FULLMOVES_ENDGAME": 57,
     "QUIES_DEPTH": 7,
     "MAX_EXTENSION": 2,
     "BISHOP_KING_PROX": 97,
     "ROOK_KING_PROX": 126,
     "QUEEN_KING_PROX": 122,
-    "KILLER_MOVE_BONUS": 107,
-    "PAWN_VICTIM_SCORE": 113,
-    "KNIGHT_VICTIM_SCORE": 116,
-    "BISHOP_VICTIM_SCORE": 104,
-    "ROOK_VICTIM_SCORE": 128,
-    "QUEEN_VICTIM_SCORE": 214,
-    "KING_VICTIM_SCORE": 98,
-    "PAWN_AGGRO_SCORE": 55,
-    "KNIGHT_AGGRO_SCORE": 71,
-    "BISHOP_AGGRO_SCORE": 98,
-    "ROOK_AGGRO_SCORE": 63,
-    "QUEEN_AGGRO_SCORE": 72,
-    "KING_AGGRO_SCORE": 57,
-    "SELECT_MOVE_CUTOFF": 8,
+    "KILLER_MOVE_BONUS": 62,
+    "PAWN_VICTIM_SCORE": 114,
+    "KNIGHT_VICTIM_SCORE": 66,
+    "BISHOP_VICTIM_SCORE": 139,
+    "ROOK_VICTIM_SCORE": 166,
+    "QUEEN_VICTIM_SCORE": 192,
+    "KING_VICTIM_SCORE": 69,
+    "PAWN_AGGRO_SCORE": 34,
+    "KNIGHT_AGGRO_SCORE": 46,
+    "BISHOP_AGGRO_SCORE": 76,
+    "ROOK_AGGRO_SCORE": 110,
+    "QUEEN_AGGRO_SCORE": 105,
+    "KING_AGGRO_SCORE": 28,
+    "SELECT_MOVE_CUTOFF": 11,
     "PS_BLACK_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, -50, -50, -50, -50, -50, -50, -50, -50, -10, -10, -20, -30, -30, -20, -10, -10, -5, -5, -10, -25, -25, -10, -5, -5, 0, 0, 0, -20, -20, 0, 0, 0, -5, 5, 10, 0, 0, 10, 5, -5, -5, -10, -10, 20, 20, -10, -10, -5, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_WHITE_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, 5, 10, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 10, 25, 25, 10, 5, 5, 10, 10, 20, 30, 30, 20, 10, 10, 50, 50, 50, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_BLACK_KNIGHT": [50, 40, 30, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 40, 30, 0, -10, -15, -15, -10, 0, 30, 30, -5, -15, -20, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 30, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 40, 50, 40, 30, 30, 30, 30, 40, 50],

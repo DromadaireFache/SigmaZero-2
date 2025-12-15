@@ -524,7 +524,6 @@ class {
     bitboard_t bb_white;       // Bitboard of all white pieces
     bitboard_t bb_black;       // Bitboard of all black pieces
     Move killer_moves[2][64];  // Used for move ordering [id][depth]
-    int history_table[2][64][64];  // Also used for move ordering [turn][from][to]
 }
 Chess;
 
@@ -2550,7 +2549,6 @@ void* play_thread(void* arg_void) {
     Move* move = &arg->move;
     int depth = arg->depth;
     memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
-    memset(chess->history_table, 0, sizeof(chess->history_table));
     Piece capture = Chess_make_move(chess, move);
 
     int score = -minimax(chess, endtime, depth, -INF, INF, capture, 0);
@@ -2668,8 +2666,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             arg->depth = depth;
             arg->score = &scores[i];
 
-            // Use this in case the search stops because of time limit to know if we can use this
-            // score
+            // Use this in case of time cut off to know if we can use this score
             arg->search_cancelled = &search_cancelled[i];
 
             if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
