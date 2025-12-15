@@ -60,7 +60,7 @@ best_consts = {
     "PAWN_VALUE": 116,
     "KNIGHT_VALUE": 340,
     "BISHOP_VALUE": 377,
-    "ROOK_VALUE": 500,
+    "ROOK_VALUE": 508,
     "QUEEN_VALUE": 958,
     "KING_VALUE": 400,
     "PROMOTION_MOVE_SCORE": 9232,

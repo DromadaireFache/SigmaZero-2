@@ -2546,6 +2546,7 @@ void* play_thread(void* arg_void) {
     ChessThread* arg = (ChessThread*)arg_void;
     Chess* chess = &arg->chess;
     TIME_TYPE endtime = arg->endtime;
+    TIME_TYPE start = TIME_NOW();
     Move* move = &arg->move;
     int depth = arg->depth;
     memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
@@ -2554,7 +2555,7 @@ void* play_thread(void* arg_void) {
     int score = -minimax(chess, endtime, depth, -INF, INF, capture, 0);
     *arg->search_cancelled = TIME_NOW() > endtime;
     *arg->score = score;
-    arg->endtime = TIME_NOW();
+    arg->endtime = TIME_NOW() - start;
 
     return NULL;
 }
@@ -2660,6 +2661,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     while (TIME_NOW() < endtime) {
         // nodes_total = 0;
 
+        TIME_TYPE start_depth = TIME_NOW();
         for (int i = 0; i < n_moves; i++) {
             ChessThread* arg = &args[i];
             memcpy(&arg->chess, chess, sizeof(Chess));
@@ -2683,9 +2685,9 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
         }
 
         // Compute time wasted
-        TIME_TYPE now = TIME_NOW();
+        TIME_TYPE end_depth = TIME_NOW();
         for (int i = 0; i < n_moves; i++) {
-            time_wasted += TIME_DIFF_S(now, args[i].endtime) / n_moves;
+            time_wasted += TIME_DIFF_S(end_depth - args[i].endtime, start_depth) / n_moves;
         }
 
         if (fancy && depth == 2) {
