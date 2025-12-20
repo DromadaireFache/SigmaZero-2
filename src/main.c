@@ -2,6 +2,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -9,7 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <stdatomic.h>
 
 #include "consts.c"
 
@@ -25,6 +25,17 @@ static atomic_size_t beta_cutoffs = 0;
 static atomic_size_t first_move_cutoffs = 0;
 static atomic_size_t total_cutoff_index = 0;
 #endif
+
+// Uncomment to enable TT tracking (has performance cost)
+// #define TRACK_TT
+
+#ifdef TRACK_TT
+static atomic_size_t tt_lookups = 0;
+static atomic_size_t tt_hits = 0;
+static atomic_size_t tt_collisions = 0;
+static atomic_size_t tt_stores = 0;
+#endif
+
 #define ISLOWER(c) ((c) >= 'a' && (c) <= 'z')
 #define ISUPPER(c) ((c) >= 'A' && (c) <= 'Z')
 
@@ -2256,8 +2267,8 @@ class {
 }
 TTItem;
 
-// Will give ~100MB array
-#define TT_LENGTH (1 << 22)
+// Will give ~128MB array
+#define TT_LENGTH (1 << 23)
 
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
@@ -2266,6 +2277,13 @@ TTItem tt[TT_LENGTH] = {0};
 void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
     TTItem* item = &tt[i];
+
+#ifdef TRACK_TT
+    atomic_fetch_add(&tt_stores, 1);
+    if (item->depth > 0 && item->key != key) {
+        atomic_fetch_add(&tt_collisions, 1);
+    }
+#endif
 
     if (depth > item->depth) {
         item->key = key;
@@ -2280,9 +2298,16 @@ bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
     TTItem* item = &tt[i];
 
+#ifdef TRACK_TT
+    atomic_fetch_add(&tt_lookups, 1);
+#endif
+
     if (item->key == key && depth <= item->depth &&
         ((item->type == TT_EXACT) || (item->type == TT_LOWER && item->eval >= b) ||
          (item->type == TT_UPPER && item->eval <= a))) {
+#ifdef TRACK_TT
+        atomic_fetch_add(&tt_hits, 1);
+#endif
         *eval_p = item->eval;
         return true;
     }
@@ -2290,8 +2315,7 @@ bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     return false;
 }
 
-void TT_occupancy(void) {
-    const size_t tt_size = sizeof(tt) / 1024 / 1024;
+double TT_occupancy(void) {
     size_t tt_use = 0;
 
     for (int i = 0; i < TT_LENGTH; i++) {
@@ -2299,8 +2323,7 @@ void TT_occupancy(void) {
         if (i == (item.key & (TT_LENGTH - 1))) tt_use++;
     }
 
-    double tt_use_pc = (double)tt_use * 100.0 / TT_LENGTH;
-    printf("Transposition table (%.2lf%% of %luMB)\n", tt_use_pc, (unsigned long)tt_size);
+    return (double)tt_use / TT_LENGTH;
 }
 
 int moves(char* fen, int depth) {
@@ -2636,6 +2659,13 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     atomic_store(&total_cutoff_index, 0);
 #endif
 
+#ifdef TRACK_TT
+    atomic_store(&tt_lookups, 0);
+    atomic_store(&tt_hits, 0);
+    atomic_store(&tt_collisions, 0);
+    atomic_store(&tt_stores, 0);
+#endif
+
     if (chess->fullmoves <= 5 && openings_db(chess)) {
         return 0;
     }
@@ -2736,9 +2766,6 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             best_score = scores[0];
             best_move = &moves[0];
         }
-
-        // Show transposition table occupancy
-        // TT_occupancy();
     }
 
     free(threads);
@@ -2774,6 +2801,17 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     printf("  \"beta_cutoff_%%\": %.2f,\n", cutoff_rate);
     printf("  \"first_move_cutoff_%%\": %.2f,\n", first_move_rate);
     printf("  \"avg_cutoff_index\": %.2f,\n", avg_cutoff_index);
+#endif
+#ifdef TRACK_TT
+    size_t lookups = atomic_load(&tt_lookups);
+    size_t hits = atomic_load(&tt_hits);
+    size_t collisions = atomic_load(&tt_collisions);
+    size_t stores = atomic_load(&tt_stores);
+    double hit_rate = lookups > 0 ? (double)hits * 100.0 / lookups : 0;
+    double collision_rate = stores > 0 ? (double)collisions * 100.0 / stores : 0;
+    printf("  \"tt_hit_rate_%%\": %.2f,\n", hit_rate);
+    printf("  \"tt_collision_rate_%%\": %.2f,\n", collision_rate);
+    printf("  \"TT_occupancy_%%\": %.2f,\n", TT_occupancy() * 100.0);
 #endif
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
     printf("  \"move\": \"%s\"\n", Move_string(best_move));
