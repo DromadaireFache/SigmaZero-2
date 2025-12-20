@@ -2267,8 +2267,8 @@ class {
 }
 TTItem;
 
-// Will give ~128MB array
-#define TT_LENGTH (1 << 23)
+// Will give ~64MB array
+#define TT_LENGTH (1 << 22)
 
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
