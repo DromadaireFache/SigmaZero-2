@@ -1823,7 +1823,7 @@ int play(char *fen, int millis) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.0 (2025-09-06)\n");
+    printf("SigmaZero Chess Engine 2.3.4 (2025-09-14)\n");
     return 0;
 }
 

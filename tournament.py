@@ -108,6 +108,8 @@ def play_game(fen: str, is_white: bool) -> dict:
 def tournament():
     start = time.perf_counter()
     results = {"wins": 0, "losses": 0, "draws": 0, "avg_depth_new": 0, "avg_depth_old": 0}
+    sigma_zero.command("--version", exe=sigma_zero.EXE_FILE)
+    sigma_zero.command("--version", exe=sigma_zero.OLD_EXE_FILE)
     for i, fen in enumerate(FENS):
         try:
             print(f"Game {i+1}/{len(FENS)}")
