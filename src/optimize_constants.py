@@ -214,8 +214,8 @@ def play_game(fen: str, is_white: bool) -> dict:
     board = chess.Board(fen)
     number_of_moves = 0
     print(sigma_zero.EXE_FILE, "v", sigma_zero.OLD_EXE_FILE, f"({best_score_against_old})")
-    sigma_zero.command("--version", exe=sigma_zero.EXE_FILE)
-    sigma_zero.command("--version", exe=sigma_zero.OLD_EXE_FILE)
+    print(sigma_zero.command("--version", exe=sigma_zero.EXE_FILE))
+    print(sigma_zero.command("--version", exe=sigma_zero.OLD_EXE_FILE))
 
     while not board.is_game_over(claim_draw=True):
         if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
