@@ -384,12 +384,13 @@ static inline void Chess_en_passant_set(Chess *board, uint8_t col) {
     }
 }
 
+#define NO_ENPASSANT 255
 // Get en passant column (or -1 if not available)
 static inline uint8_t Chess_en_passant(Chess *chess) {
     if (chess->gamestate & BITMASK(4)) {
         return chess->gamestate >> 5;
     } else {
-        return -1;
+        return NO_ENPASSANT;
     }
 }
 
@@ -1262,7 +1263,7 @@ size_t Chess_pawn_moves(Chess *chess, Move *move, int from) {
 
     // en passant capture
     uint8_t en_passant_col = Chess_en_passant(chess);
-    if (at_en_passant_rank && en_passant_col != -1) {
+    if (at_en_passant_rank && en_passant_col != NO_ENPASSANT) {
         if (en_passant_col == pos.col - 1) {
             PAWN_ADD_MOVE(8 * direction - 1)
         } else if (en_passant_col == pos.col + 1) {

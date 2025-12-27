@@ -11,15 +11,17 @@ except ModuleNotFoundError:
     from . import sigma_zero
 
 DEPTH = 4
-STOCKFISH_EXE = (
-    r"C:\Users\charl\Downloads\stockfish-windows-x86-64-avx2 (1)\stockfish\stockfish-windows-x86-64-avx2.exe"
-)
+STOCKFISH_EXE = "stockfish"
 
 
 def stockfish_perft(fen: str, depth: int, stockfish_path: str = STOCKFISH_EXE) -> int:
     """Use Stockfish's perft command to count nodes at a given depth."""
     process = subprocess.Popen(
-        stockfish_path, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1
+        stockfish_path,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+        bufsize=1,
     )
 
     commands = [

@@ -6,7 +6,7 @@ import chess.pgn
 import src.optimize_constants as optimize_constants
 
 TIME = 100  # milliseconds per move
-OLD_BOT = "V2.6"
+OLD_BOT = "V2.7"
 FENS = []
 
 with open("data/FENs.txt", "r") as f:
@@ -152,4 +152,4 @@ if __name__ == "__main__":
     with open("pgns.txt", "w") as f:
         f.write("")  # Clear previous PGNs
     # tournament()
-    optimize_constants.tournament(sigma_zero.EXE_FILE, sigma_zero.OLD_EXE_FILE, 0, exit_on_interrupt=True)
+    optimize_constants.tournament(sigma_zero.EXE_FILE, sigma_zero.OLD_EXE_FILE, -100, exit_on_interrupt=True)

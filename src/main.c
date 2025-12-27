@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <pthread.h>
@@ -44,10 +45,26 @@ static atomic_size_t tt_stores = 0;
 #define TIME_NOW() clock()
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
 #define TIME_PLUS_OFFSET_MS(start, millis) ((start) + CLOCKS_PER_SEC * (millis) / 1000)
+#include <windows.h>
+int cpu_count(void) {
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    return sysinfo.dwNumberOfProcessors;
+}
+
 #else
+#include <unistd.h>
+int cpu_count(void) {
+    long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+    return (nprocs > 0) ? nprocs : 1;
+}
 __attribute__((always_inline)) static inline uint64_t now_nanos() {
     struct timespec ts;
+#ifdef __linux__
     clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+#else
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
     return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 }
 #define TIME_TYPE uint64_t
@@ -601,12 +618,13 @@ static inline void Chess_en_passant_set(Chess* board, uint8_t col) {
     }
 }
 
-// Get en passant column (or -1 if not available)
+#define NO_ENPASSANT 255
+// Get en passant column (or NO_ENPASSANT if not available)
 static inline uint8_t Chess_en_passant(Chess* chess) {
     if (chess->gamestate & BITMASK(4)) {
         return chess->gamestate >> 5;
     } else {
-        return -1;
+        return NO_ENPASSANT;
     }
 }
 
@@ -1919,7 +1937,7 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
 
     // en passant capture
     uint8_t en_passant_col = Chess_en_passant(chess);
-    if (at_en_passant_rank && en_passant_col != -1) {
+    if (at_en_passant_rank && en_passant_col != NO_ENPASSANT) {
         if (en_passant_col == pos.col - 1) {
             PAWN_EN_PASSANT(left_capture)
         } else if (en_passant_col == pos.col + 1) {
@@ -2256,6 +2274,209 @@ size_t Chess_count_moves_multi(Chess* chess, int depth) {
     return nodes_total;
 }
 
+typedef void (*task_fn)(void*);
+
+typedef struct {
+    int score;
+    bool reached;
+} result_t;
+
+typedef struct {
+    Chess chess;
+    int depth;
+    Piece capture;
+    Move move;
+    int move_index;
+    result_t* result;
+    bool dont_push_next;
+} task_t;
+
+#define QUEUE_CAPACITY 1024
+
+struct {
+    result_t (*results)[64];  // results[n_moves][64]
+    int n_moves;
+    task_t tasks[QUEUE_CAPACITY];
+    int sp;
+
+    pthread_mutex_t mutex;
+    pthread_cond_t not_empty;
+    pthread_cond_t not_full;
+    atomic_bool stop;
+    atomic_size_t active_workers;
+} task_stack;
+
+void task_init(result_t (*results)[64], int n_moves) {
+    task_stack.sp = 0;
+    task_stack.results = results;
+    task_stack.n_moves = n_moves;
+    task_stack.stop = false;
+    atomic_store(&task_stack.active_workers, 0);
+    pthread_mutex_init(&task_stack.mutex, NULL);
+    pthread_cond_init(&task_stack.not_empty, NULL);
+    pthread_cond_init(&task_stack.not_full, NULL);
+}
+
+void task_destroy(void) {
+    pthread_mutex_destroy(&task_stack.mutex);
+    pthread_cond_destroy(&task_stack.not_empty);
+    pthread_cond_destroy(&task_stack.not_full);
+}
+
+static inline void task_request_stop(void) {
+    atomic_store(&task_stack.stop, true);
+    pthread_cond_broadcast(&task_stack.not_empty);
+    pthread_cond_broadcast(&task_stack.not_full);
+}
+
+void task_show(void) {
+    printf("{");
+    for (int i = 0; i < task_stack.sp; i++) {
+        task_t task = task_stack.tasks[i];
+        printf("%s(%d)", Move_string(&task.move), task.depth);
+        if (i + 1 != task_stack.sp) printf(", ");
+    }
+    printf("}\n");
+}
+
+void task_push(task_t task) {
+    pthread_mutex_lock(&task_stack.mutex);
+
+    while (task_stack.sp == QUEUE_CAPACITY && !atomic_load(&task_stack.stop)) {
+        pthread_cond_wait(&task_stack.not_full, &task_stack.mutex);
+    }
+    if (atomic_load(&task_stack.stop)) {
+        pthread_mutex_unlock(&task_stack.mutex);
+        return;
+    }
+
+    task_stack.tasks[task_stack.sp++] = task;
+    // task_show();
+
+    pthread_cond_signal(&task_stack.not_empty);
+    pthread_mutex_unlock(&task_stack.mutex);
+}
+
+size_t task_size(void) {
+    pthread_mutex_lock(&task_stack.mutex);
+    size_t sz = (size_t)task_stack.sp;
+    pthread_mutex_unlock(&task_stack.mutex);
+    return sz;
+}
+
+static inline void task_maybe_stop_if_idle(void) {
+    if (atomic_load(&task_stack.active_workers) == 0 && task_size() == 0) {
+        task_request_stop();
+    }
+}
+
+void task_remove(int index) {
+    if (index >= task_stack.sp) return;
+
+    for (int i = index; i + 1 < task_stack.sp; i++) {
+        task_stack.tasks[i] = task_stack.tasks[i + 1];
+    }
+    task_stack.sp--;
+}
+
+// Returns true if found a task at depth 1
+bool task_find_depth_1(task_t* task) {
+    for (int i = 0; i < task_stack.sp; i++) {
+        task_t t = task_stack.tasks[i];
+        if (t.depth <= 1) {
+            *task = t;
+            task_remove(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool task_is_priority(int depth, int score) {
+    int better_count = 0, total_count = 0;
+
+    // Count how many moves have a better score at this depth
+    for (int i = 0; i < task_stack.n_moves; i++) {
+        result_t other = task_stack.results[i][depth];
+        if (!other.reached) continue;
+        total_count++;
+
+        if (other.score > score) {
+            better_count++;
+            if (better_count >= PRIORITY_LINES) {
+                return false;  // This move is not in top PRIORITY_LINES
+            }
+        }
+    }
+
+    return total_count >= PRIORITY_LINES;  // This move is in top PRIORITY_LINES
+}
+
+int task_find_best(bool priority_line) {
+    int best_score = -INF, best_index = -1, best_depth = INF;
+
+    for (int i = 0; i < task_stack.sp; i++) {
+        task_t t = task_stack.tasks[i];
+        result_t result = task_stack.results[t.move_index][t.depth - 1];
+        int score = result.reached ? result.score : -INF;
+
+        if (t.depth > best_depth) continue;
+        if (priority_line && !result.reached) continue;
+        if (priority_line && !task_is_priority(t.depth - 1, score)) continue;
+
+        if (t.depth < best_depth || score > best_score) {
+            best_depth = t.depth;
+            best_index = i;
+            best_score = score;
+        }
+    }
+
+    return best_index;
+}
+
+// Will return true if there is time left
+bool task_pop(task_t* task, TIME_TYPE endtime) {
+    pthread_mutex_lock(&task_stack.mutex);
+
+    while (task_stack.sp == 0 && !atomic_load(&task_stack.stop)) {
+        // Wake up either when there is work or when time is up
+        pthread_cond_wait(&task_stack.not_empty, &task_stack.mutex);
+        if (TIME_NOW() > endtime) {
+            task_request_stop();
+        }
+    }
+
+    if (task_stack.sp == 0) {
+        pthread_mutex_unlock(&task_stack.mutex);
+        return false;  // nothing to do / stopping
+    }
+
+    // Complete all depth 1 tasks.
+    if (task_find_depth_1(task)) {
+        atomic_fetch_add(&task_stack.active_workers, 1);
+        pthread_cond_signal(&task_stack.not_full);
+        pthread_mutex_unlock(&task_stack.mutex);
+        return true;
+    }
+
+    // Loop through all the tasks and find the lowest depth and best previous score at that depth.
+    int i = task_find_best(false);
+
+    // Loop through all the tasks and find the lowest depth where the score of the previous depth is
+    // within the top PRIORITY_LINES best scores. Otherwise, do the task found in the previous step.
+    int i2 = task_find_best(true);
+
+    if (i2 != -1) i = i2;
+    // if (i2 != -1) printf("%s\n", Move_string(&task_stack.tasks[i].move));
+    *task = task_stack.tasks[i];
+    task_remove(i);
+
+    atomic_fetch_add(&task_stack.active_workers, 1);
+    pthread_cond_signal(&task_stack.not_full);
+    pthread_mutex_unlock(&task_stack.mutex);
+    return TIME_NOW() < endtime;
+}
+
 // Transposition table
 typedef enum { TT_EXACT, TT_LOWER, TT_UPPER } TTNodeType;
 
@@ -2565,21 +2786,52 @@ void bubble_sort(Move* moves, int* scores, size_t n_moves) {
     } while (swapped);
 }
 
-void* play_thread(void* arg_void) {
-    ChessThread* arg = (ChessThread*)arg_void;
-    Chess* chess = &arg->chess;
-    TIME_TYPE endtime = arg->endtime;
-    TIME_TYPE start = TIME_NOW();
-    Move* move = &arg->move;
-    int depth = arg->depth;
-    memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
-    Piece capture = Chess_make_move(chess, move);
+void* play_thread(void* arg) {
+    TIME_TYPE endtime = *(TIME_TYPE*)arg;
+    task_t task;
 
-    int score = -minimax(chess, endtime, depth, -INF, INF, capture, 0);
-    *arg->search_cancelled = TIME_NOW() > endtime;
-    *arg->score = score;
-    arg->endtime = TIME_NOW() - start;
+    while (1) {
+        if (!task_pop(&task, endtime)) break;
+        if (task.depth >= 64) continue;
 
+        Chess* chess = &task.chess;
+        int depth = task.depth;
+        Piece capture = task.capture;
+        Move move = task.move;
+        memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
+
+        int score = -minimax(chess, endtime, depth - 1, -INF, INF, capture, 0);
+
+        if (TIME_NOW() > endtime) {
+            task_request_stop();
+            break;
+        }
+
+        // Add move score
+        task.result->score = score;
+        task.result->reached = true;
+        atomic_fetch_sub(&task_stack.active_workers, 1);
+
+        // Don't push moves that lead to checkmate
+        if (abs(score) >= 1000000 || task.dont_push_next) {
+            task_maybe_stop_if_idle();
+            continue;
+        }
+
+        // Push the next depth to the queue
+        // If there is still space push another depth, push task a second time
+        bool push_two_tasks = task_size() < cpu_count();
+        for (int i = 0; i < (1 + push_two_tasks); i++) {
+            task_t task2 = {.chess = *chess,
+                            .capture = capture,
+                            .depth = ++depth,
+                            .move = move,
+                            .move_index = task.move_index,
+                            .result = ++task.result,
+                            .dont_push_next = push_two_tasks && i == 0};
+            task_push(task2);
+        }
+    }
     return NULL;
 }
 
@@ -2641,7 +2893,7 @@ bool openings_db(Chess* chess) {
 
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
-int play(char* fen, int millis, char* game_history, bool fancy) {
+int play(char* fen, int millis, char* game_history) {
     ZHashStack zhstack = {0};
     if (game_history != NULL) {
         ZHashStack_game_history(&zhstack, game_history);
@@ -2672,123 +2924,77 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
 
     TIME_TYPE start = TIME_NOW();
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
-    double time_wasted = 0.0;
     Move moves[MAX_LEGAL_MOVES];
-    int scores[MAX_LEGAL_MOVES];
-    bool search_cancelled[MAX_LEGAL_MOVES];
-    Move moves_at_depth2[MAX_LEGAL_MOVES];
-    int scores_at_depth2[MAX_LEGAL_MOVES];
+    result_t results[MAX_LEGAL_MOVES][64] = {0};
     size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
     if (n_moves < 1) return 1;
+    task_init(results, n_moves);
 
-    Move* best_move = NULL;
-    int best_score = -INF;
-    int depth = 1;
+    for (int i = 0; i < n_moves; i++) {
+        Chess chess_cp = *chess;
+        Move* move = &moves[i];
+        Piece capture = Chess_make_move(&chess_cp, move);
+        task_t task = {.chess = chess_cp,
+                       .capture = capture,
+                       .depth = 1,
+                       .move = moves[i],
+                       .move_index = i,
+                       .result = &results[i][1]};
+        task_push(task);
+    }
 
-    pthread_t* threads = calloc(n_moves, sizeof(pthread_t));
-    ChessThread* args = calloc(n_moves, sizeof(ChessThread));
+    // task_show();
 
-    while (TIME_NOW() < endtime) {
-        // nodes_total = 0;
-
-        TIME_TYPE start_depth = TIME_NOW();
-        for (int i = 0; i < n_moves; i++) {
-            ChessThread* arg = &args[i];
-            memcpy(&arg->chess, chess, sizeof(Chess));
-            memcpy(&arg->move, &moves[i], sizeof(Move));
-            arg->endtime = endtime;
-            arg->depth = depth;
-            arg->score = &scores[i];
-
-            // Use this in case of time cut off to know if we can use this score
-            arg->search_cancelled = &search_cancelled[i];
-
-            if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
-                perror("pthread_create failed");
-                return 1;
-            }
-        }
-
-        // Wait for threads to finish
-        for (int i = 0; i < n_moves; i++) {
-            pthread_join(threads[i], NULL);
-        }
-
-        // Compute time wasted
-        TIME_TYPE end_depth = TIME_NOW();
-        for (int i = 0; i < n_moves; i++) {
-            time_wasted += TIME_DIFF_S(end_depth - args[i].endtime, start_depth) / n_moves;
-        }
-
-        if (fancy && depth == 2) {
-            memcpy(scores_at_depth2, scores, sizeof(scores));
-            memcpy(moves_at_depth2, moves, sizeof(moves));
-        }
-
-        // If we finished this depth, update best move
-        if (TIME_NOW() < endtime) {
-            bubble_sort(moves, scores, n_moves);
-            best_score = scores[0];
-            best_move = &moves[0];
-
-            // Give more points to a move if there is a large difference with depth 2 score
-            if (fancy && depth > 2) {
-                for (int i = 0; i < n_moves / 2; i++) {
-                    if (scores[i] <= 0 || scores[i] > 500) continue;
-                    int score_depth2 = scores[i];
-
-                    for (int j = 0; j < n_moves; j++) {
-                        if (Move_equals(&moves[i], &moves_at_depth2[j])) {
-                            score_depth2 = scores_at_depth2[j];
-                            break;
-                        }
-                    }
-
-                    int improvement = scores[i] - score_depth2;
-                    scores[i] += improvement / 2;
-                }
-
-                bubble_sort(moves, scores, n_moves);
-                best_move = &moves[0];
-            }
-
-            depth++;
-
-        } else if (!search_cancelled[0]) {
-            // In case search was cancelled, try using results from this iteration
-            // Give a null score to moves that didn't complete search
-            for (int i = 1; i < n_moves; i++) {
-                if (search_cancelled[i]) scores[i] = -INF;
-            }
-
-            // Partial sort for the best move at this depth
-            bubble_sort(moves, scores, n_moves);
-            best_score = scores[0];
-            best_move = &moves[0];
+    pthread_t* threads = calloc(cpu_count(), sizeof(pthread_t));
+    for (int i = 0; i < cpu_count(); i++) {
+        if (pthread_create(&threads[i], NULL, play_thread, &endtime) != 0) {
+            perror("pthread_create failed");
+            return 1;
         }
     }
 
+    // Wait for threads to finish
+    for (int i = 0; i < cpu_count(); i++) {
+        pthread_join(threads[i], NULL);
+    }
+
     free(threads);
-    free(args);
+    task_destroy();
+
+    // Display results
+    // for (int i = 0; i < n_moves; i++) {
+    //     printf("%-2d %-5s ", i, Move_string(&moves[i]));
+    //     for (int j = 1; results[i][j].reached; j++) {
+    //         printf("%5d ", results[i][j].score);
+    //     }
+    //     printf("\n");
+    // }
+
+    // Select best move in results
+    bool has_next = true;
+    int depth = 0, best_score = -INF;
+    Move best_move;
+    for (depth = 1; depth < 63 && has_next; depth++) {
+        best_score = -INF;
+        for (int i = 0; i < n_moves; i++) {
+            result_t result = results[i][depth];
+            if (result.reached && result.score > best_score) {
+                best_score = result.score;
+                best_move = moves[i];
+                has_next = results[i][depth + 1].reached;
+            }
+        }
+    }
 
     TIME_TYPE end = TIME_NOW();
     double cpu_time = TIME_DIFF_S(end, start);
-    best_score *= chess->turn == TURN_WHITE ? 1 : -1;
+    best_score = chess->turn == TURN_WHITE ? best_score : -best_score;
+    depth--;
 
     puts("{");
-    // printf("  \"scores\": {\n");
-    // for (int i = 0; i < n_moves; i++) {
-    //     if (i >= n_moves - 1) {
-    //         printf("    \"%s\": %.2f\n", Move_string(moves + i), (double)scores[i] / 100);
-    //     } else {
-    //         printf("    \"%s\": %.2f,\n", Move_string(moves + i), (double)scores[i] / 100);
-    //     }
-    // }
-    // printf("  },\n");
     printf("  \"millis\": %d,\n", millis);
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
-    printf("  \"time_wasted\": \"%.1lf%%\",\n", time_wasted / cpu_time * 100);
 #ifdef TRACK_BETA_CUTOFFS
     size_t nodes = atomic_load(&total_nodes);
     size_t cutoffs = atomic_load(&beta_cutoffs);
@@ -2814,13 +3020,13 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     printf("  \"TT_occupancy_%%\": %.2f,\n", TT_occupancy() * 100.0);
 #endif
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
-    printf("  \"move\": \"%s\"\n", Move_string(best_move));
+    printf("  \"move\": \"%s\"\n", Move_string(&best_move));
     puts("}");
     return 0;
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.7.2 (2025-12-14)\n");
+    printf("SigmaZero Chess Engine 2.8.0 (2025-12-27)\n");
     return 0;
 }
 
@@ -2919,16 +3125,9 @@ int main(int argc, char** argv) {
     } else if ((argc == 4 || argc == 5) && strcmp(argv[1], "play") == 0) {
         int millis = atoi(argv[3]);
         if (argc == 4) {
-            return play(argv[2], millis, NULL, false);
+            return play(argv[2], millis, NULL);
         } else {
-            return play(argv[2], millis, argv[4], false);
-        }
-    } else if ((argc == 4 || argc == 5) && strcmp(argv[1], "fancy") == 0) {
-        int millis = atoi(argv[3]);
-        if (argc == 4) {
-            return play(argv[2], millis, NULL, true);
-        } else {
-            return play(argv[2], millis, argv[4], true);
+            return play(argv[2], millis, argv[4]);
         }
     } else if (argc == 4 && strcmp(argv[1], "moves") == 0) {
         int depth = atoi(argv[3]);

@@ -2,6 +2,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -10,21 +11,31 @@
 #include <string.h>
 #include <time.h>
 
-#include "consts_V2.6.c"
+#include "consts_V2.7.c"
 
 #define class typedef struct
 #define INF 1000000000
 
 // Uncomment to enable beta cutoff tracking (has performance cost)
-#define TRACK_BETA_CUTOFFS
+// #define TRACK_BETA_CUTOFFS
 
 #ifdef TRACK_BETA_CUTOFFS
-#include <stdatomic.h>
 static atomic_size_t total_nodes = 0;
 static atomic_size_t beta_cutoffs = 0;
 static atomic_size_t first_move_cutoffs = 0;
 static atomic_size_t total_cutoff_index = 0;
 #endif
+
+// Uncomment to enable TT tracking (has performance cost)
+// #define TRACK_TT
+
+#ifdef TRACK_TT
+static atomic_size_t tt_lookups = 0;
+static atomic_size_t tt_hits = 0;
+static atomic_size_t tt_collisions = 0;
+static atomic_size_t tt_stores = 0;
+#endif
+
 #define ISLOWER(c) ((c) >= 'a' && (c) <= 'z')
 #define ISUPPER(c) ((c) >= 'A' && (c) <= 'Z')
 
@@ -54,6 +65,13 @@ __attribute__((always_inline)) static inline uint64_t now_nanos() {
 // and the most significant bit (MSB) represents h8.
 typedef uint64_t bitboard_t;
 
+extern const bitboard_t ROOK_MAGIC_NUMS[64];
+extern const int ROOK_MAGIC_SHIFTS[64];
+extern const bitboard_t BISHOP_MAGIC_NUMS[64];
+extern const int BISHOP_MAGIC_SHIFTS[64];
+extern const bitboard_t* ROOK_MOVES[64];
+extern const bitboard_t* BISHOP_MOVES[64];
+
 // Print a bitboard as a 64-character string of 0s and 1s
 void bitboard_print(bitboard_t bb) {
     for (int rank = 7; rank >= 0; rank--) {
@@ -73,6 +91,16 @@ static inline int index_col(int index) { return index % 8; }
 
 static inline int index_row(int index) { return index / 8; }
 
+static inline bitboard_t bitboard_row_no_edge(int i) { return 0x7EULL << (i - index_col(i)); }
+
+static inline bitboard_t bitboard_col_no_edge(int i) {
+    return 0x0001010101010100ULL << index_col(i);
+}
+
+static inline bitboard_t bitboard_rook_mask(int i) {
+    return (bitboard_row_no_edge(i) ^ bitboard_col_no_edge(i)) & ~bitboard_from_index(i);
+}
+
 // All pieces
 typedef enum {
     EMPTY = '.',
@@ -90,7 +118,57 @@ typedef enum {
     BLACK_KING = 'k',
 } Piece;
 
-int Piece_value(Piece piece) {
+static inline int Piece_victim_score(Piece piece) {
+    switch (piece) {
+        case WHITE_PAWN:
+        case BLACK_PAWN:
+            return PAWN_VICTIM_SCORE;
+        case WHITE_KNIGHT:
+        case BLACK_KNIGHT:
+            return KNIGHT_VICTIM_SCORE;
+        case WHITE_BISHOP:
+        case BLACK_BISHOP:
+            return BISHOP_VICTIM_SCORE;
+        case WHITE_ROOK:
+        case BLACK_ROOK:
+            return ROOK_VICTIM_SCORE;
+        case WHITE_QUEEN:
+        case BLACK_QUEEN:
+            return QUEEN_VICTIM_SCORE;
+        case WHITE_KING:
+        case BLACK_KING:
+            return KING_VICTIM_SCORE;
+        default:
+            return 0;
+    }
+}
+
+static inline int Piece_aggro_score(Piece piece) {
+    switch (piece) {
+        case WHITE_PAWN:
+        case BLACK_PAWN:
+            return PAWN_AGGRO_SCORE;
+        case WHITE_KNIGHT:
+        case BLACK_KNIGHT:
+            return KNIGHT_AGGRO_SCORE;
+        case WHITE_BISHOP:
+        case BLACK_BISHOP:
+            return BISHOP_AGGRO_SCORE;
+        case WHITE_ROOK:
+        case BLACK_ROOK:
+            return ROOK_AGGRO_SCORE;
+        case WHITE_QUEEN:
+        case BLACK_QUEEN:
+            return QUEEN_AGGRO_SCORE;
+        case WHITE_KING:
+        case BLACK_KING:
+            return KING_AGGRO_SCORE;
+        default:
+            return 0;
+    }
+}
+
+static inline int Piece_value(Piece piece) {
     switch (piece) {
         case WHITE_PAWN:
             return PAWN_VALUE;
@@ -439,11 +517,8 @@ class {
     bitboard_t block_attack_map;
     // xor this with the location of a piece to check if it's pinned
     bitboard_t pinned_piece_map;
-    // once you know a piece is pinned, loop through to find its legal moves map
-    struct ValidMap {
-        bitboard_t valid_map;
-        uint8_t pinned_piece;
-    } pins[8];
+    // once you know a piece is pinned, check this to find legal moves map
+    bitboard_t valid_map[64];
 }
 EnemyAttackMap;
 
@@ -459,10 +534,11 @@ class {
     ZHashStack zhstack;     // Stack to store zobrist hash of previous positions
     uint64_t zhash;         // Current zobrist hash of the position
     EnemyAttackMap enemy_attack_map;
-    int eval;             // Cache a partial value of the eval that doesn't depend on fullmoves
-    int pawn_row_sum;     // Sum pawn rows to use in final eval calculation
-    bitboard_t bb_white;  // Bitboard of all white pieces
-    bitboard_t bb_black;  // Bitboard of all black pieces
+    int eval;                  // Cache a partial value of the eval that doesn't depend on fullmoves
+    int pawn_row_sum;          // Sum pawn rows to use in final eval calculation
+    bitboard_t bb_white;       // Bitboard of all white pieces
+    bitboard_t bb_black;       // Bitboard of all black pieces
+    Move killer_moves[2][64];  // Used for move ordering [id][depth]
 }
 Chess;
 
@@ -530,7 +606,7 @@ static inline void Chess_en_passant_set(Chess* board, uint8_t col) {
 }
 
 #define NO_ENPASSANT 255
-// Get en passant column (or -1 if not available)
+// Get en passant column (or NO_ENPASSANT if not available)
 static inline uint8_t Chess_en_passant(Chess* chess) {
     if (chess->gamestate & BITMASK(4)) {
         return chess->gamestate >> 5;
@@ -814,18 +890,6 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->halfmoves = 0;
     }
 
-    // Update pawn row sum number
-    if (moving_piece == WHITE_PAWN) {
-        chess->pawn_row_sum += index_row(move->to - move->from + 1);
-    } else if (moving_piece == BLACK_PAWN) {
-        chess->pawn_row_sum += index_row(move->to - move->from - 1);
-    }
-    if (target_piece == WHITE_PAWN) {
-        chess->pawn_row_sum -= index_row(move->to) - 1;
-    } else if (target_piece == BLACK_PAWN) {
-        chess->pawn_row_sum -= index_row(move->to) - 6;
-    }
-
     // Update fullmove number
     if (chess->turn == TURN_BLACK) {
         chess->fullmoves++;
@@ -939,50 +1003,54 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->bb_white &= ~bitboard_from_index(move->to + 8);
     }
 
-    // Handle promotion
-    if (move->promotion) {
-        if (chess->turn == TURN_WHITE) {
-            switch (move->promotion) {
-                case PROMOTE_QUEEN:
-                    moving_piece = WHITE_QUEEN;
-                    chess->pawn_row_sum -= index_row(move->to) - 1;
-                    break;
-                case PROMOTE_ROOK:
-                    moving_piece = WHITE_ROOK;
-                    chess->pawn_row_sum -= index_row(move->to) - 1;
-                    break;
-                case PROMOTE_BISHOP:
-                    moving_piece = WHITE_BISHOP;
-                    chess->pawn_row_sum -= index_row(move->to) - 1;
-                    break;
-                case PROMOTE_KNIGHT:
-                    moving_piece = WHITE_KNIGHT;
-                    chess->pawn_row_sum -= index_row(move->to) - 1;
-                    break;
-                default:
-                    break;
-            }
-        } else {
-            switch (move->promotion) {
-                case PROMOTE_QUEEN:
-                    moving_piece = BLACK_QUEEN;
-                    chess->pawn_row_sum -= index_row(move->to) - 6;
-                    break;
-                case PROMOTE_ROOK:
-                    moving_piece = BLACK_ROOK;
-                    chess->pawn_row_sum -= index_row(move->to) - 6;
-                    break;
-                case PROMOTE_BISHOP:
-                    moving_piece = BLACK_BISHOP;
-                    chess->pawn_row_sum -= index_row(move->to) - 6;
-                    break;
-                case PROMOTE_KNIGHT:
-                    moving_piece = BLACK_KNIGHT;
-                    chess->pawn_row_sum -= index_row(move->to) - 6;
-                    break;
-                default:
-                    break;
-            }
+    // Handle promotion and update pawn row sum number
+    if (moving_piece == WHITE_PAWN) {
+        chess->pawn_row_sum += index_row(move->to - move->from + 1);
+        if (target_piece == BLACK_PAWN) chess->pawn_row_sum -= index_row(move->to) - 6;
+
+        switch (move->promotion) {
+            case PROMOTE_QUEEN:
+                moving_piece = WHITE_QUEEN;
+                chess->pawn_row_sum -= index_row(move->to) - 1;
+                break;
+            case PROMOTE_ROOK:
+                moving_piece = WHITE_ROOK;
+                chess->pawn_row_sum -= index_row(move->to) - 1;
+                break;
+            case PROMOTE_BISHOP:
+                moving_piece = WHITE_BISHOP;
+                chess->pawn_row_sum -= index_row(move->to) - 1;
+                break;
+            case PROMOTE_KNIGHT:
+                moving_piece = WHITE_KNIGHT;
+                chess->pawn_row_sum -= index_row(move->to) - 1;
+                break;
+            default:
+                break;
+        }
+    } else if (moving_piece == BLACK_PAWN) {
+        chess->pawn_row_sum += index_row(move->to - move->from - 1);
+        if (target_piece == WHITE_PAWN) chess->pawn_row_sum -= index_row(move->to) - 1;
+
+        switch (move->promotion) {
+            case PROMOTE_QUEEN:
+                moving_piece = BLACK_QUEEN;
+                chess->pawn_row_sum -= index_row(move->to) - 6;
+                break;
+            case PROMOTE_ROOK:
+                moving_piece = BLACK_ROOK;
+                chess->pawn_row_sum -= index_row(move->to) - 6;
+                break;
+            case PROMOTE_BISHOP:
+                moving_piece = BLACK_BISHOP;
+                chess->pawn_row_sum -= index_row(move->to) - 6;
+                break;
+            case PROMOTE_KNIGHT:
+                moving_piece = BLACK_KNIGHT;
+                chess->pawn_row_sum -= index_row(move->to) - 6;
+                break;
+            default:
+                break;
         }
     }
 
@@ -1425,7 +1493,7 @@ void Chess_fill_attack_map(Chess* chess) {
     uint8_t enemy_king_i = Chess_enemy_king_i(chess);
     Position enemy_king_pos = Position_from_index(enemy_king_i);
     ENEMY_ATTACK(abs(enemy_king_pos.row - king_pos.row) <= 1,
-                 abs(enemy_king_pos.col - king_pos.col) <= 1, bitboard_from_index(enemy_king_i))
+                 abs(enemy_king_pos.col - king_pos.col) <= 1, 0)
 
     int i;
     bitboard_t attack_map;
@@ -1434,9 +1502,8 @@ void Chess_fill_attack_map(Chess* chess) {
 
     // Reset the pinned piece map
     eam->pinned_piece_map = 0;
-    for (int i = 0; i < 8; i++) eam->pins[i].pinned_piece = -1;
 
-#define SLIDING_PIECE_ATTACK(fn, condition, offset, pin_i)                     \
+#define SLIDING_PIECE_ATTACK(fn, condition, offset)                            \
     attack_map = 0;                                                            \
     found_pinned_piece = false;                                                \
     for (i = 0; (condition); i++) {                                            \
@@ -1454,8 +1521,7 @@ void Chess_fill_attack_map(Chess* chess) {
         } else if (fn(chess, square) || Chess_enemy_queen_at(chess, square)) { \
             if (found_pinned_piece) {                                          \
                 /* found an enemy behind friendly, so piece pinned */          \
-                eam->pins[pin_i].valid_map = attack_map;                       \
-                eam->pins[pin_i].pinned_piece = pinned_piece;                  \
+                eam->valid_map[pinned_piece] = attack_map;                     \
                 eam->pinned_piece_map |= bitboard_from_index(pinned_piece);    \
             } else {                                                           \
                 /* found an enemy without a pin, so it's a check */            \
@@ -1470,33 +1536,32 @@ void Chess_fill_attack_map(Chess* chess) {
 #define kp king_pos
 
 // Look for bishop/queen attacks
-#define BISHOP_ATTACK(condition, offset, pin_i) \
-    SLIDING_PIECE_ATTACK(Chess_enemy_bishop_at, condition, offset, pin_i)
+#define BISHOP_ATTACK(condition, offset) \
+    SLIDING_PIECE_ATTACK(Chess_enemy_bishop_at, condition, offset)
     if (chess->turn == TURN_WHITE) {
-        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7, 0)
-        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9, 1)
-        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9, 2)
-        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7, 3)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7)
     } else {
-        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9, 0)
-        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7, 1)
-        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7, 2)
-        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9, 3)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9)
     }
 
 // Look for rook/queen attacks
-#define ROOK_ATTACK(condition, offset, pin_i) \
-    SLIDING_PIECE_ATTACK(Chess_enemy_rook_at, condition, offset, pin_i + 4)
+#define ROOK_ATTACK(condition, offset) SLIDING_PIECE_ATTACK(Chess_enemy_rook_at, condition, offset)
     if (chess->turn == TURN_WHITE) {
-        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8, 0)
-        ROOK_ATTACK(king_pos.col + i < 7, (i + 1), 1)
-        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1, 2)
-        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8, 3)
+        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8)
+        ROOK_ATTACK(king_pos.col + i < 7, (i + 1))
+        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1)
+        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8)
     } else {
-        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8, 0)
-        ROOK_ATTACK(king_pos.col + i < 7, (i + 1), 1)
-        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1, 2)
-        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8, 3)
+        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8)
+        ROOK_ATTACK(king_pos.col + i < 7, (i + 1))
+        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1)
+        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8)
     }
 }
 
@@ -1631,9 +1696,7 @@ bool Chess_is_move_legal(Chess* chess, Move* move) {
             if (eam->n_checks == 1) return false;
 
             // if pinned, limit movement to stay pinned
-            int i = 0;
-            while (eam->pins[i++].pinned_piece != move->from);
-            bool still_pinned = to_bb & eam->pins[i - 1].valid_map;
+            bool still_pinned = to_bb & eam->valid_map[move->from];
             if (!still_pinned) return false;
         } else {
             // if it's not pinned and there's no check, can move freely
@@ -1682,46 +1745,72 @@ size_t Chess_knight_moves(Chess* chess, Move* move, int from, bool captures_only
     return n_moves;
 }
 
-#define SLIDING_PIECE_ADD_MOVE(condition, offset)                     \
-    for (i = 0; (condition); i++) {                                   \
-        move->from = from;                                            \
-        move->to = from + (offset);                                   \
-        move->promotion = NO_PROMOTION;                               \
-        if (Chess_square_available(chess, move->to, captures_only) && \
-            Chess_is_move_legal(chess, move)) {                       \
-            move++;                                                   \
-            n_moves++;                                                \
-        }                                                             \
-        bitboard_t to_bit = bitboard_from_index(from + (offset));     \
-        if (occupied & to_bit) break;                                 \
+const bitboard_t BISHOP_MASKS[64] = {
+    0x0040201008040200ULL, 0x0000402010080400ULL, 0x0000004020100a00ULL, 0x0000000040221400ULL,
+    0x0000000002442800ULL, 0x0000000204085000ULL, 0x0000020408102000ULL, 0x0002040810204000ULL,
+    0x0020100804020000ULL, 0x0040201008040000ULL, 0x00004020100a0000ULL, 0x0000004022140000ULL,
+    0x0000000244280000ULL, 0x0000020408500000ULL, 0x0002040810200000ULL, 0x0004081020400000ULL,
+    0x0010080402000200ULL, 0x0020100804000400ULL, 0x004020100a000a00ULL, 0x0000402214001400ULL,
+    0x0000024428002800ULL, 0x0002040850005000ULL, 0x0004081020002000ULL, 0x0008102040004000ULL,
+    0x0008040200020400ULL, 0x0010080400040800ULL, 0x0020100a000a1000ULL, 0x0040221400142200ULL,
+    0x0002442800284400ULL, 0x0004085000500800ULL, 0x0008102000201000ULL, 0x0010204000402000ULL,
+    0x0004020002040800ULL, 0x0008040004081000ULL, 0x00100a000a102000ULL, 0x0022140014224000ULL,
+    0x0044280028440200ULL, 0x0008500050080400ULL, 0x0010200020100800ULL, 0x0020400040201000ULL,
+    0x0002000204081000ULL, 0x0004000408102000ULL, 0x000a000a10204000ULL, 0x0014001422400000ULL,
+    0x0028002844020000ULL, 0x0050005008040200ULL, 0x0020002010080400ULL, 0x0040004020100800ULL,
+    0x0000020408102000ULL, 0x0000040810204000ULL, 0x00000a1020400000ULL, 0x0000142240000000ULL,
+    0x0000284402000000ULL, 0x0000500804020000ULL, 0x0000201008040200ULL, 0x0000402010080400ULL,
+    0x0002040810204000ULL, 0x0004081020400000ULL, 0x000a102040000000ULL, 0x0014224000000000ULL,
+    0x0028440200000000ULL, 0x0050080402000000ULL, 0x0020100804020000ULL, 0x0040201008040200ULL};
+
+bitboard_t bitboard_bishop_mask(int i) { return BISHOP_MASKS[i]; }
+
+__attribute__((always_inline)) static inline size_t  //
+Chess_sliding_piece_moves(Chess* chess, Move* move, int from, bool captures_only,
+                          bitboard_t (*bitboard_piece_mask)(int), const bitboard_t MAGIC_NUMS[64],
+                          const int MAGIC_SHIFTS[64], const bitboard_t* MOVES[64]) {
+    EnemyAttackMap* eam = &chess->enemy_attack_map;
+
+    bitboard_t piece_mask = bitboard_piece_mask(from);
+    bitboard_t friendly_bb = chess->turn == TURN_WHITE ? chess->bb_white : chess->bb_black;
+    bitboard_t all_bb = chess->bb_white | chess->bb_black;
+    bitboard_t target_mask = piece_mask & all_bb;
+    int index = (target_mask * MAGIC_NUMS[from]) >> MAGIC_SHIFTS[from];
+    bitboard_t moves = MOVES[from][index] & ~friendly_bb;
+    if (captures_only) moves &= chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white;
+
+    bitboard_t from_bb = bitboard_from_index(from);
+    bool is_pinned = from_bb & eam->pinned_piece_map;
+
+    if (is_pinned) {
+        // if pinned and king is in check, can't move to block the attack
+        if (eam->n_checks == 1) moves = 0;
+        // if pinned, limit movement to stay pinned
+        moves &= eam->valid_map[from];
+    } else if (eam->n_checks == 1) {
+        // single check: has to block the attack with the piece
+        moves &= eam->block_attack_map;
     }
 
-size_t Chess_bishop_moves(Chess* chess, Move* move, int from, bool captures_only) {
-    size_t n_moves = 0;
-    Position pos = Position_from_index(from);
-    bitboard_t occupied = chess->bb_white | chess->bb_black;
-    int i;
-
-    SLIDING_PIECE_ADD_MOVE(pos.col + i < 7 && pos.row + i < 7, (i + 1) * 9)
-    SLIDING_PIECE_ADD_MOVE(pos.col - i > 0 && pos.row - i > 0, (i + 1) * -9)
-    SLIDING_PIECE_ADD_MOVE(pos.col + i < 7 && pos.row - i > 0, (i + 1) * -7)
-    SLIDING_PIECE_ADD_MOVE(pos.col - i > 0 && pos.row + i < 7, (i + 1) * 7)
-
+    size_t n_moves = __builtin_popcountll(moves);
+    while (moves) {
+        move->from = from;
+        move->to = __builtin_ctzll(moves);  // Get the index
+        moves &= moves - 1;                 // Clear the least significant bit
+        move->promotion = NO_PROMOTION;
+        move++;
+    }
     return n_moves;
 }
 
+size_t Chess_bishop_moves(Chess* chess, Move* move, int from, bool captures_only) {
+    return Chess_sliding_piece_moves(chess, move, from, captures_only, bitboard_bishop_mask,
+                                     BISHOP_MAGIC_NUMS, BISHOP_MAGIC_SHIFTS, BISHOP_MOVES);
+}
+
 size_t Chess_rook_moves(Chess* chess, Move* move, int from, bool captures_only) {
-    size_t n_moves = 0;
-    Position pos = Position_from_index(from);
-    bitboard_t occupied = chess->bb_white | chess->bb_black;
-    int i;
-
-    SLIDING_PIECE_ADD_MOVE(pos.row + i < 7, (i + 1) * 8)
-    SLIDING_PIECE_ADD_MOVE(pos.col + i < 7, (i + 1))
-    SLIDING_PIECE_ADD_MOVE(pos.row - i > 0, (i + 1) * -8)
-    SLIDING_PIECE_ADD_MOVE(pos.col - i > 0, (i + 1) * -1)
-
-    return n_moves;
+    return Chess_sliding_piece_moves(chess, move, from, captures_only, bitboard_rook_mask,
+                                     ROOK_MAGIC_NUMS, ROOK_MAGIC_SHIFTS, ROOK_MOVES);
 }
 
 size_t Chess_queen_moves(Chess* chess, Move* move, int from, bool captures_only) {
@@ -1972,20 +2061,20 @@ void Chess_score_move(Chess* chess, Move* move) {
         return;
     }
 
-    move->score = 0;
-    Position pos = Position_from_index(move->to);
     Piece aggressor = chess->board[move->from];
     Piece victim = chess->board[move->to];
 
     // MVV - LVA
     if (victim != EMPTY) {
-        move->score +=
-            abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) / 64 - Piece_value(aggressor));
+        move->score = Piece_victim_score(victim) - Piece_aggro_score(aggressor);
     } else {
         // Deduct points if attacked by enemy pawns
-#define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
-    if ((condition) && chess->board[move->to + (offset)] == (pawn)) \
-        move->score -= abs(Piece_value(aggressor));
+#define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)               \
+    if ((condition) && chess->board[move->to + (offset)] == (pawn)) { \
+        move->score = -abs(Piece_value(aggressor));                   \
+        return;                                                       \
+    }
+        Position pos = Position_from_index(move->to);
 
         if (chess->turn == TURN_WHITE && aggressor != WHITE_PAWN) {
             ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col < 7, 9, BLACK_PAWN)
@@ -1994,6 +2083,9 @@ void Chess_score_move(Chess* chess, Move* move) {
             ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col < 7, -7, WHITE_PAWN)
             ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col > 0, -9, WHITE_PAWN)
         }
+
+        // Not attacked by enemy pawns
+        move->score = 0;
     }
 }
 
@@ -2034,8 +2126,6 @@ size_t Chess_legal_moves_scored(Chess* chess, Move* moves, bool captures_only) {
 }
 
 static inline void select_best_move(Move* moves, int start, int n_moves) {
-    if (start >= n_moves) return;
-
     int best = start;
     for (int i = start + 1; i < n_moves; i++) {
         if (moves[i].score > moves[best].score) {
@@ -2182,7 +2272,7 @@ class {
 }
 TTItem;
 
-// Will give ~100MB array
+// Will give ~64MB array
 #define TT_LENGTH (1 << 22)
 
 // Transposition table array
@@ -2192,6 +2282,13 @@ TTItem tt[TT_LENGTH] = {0};
 void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
     TTItem* item = &tt[i];
+
+#ifdef TRACK_TT
+    atomic_fetch_add(&tt_stores, 1);
+    if (item->depth > 0 && item->key != key) {
+        atomic_fetch_add(&tt_collisions, 1);
+    }
+#endif
 
     if (depth > item->depth) {
         item->key = key;
@@ -2206,9 +2303,16 @@ bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
     TTItem* item = &tt[i];
 
+#ifdef TRACK_TT
+    atomic_fetch_add(&tt_lookups, 1);
+#endif
+
     if (item->key == key && depth <= item->depth &&
         ((item->type == TT_EXACT) || (item->type == TT_LOWER && item->eval >= b) ||
          (item->type == TT_UPPER && item->eval <= a))) {
+#ifdef TRACK_TT
+        atomic_fetch_add(&tt_hits, 1);
+#endif
         *eval_p = item->eval;
         return true;
     }
@@ -2216,8 +2320,7 @@ bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     return false;
 }
 
-void TT_occupancy(void) {
-    const size_t tt_size = sizeof(tt) / 1024 / 1024;
+double TT_occupancy(void) {
     size_t tt_use = 0;
 
     for (int i = 0; i < TT_LENGTH; i++) {
@@ -2225,8 +2328,7 @@ void TT_occupancy(void) {
         if (i == (item.key & (TT_LENGTH - 1))) tt_use++;
     }
 
-    double tt_use_pc = (double)tt_use * 100.0 / TT_LENGTH;
-    printf("Transposition table (%.2lf%% of %luMB)\n", tt_use_pc, (unsigned long)tt_size);
+    return (double)tt_use / TT_LENGTH;
 }
 
 int moves(char* fen, int depth) {
@@ -2286,7 +2388,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
-    if (depth == 0 || best_score >= b || TIME_NOW() > endtime) {
+    if (depth == 0 || best_score >= b) {
         // nodes_total++;
         return best_score;
     }
@@ -2296,7 +2398,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     size_t n_moves = Chess_legal_moves_scored(chess, moves, true);
 
     for (int i = 0; i < n_moves; i++) {
-        if (i < 8) select_best_move(moves, i, n_moves);
+        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
@@ -2317,9 +2419,11 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
         chess->bb_white = bb_white;
         chess->bb_black = bb_black;
 
-        if (score >= b) return score;
-        if (score > best_score) best_score = score;
-        if (score > a) a = score;
+        if (score > best_score) {
+            best_score = score;
+            if (score > a) a = score;
+        }
+        if (score >= b) return best_score;
     }
     return best_score;
 }
@@ -2342,11 +2446,6 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     TT_store(hash, evaluation, depth, node_type); \
     return evaluation;
 
-    // Time cutoff
-    if (TIME_NOW() > endtime) {
-        RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
-    }
-
     // Extend search if in check, otherwise don't
     if (depth == 0) {
         if (extensions < MAX_EXTENSION && Chess_friendly_check(chess)) {
@@ -2356,6 +2455,9 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
         }
     }
+
+    // Time cutoff
+    if (TIME_NOW() > endtime) return 0;
 
     // Check for 3 fold repetition
     if (Chess_3fold_repetition(chess) >= 3) {
@@ -2377,15 +2479,29 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
     }
 
+    // Add score for killer move heuristic
+    for (int i = 0; i < n_moves; i++) {
+        Move* move = &moves[i];
+
+        if (chess->board[move->to] == EMPTY) {
+            // Check both killer slots
+            if ((chess->killer_moves[0][depth].from == move->from &&
+                 chess->killer_moves[0][depth].to == move->to) ||
+                (chess->killer_moves[1][depth].from == move->from &&
+                 chess->killer_moves[1][depth].to == move->to)) {
+                move->score += KILLER_MOVE_BONUS;
+            }
+        }
+    }
+
 #ifdef TRACK_BETA_CUTOFFS
     atomic_fetch_add(&total_nodes, 1);
 #endif
 
     int original_a = a;
-    int original_b = b;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
-        if (i < 8) select_best_move(moves, i, n_moves);
+        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
@@ -2416,18 +2532,23 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             atomic_fetch_add(&total_cutoff_index, i);
             if (i == 0) atomic_fetch_add(&first_move_cutoffs, 1);
 #endif
-            break;
+            if (capture == EMPTY) {
+                // Shift killers: move primary to secondary, new move to primary
+                if (!(chess->killer_moves[0][depth].from == move->from &&
+                      chess->killer_moves[0][depth].to == move->to)) {
+                    chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
+                    chess->killer_moves[0][depth].from = move->from;
+                    chess->killer_moves[0][depth].to = move->to;
+                }
+            }
+            RETURN_AND_STORE_TT(best_score, TT_LOWER)  // Failed high
         }
     }
 
-    TTNodeType node_type;
-    if (best_score <= original_a)
-        node_type = TT_UPPER;  // Failed low
-    else if (best_score >= original_b)
-        node_type = TT_LOWER;  // Failed high
-    else
-        node_type = TT_EXACT;
-    RETURN_AND_STORE_TT(best_score, node_type)
+    if (best_score <= original_a) {
+        RETURN_AND_STORE_TT(best_score, TT_UPPER)  // Failed low
+    }
+    RETURN_AND_STORE_TT(best_score, TT_EXACT)
 }
 
 // if is_white sort in descending order, otherwise ascending
@@ -2453,13 +2574,16 @@ void* play_thread(void* arg_void) {
     ChessThread* arg = (ChessThread*)arg_void;
     Chess* chess = &arg->chess;
     TIME_TYPE endtime = arg->endtime;
+    TIME_TYPE start = TIME_NOW();
     Move* move = &arg->move;
     int depth = arg->depth;
+    memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
     Piece capture = Chess_make_move(chess, move);
 
     int score = -minimax(chess, endtime, depth, -INF, INF, capture, 0);
     *arg->search_cancelled = TIME_NOW() > endtime;
     *arg->score = score;
+    arg->endtime = TIME_NOW() - start;
 
     return NULL;
 }
@@ -2540,12 +2664,20 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     atomic_store(&total_cutoff_index, 0);
 #endif
 
+#ifdef TRACK_TT
+    atomic_store(&tt_lookups, 0);
+    atomic_store(&tt_hits, 0);
+    atomic_store(&tt_collisions, 0);
+    atomic_store(&tt_stores, 0);
+#endif
+
     if (chess->fullmoves <= 5 && openings_db(chess)) {
         return 0;
     }
 
     TIME_TYPE start = TIME_NOW();
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
+    double time_wasted = 0.0;
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
     bool search_cancelled[MAX_LEGAL_MOVES];
@@ -2564,6 +2696,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     while (TIME_NOW() < endtime) {
         // nodes_total = 0;
 
+        TIME_TYPE start_depth = TIME_NOW();
         for (int i = 0; i < n_moves; i++) {
             ChessThread* arg = &args[i];
             memcpy(&arg->chess, chess, sizeof(Chess));
@@ -2572,8 +2705,7 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             arg->depth = depth;
             arg->score = &scores[i];
 
-            // Use this in case the search stops because of time limit to know if we can use this
-            // score
+            // Use this in case of time cut off to know if we can use this score
             arg->search_cancelled = &search_cancelled[i];
 
             if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
@@ -2585,6 +2717,12 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
         // Wait for threads to finish
         for (int i = 0; i < n_moves; i++) {
             pthread_join(threads[i], NULL);
+        }
+
+        // Compute time wasted
+        TIME_TYPE end_depth = TIME_NOW();
+        for (int i = 0; i < n_moves; i++) {
+            time_wasted += TIME_DIFF_S(end_depth - args[i].endtime, start_depth) / n_moves;
         }
 
         if (fancy && depth == 2) {
@@ -2633,9 +2771,6 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             best_score = scores[0];
             best_move = &moves[0];
         }
-
-        // Show transposition table occupancy
-        // TT_occupancy();
     }
 
     free(threads);
@@ -2646,18 +2781,19 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     best_score *= chess->turn == TURN_WHITE ? 1 : -1;
 
     puts("{");
-    printf("  \"scores\": {\n");
-    for (int i = 0; i < n_moves; i++) {
-        if (i >= n_moves - 1) {
-            printf("    \"%s\": %.2f\n", Move_string(moves + i), (double)scores[i] / 100);
-        } else {
-            printf("    \"%s\": %.2f,\n", Move_string(moves + i), (double)scores[i] / 100);
-        }
-    }
-    printf("  },\n");
+    // printf("  \"scores\": {\n");
+    // for (int i = 0; i < n_moves; i++) {
+    //     if (i >= n_moves - 1) {
+    //         printf("    \"%s\": %.2f\n", Move_string(moves + i), (double)scores[i] / 100);
+    //     } else {
+    //         printf("    \"%s\": %.2f,\n", Move_string(moves + i), (double)scores[i] / 100);
+    //     }
+    // }
+    // printf("  },\n");
     printf("  \"millis\": %d,\n", millis);
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
+    printf("  \"time_wasted\": \"%.1lf%%\",\n", time_wasted / cpu_time * 100);
 #ifdef TRACK_BETA_CUTOFFS
     size_t nodes = atomic_load(&total_nodes);
     size_t cutoffs = atomic_load(&beta_cutoffs);
@@ -2671,6 +2807,17 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     printf("  \"first_move_cutoff_%%\": %.2f,\n", first_move_rate);
     printf("  \"avg_cutoff_index\": %.2f,\n", avg_cutoff_index);
 #endif
+#ifdef TRACK_TT
+    size_t lookups = atomic_load(&tt_lookups);
+    size_t hits = atomic_load(&tt_hits);
+    size_t collisions = atomic_load(&tt_collisions);
+    size_t stores = atomic_load(&tt_stores);
+    double hit_rate = lookups > 0 ? (double)hits * 100.0 / lookups : 0;
+    double collision_rate = stores > 0 ? (double)collisions * 100.0 / stores : 0;
+    printf("  \"tt_hit_rate_%%\": %.2f,\n", hit_rate);
+    printf("  \"tt_collision_rate_%%\": %.2f,\n", collision_rate);
+    printf("  \"TT_occupancy_%%\": %.2f,\n", TT_occupancy() * 100.0);
+#endif
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
     printf("  \"move\": \"%s\"\n", Move_string(best_move));
     puts("}");
@@ -2678,19 +2825,37 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.6.5 (2025-12-12)\n");
+    printf("SigmaZero Chess Engine 2.7.2 (2025-12-14)\n");
     return 0;
 }
 
 void help(void) {
-    printf("Usage: sigma-zero <command>\n");
+    printf("SigmaZero Chess Engine - Command Line Interface\n\n");
+    printf("Usage: sigma-zero <command> [arguments]\n\n");
     printf("Commands:\n");
-#define HELP_WIDTH "  %-20s "
-    printf(HELP_WIDTH "Show this help message\n", "help");
-    printf(HELP_WIDTH "Show version information\n", "version");
-    printf(HELP_WIDTH "Show legal moves for the given position\n", "moves <FEN> <depth>");
-    printf(HELP_WIDTH "Get the evaluation of the given position\n", "eval <FEN>");
-    printf(HELP_WIDTH "Bot plays a move based on the given position\n", "play <FEN> <millis>");
+#define HELP_WIDTH "  %-30s"
+    printf(HELP_WIDTH " %s\n", "help, -h, --help", "Show this help message");
+    printf(HELP_WIDTH " %s\n", "version, -v, --version", "Show version information");
+    printf("\n");
+    printf(HELP_WIDTH " %s\n", "play <FEN> <millis> [history]", "Play best move for position");
+    printf(HELP_WIDTH " %s\n", "", "  FEN: Position in FEN notation");
+    printf(HELP_WIDTH " %s\n", "", "  millis: Time limit in milliseconds");
+    printf(HELP_WIDTH " %s\n", "", "  history: Optional game history");
+    printf("\n");
+    printf(HELP_WIDTH " %s\n", "fancy <FEN> <millis> [history]", "Play with enhanced scoring");
+    printf("\n");
+    printf(HELP_WIDTH " %s\n", "moves <FEN> <depth>", "Count legal moves at depth");
+    printf(HELP_WIDTH " %s\n", "", "  depth: Search depth (perft)");
+    printf("\n");
+    printf(HELP_WIDTH " %s\n", "eval <FEN>", "Evaluate position");
+    printf(HELP_WIDTH " %s\n", "hash <FEN>", "Show zobrist hash");
+    printf(HELP_WIDTH " %s\n", "scores <FEN>", "Show move scores");
+    printf(HELP_WIDTH " %s\n", "kingsafety <FEN>", "Show king danger scores");
+    printf("\n");
+    printf("Examples:\n");
+    printf("  sigma-zero play \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 1000\n");
+    printf("  sigma-zero moves \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 5\n");
+    printf("  sigma-zero eval \"8/8/8/4k3/8/8/4K3/8 w - - 0 1\"\n");
 }
 
 int king_safety_command(Chess* chess) {
@@ -2712,15 +2877,36 @@ int king_safety_command(Chess* chess) {
     return 0;
 }
 
+int move_scores_command(Chess* chess) {
+    Move moves[MAX_LEGAL_MOVES];
+    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
+    bool elipses = false;
+
+    for (int i = 0; i < n_moves; i++) {
+        select_best_move(moves, i, n_moves);
+        if (moves[i].score != 0) {
+            printf("%-5s %6d\n", Move_string(moves + i), moves[i].score);
+        } else if (!elipses) {
+            printf("...   %6d\n", 0);
+            elipses = true;
+        }
+    }
+    return 0;
+}
+
 int test() {
-    Chess* chess = Chess_from_fen("4k3/8/8/4n3/2N5/8/8/4K3 b - - 0 1");
+    Chess* chess = Chess_from_fen("8/1k6/8/4R3/8/8/4K3/8 w - - 0 1");
     if (!chess) return 1;
 
-    Chess_print(chess);
-    putchar('\n');
-    bitboard_print(chess->bb_white);
-    putchar('\n');
-    bitboard_print(chess->bb_black);
+    Chess_fill_attack_map(chess);
+    Move moves[MAX_LEGAL_MOVES];
+
+    size_t n_moves = Chess_rook_moves(chess, moves, 36, false);
+
+    printf("%lu moves\n", (unsigned long)n_moves);
+    for (int i = 0; i < n_moves; i++) {
+        Move_print(&moves[i]);
+    }
 
     return 0;
 }
@@ -2766,6 +2952,10 @@ int main(int argc, char** argv) {
         Chess* chess = Chess_from_fen(argv[2]);
         if (!chess) return 1;
         return king_safety_command(chess);
+    } else if (argc == 3 && strcmp(argv[1], "scores") == 0) {
+        Chess* chess = Chess_from_fen(argv[2]);
+        if (!chess) return 1;
+        return move_scores_command(chess);
     } else {
         help();
         return 1;

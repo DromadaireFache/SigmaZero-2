@@ -15,7 +15,7 @@ except ModuleNotFoundError:
     from . import sigma_zero
 
 TIME = 100          # milliseconds per move
-OLD = "V2.6"        # Old engine version to compete against
+OLD = "V2.7"        # Old engine version to compete against
 RAND_NOISE = 0.1    # Random noise to add to constant mutations
 
 TIME_CUTOFF = 100   # milliseconds per move for cutoff training
@@ -84,6 +84,7 @@ best_consts = {
     "QUEEN_AGGRO_SCORE": 96,
     "KING_AGGRO_SCORE": 37,
     "SELECT_MOVE_CUTOFF": 12,
+    "PRIORITY_LINES": 4,
     "PS_BLACK_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, -50, -52, -50, -50, -50, -50, -50, -48, -9, -10, -20, -33, -30, -20, -11, -10, -4, -2, -10, -24, -26, -10, -6, -6, 0, 0, 0, -20, -20, 0, 0, 0, -4, 4, 9, 0, 0, 11, 5, -6, -5, -10, -10, 20, 20, -10, -10, -4, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_WHITE_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, 6, 9, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 11, 23, 25, 11, 5, 5, 10, 9, 19, 30, 30, 20, 10, 10, 50, 50, 48, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_BLACK_KNIGHT": [50, 40, 31, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 37, 30, 0, -10, -15, -15, -10, 0, 32, 33, -5, -15, -19, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 33, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 37, 50, 40, 30, 32, 30, 30, 40, 52],

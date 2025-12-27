@@ -10,12 +10,12 @@ import chess
 
 DEPTH = 5
 _COMPILED = set()
-if sys.platform == "linux":
-    EXE_FILE = "./sigma-zero"
-    OLD_EXE_FILE = "./old"
-else:
+if sys.platform == "win32":
     EXE_FILE = "sigma-zero.exe"
     OLD_EXE_FILE = "old.exe"
+else:
+    EXE_FILE = "./sigma-zero"
+    OLD_EXE_FILE = "./old"
 FENS = [
     "r1bq1rk1/p5pp/1p3b2/2pp4/1n1Pp3/1P2P1P1/1B1Q1PBP/2R1NRK1 b - - 1 17",
     "8/6k1/5q1p/1p6/8/7P/6P1/Q6K w - - 11 62",
