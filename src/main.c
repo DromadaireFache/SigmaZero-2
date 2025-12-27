@@ -2342,7 +2342,7 @@ void task_show(void) {
 void task_push(task_t task) {
     pthread_mutex_lock(&task_stack.mutex);
 
-    while (task_stack.sp == QUEUE_CAPACITY && !atomic_load(&task_stack.stop)) {
+    while (task_stack.sp >= QUEUE_CAPACITY && !atomic_load(&task_stack.stop)) {
         pthread_cond_wait(&task_stack.not_full, &task_stack.mutex);
     }
     if (atomic_load(&task_stack.stop)) {
@@ -2813,7 +2813,7 @@ void* play_thread(void* arg) {
         atomic_fetch_sub(&task_stack.active_workers, 1);
 
         // Don't push moves that lead to checkmate
-        if (abs(score) >= 1000000 || task.dont_push_next) {
+        if (abs(score) >= 1000000 || task.dont_push_next || task.depth >= 63) {
             task_maybe_stop_if_idle();
             continue;
         }
