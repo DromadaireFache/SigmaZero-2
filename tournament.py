@@ -149,7 +149,7 @@ def tournament():
 
 
 if __name__ == "__main__":
-    with open("pgns.txt", "w") as f:
-        f.write("")  # Clear previous PGNs
+    # with open("pgns.txt", "w") as f:
+    #     f.write("")  # Clear previous PGNs
     # tournament()
     optimize_constants.tournament(sigma_zero.EXE_FILE, sigma_zero.OLD_EXE_FILE, -100, exit_on_interrupt=True)

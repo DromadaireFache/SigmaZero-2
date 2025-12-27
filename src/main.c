@@ -2813,7 +2813,7 @@ void* play_thread(void* arg) {
         atomic_fetch_sub(&task_stack.active_workers, 1);
 
         // Don't push moves that lead to checkmate
-        if (abs(score) >= 1000000 || task.dont_push_next || task.depth >= 63) {
+        if (abs(score) >= 1000000 || task.dont_push_next || task.depth >= 62) {
             task_maybe_stop_if_idle();
             continue;
         }
