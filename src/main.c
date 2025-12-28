@@ -239,44 +239,6 @@ int Piece_value_at(Piece piece, int i) {
     }
 }
 
-int Piece_king_proximity(Piece piece, int i, int white_king, int black_king) {
-#define ROW_COL_VALUES(color_king)                   \
-    x = abs(index_row(i) - index_row(color_king));   \
-    tmp = abs(index_col(i) - index_col(color_king)); \
-    y = tmp < x ? tmp : x;                           \
-    x = tmp > x ? tmp : x;
-    int x, tmp, y;
-
-    switch (piece) {
-        // case WHITE_KNIGHT: // TODO
-        //     ROW_COL_VALUES(black_king);
-        //     return 0;
-        // case BLACK_KNIGHT:
-        //     ROW_COL_VALUES(white_king);
-        //     return 0;
-        case WHITE_BISHOP:
-            ROW_COL_VALUES(black_king);
-            return BISHOP_KING_PROX * 2 * y / ((x + y) * (x + y));
-        case BLACK_BISHOP:
-            ROW_COL_VALUES(white_king);
-            return -BISHOP_KING_PROX * 2 * y / ((x + y) * (x + y));
-        case WHITE_ROOK:
-            ROW_COL_VALUES(black_king);
-            return ROOK_KING_PROX * (x - y) / ((x + y) * (x + y));
-        case BLACK_ROOK:
-            ROW_COL_VALUES(white_king);
-            return -ROOK_KING_PROX * (x - y) / ((x + y) * (x + y));
-        case WHITE_QUEEN:
-            ROW_COL_VALUES(black_king);
-            return QUEEN_KING_PROX / (x + y);
-        case BLACK_QUEEN:
-            ROW_COL_VALUES(white_king);
-            return -QUEEN_KING_PROX / (x + y);
-        default:
-            return 0;
-    }
-}
-
 uint64_t Piece_zhash_at(Piece piece, int i) {
     switch (piece) {
         case WHITE_PAWN:
@@ -2381,7 +2343,6 @@ size_t task_max_pushes(void) {
 static inline void task_maybe_stop_if_idle(void) {
     usleep(1000);
     if (atomic_load(&task_stack.active_workers) == 0 && task_size() == 0) {
-        printf("stopping\n");
         task_request_stop();
     }
 }
@@ -2597,6 +2558,19 @@ int moves(char* fen, int depth) {
     return 0;
 }
 
+int Chess_king_safety(Chess *chess) {
+    if (chess->fullmoves >= FULLMOVES_ENDGAME) return 0;
+    uint8_t fullmoves_min = chess->fullmoves;
+    uint8_t fullmoves_max = FULLMOVES_ENDGAME - chess->fullmoves;
+    uint8_t fullmoves_score = fullmoves_min < fullmoves_max ? fullmoves_min : fullmoves_max;
+
+    int eval = -Chess_king_mobility(chess, chess->king_white);
+    eval += Chess_king_mobility(chess, chess->king_black);
+    eval *= fullmoves_score * KING_SAFETY_FACTOR / 64;
+
+    return eval;
+}
+
 int eval(Chess* chess) {
     uint8_t fullmoves = chess->fullmoves > FULLMOVES_ENDGAME ? FULLMOVES_ENDGAME : chess->fullmoves;
     int e = chess->eval;
@@ -2613,6 +2587,7 @@ int eval(Chess* chess) {
     black_king_value += PS_BLACK_KING_ENDGAME[chess->king_black] * fullmoves;
     e += black_king_value / FULLMOVES_ENDGAME;
 
+    e += Chess_king_safety(chess);
     return e;
 }
 
@@ -3076,22 +3051,29 @@ void help(void) {
     printf("  sigma-zero eval \"8/8/8/4k3/8/8/4K3/8 w - - 0 1\"\n");
 }
 
+int Chess_king_mobility(Chess *chess, int king_i) {
+    bitboard_t friendly_bb = king_i == chess->king_white ? chess->bb_white : chess->bb_black;
+    bitboard_t all_bb = chess->bb_white | chess->bb_black;
+
+    // Rook moves
+    bitboard_t piece_mask = bitboard_rook_mask(king_i);
+    bitboard_t target_mask = piece_mask & all_bb;
+    int index = (target_mask * ROOK_MAGIC_NUMS[king_i]) >> ROOK_MAGIC_SHIFTS[king_i];
+    bitboard_t moves = ROOK_MOVES[king_i][index];
+
+    // Bishop moves
+    piece_mask = bitboard_bishop_mask(king_i);
+    target_mask = piece_mask & all_bb;
+    index = (target_mask * BISHOP_MAGIC_NUMS[king_i]) >> BISHOP_MAGIC_SHIFTS[king_i];
+    moves |= BISHOP_MOVES[king_i][index];
+    moves &= ~friendly_bb;
+
+    bitboard_t enemies = moves & (chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white);
+    return __builtin_popcountll(moves) + __builtin_popcountll(enemies);
+}
+
 int king_safety_command(Chess* chess) {
-    int white_score = 0, black_score = 0;
-
-    for (int i = 0; i < 64; i++) {
-        Piece piece = chess->board[i];
-        if (piece == EMPTY) continue;
-
-        if (Piece_is_white(piece)) {
-            white_score += Piece_king_proximity(piece, i, chess->king_white, chess->king_black);
-        } else {
-            black_score -= Piece_king_proximity(piece, i, chess->king_white, chess->king_black);
-        }
-    }
-
-    printf("White king danger score: %d\n", black_score);
-    printf("Black king danger score: %d\n", white_score);
+    printf("Chess_king_safety() -> %d\n", Chess_king_safety(chess));
     return 0;
 }
 

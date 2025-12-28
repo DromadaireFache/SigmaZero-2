@@ -12,9 +12,6 @@
 #define FULLMOVES_ENDGAME 55
 #define QUIES_DEPTH 9
 #define MAX_EXTENSION 2
-#define BISHOP_KING_PROX 97
-#define ROOK_KING_PROX 126
-#define QUEEN_KING_PROX 122
 #define KILLER_MOVE_BONUS 59
 #define PAWN_VICTIM_SCORE 88
 #define KNIGHT_VICTIM_SCORE 127
@@ -30,6 +27,7 @@
 #define KING_AGGRO_SCORE 37
 #define SELECT_MOVE_CUTOFF 12
 #define PRIORITY_LINES 4
+#define KING_SAFETY_FACTOR 64
 
 // Piece square values
 const int PS_BLACK_PAWN[] = {0, 0, 0, 0, 0, 0, 0, 0, -50, -52, -50, -50, -50, -50, -50, -48, -9, -10, -20, -33, -30, -20, -11, -10, -4, -2, -10, -24, -26, -10, -6, -6, 0, 0, 0, -20, -20, 0, 0, 0, -4, 4, 9, 0, 0, 11, 5, -6, -5, -10, -10, 20, 20, -10, -10, -4, 0, 0, 0, 0, 0, 0, 0, 0};
