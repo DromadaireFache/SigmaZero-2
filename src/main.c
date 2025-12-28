@@ -2558,6 +2558,27 @@ int moves(char* fen, int depth) {
     return 0;
 }
 
+int Chess_king_mobility(Chess *chess, int king_i) {
+    bitboard_t friendly_bb = king_i == chess->king_white ? chess->bb_white : chess->bb_black;
+    bitboard_t all_bb = chess->bb_white | chess->bb_black;
+
+    // Rook moves
+    bitboard_t piece_mask = bitboard_rook_mask(king_i);
+    bitboard_t target_mask = piece_mask & all_bb;
+    int index = (target_mask * ROOK_MAGIC_NUMS[king_i]) >> ROOK_MAGIC_SHIFTS[king_i];
+    bitboard_t moves = ROOK_MOVES[king_i][index];
+
+    // Bishop moves
+    piece_mask = bitboard_bishop_mask(king_i);
+    target_mask = piece_mask & all_bb;
+    index = (target_mask * BISHOP_MAGIC_NUMS[king_i]) >> BISHOP_MAGIC_SHIFTS[king_i];
+    moves |= BISHOP_MOVES[king_i][index];
+    moves &= ~friendly_bb;
+
+    bitboard_t enemies = moves & (chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white);
+    return __builtin_popcountll(moves) + __builtin_popcountll(enemies);
+}
+
 int Chess_king_safety(Chess *chess) {
     if (chess->fullmoves >= FULLMOVES_ENDGAME) return 0;
     uint8_t fullmoves_min = chess->fullmoves;
@@ -3049,27 +3070,6 @@ void help(void) {
     printf("  sigma-zero play \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 1000\n");
     printf("  sigma-zero moves \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 5\n");
     printf("  sigma-zero eval \"8/8/8/4k3/8/8/4K3/8 w - - 0 1\"\n");
-}
-
-int Chess_king_mobility(Chess *chess, int king_i) {
-    bitboard_t friendly_bb = king_i == chess->king_white ? chess->bb_white : chess->bb_black;
-    bitboard_t all_bb = chess->bb_white | chess->bb_black;
-
-    // Rook moves
-    bitboard_t piece_mask = bitboard_rook_mask(king_i);
-    bitboard_t target_mask = piece_mask & all_bb;
-    int index = (target_mask * ROOK_MAGIC_NUMS[king_i]) >> ROOK_MAGIC_SHIFTS[king_i];
-    bitboard_t moves = ROOK_MOVES[king_i][index];
-
-    // Bishop moves
-    piece_mask = bitboard_bishop_mask(king_i);
-    target_mask = piece_mask & all_bb;
-    index = (target_mask * BISHOP_MAGIC_NUMS[king_i]) >> BISHOP_MAGIC_SHIFTS[king_i];
-    moves |= BISHOP_MOVES[king_i][index];
-    moves &= ~friendly_bb;
-
-    bitboard_t enemies = moves & (chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white);
-    return __builtin_popcountll(moves) + __builtin_popcountll(enemies);
 }
 
 int king_safety_command(Chess* chess) {
