@@ -2364,8 +2364,24 @@ size_t task_size(void) {
     return sz;
 }
 
+size_t task_max_pushes(void) {
+    pthread_mutex_lock(&task_stack.mutex);
+    if (task_stack.n_moves > cpu_count()) {
+        pthread_mutex_unlock(&task_stack.mutex);
+        return 1;
+    }
+
+    size_t max_pushes = (cpu_count() - task_stack.active_workers) / task_stack.n_moves + 1;
+    // printf("workers: %zu/%d, max_pushes: %zu\n", task_stack.active_workers, cpu_count(),
+    //        max_pushes);
+    pthread_mutex_unlock(&task_stack.mutex);
+    return max_pushes;
+}
+
 static inline void task_maybe_stop_if_idle(void) {
+    usleep(1000);
     if (atomic_load(&task_stack.active_workers) == 0 && task_size() == 0) {
+        printf("stopping\n");
         task_request_stop();
     }
 }
@@ -2820,15 +2836,16 @@ void* play_thread(void* arg) {
 
         // Push the next depth to the queue
         // If there is still space push another depth, push task a second time
-        bool push_two_tasks = task_size() < cpu_count();
-        for (int i = 0; i < (1 + push_two_tasks); i++) {
+        // bool push_two_tasks = task_size() < cpu_count();
+        size_t max_pushes = task_max_pushes();
+        for (int i = 0; i < max_pushes; i++) {
             task_t task2 = {.chess = *chess,
                             .capture = capture,
                             .depth = ++depth,
                             .move = move,
                             .move_index = task.move_index,
                             .result = ++task.result,
-                            .dont_push_next = push_two_tasks && i == 0};
+                            .dont_push_next = i + 1 < max_pushes};
             task_push(task2);
         }
     }
