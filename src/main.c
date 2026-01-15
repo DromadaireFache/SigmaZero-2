@@ -2558,7 +2558,7 @@ int moves(char* fen, int depth) {
     return 0;
 }
 
-int Chess_king_mobility(Chess *chess, int king_i) {
+int Chess_king_mobility(Chess *chess, int king_i, bool only_attacks) {
     bitboard_t friendly_bb = king_i == chess->king_white ? chess->bb_white : chess->bb_black;
     bitboard_t all_bb = chess->bb_white | chess->bb_black;
 
@@ -2575,8 +2575,9 @@ int Chess_king_mobility(Chess *chess, int king_i) {
     moves |= BISHOP_MOVES[king_i][index];
     moves &= ~friendly_bb;
 
-    bitboard_t enemies = moves & (chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white);
-    return __builtin_popcountll(moves) + __builtin_popcountll(enemies);
+    bitboard_t attacks = moves & (chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white);
+    if (only_attacks) return __builtin_popcountll(attacks);
+    return __builtin_popcountll(moves) + __builtin_popcountll(attacks);
 }
 
 int Chess_king_safety(Chess *chess) {
@@ -2584,12 +2585,24 @@ int Chess_king_safety(Chess *chess) {
     uint8_t fullmoves_min = chess->fullmoves;
     uint8_t fullmoves_max = FULLMOVES_ENDGAME - chess->fullmoves;
     uint8_t fullmoves_score = fullmoves_min < fullmoves_max ? fullmoves_min : fullmoves_max;
+    uint8_t king_white_col = index_col(chess->king_white);
+    uint8_t king_black_col = index_col(chess->king_black);
+    int e = 0;
 
-    int eval = -Chess_king_mobility(chess, chess->king_white);
-    eval += Chess_king_mobility(chess, chess->king_black);
-    eval *= fullmoves_score * KING_SAFETY_FACTOR / 64;
+    // at position
+    e -= Chess_king_mobility(chess, chess->king_white, false);
+    e += Chess_king_mobility(chess, chess->king_black, false);
 
-    return eval;
+    // left
+    if (king_white_col > 0) e -= Chess_king_mobility(chess, chess->king_white - 1, true);
+    if (king_black_col > 0) e += Chess_king_mobility(chess, chess->king_black - 1, true);
+
+    // right
+    if (king_white_col < 7) e -= Chess_king_mobility(chess, chess->king_white + 1, true);
+    if (king_black_col < 7) e += Chess_king_mobility(chess, chess->king_black + 1, true);
+    
+    e *= fullmoves_score * KING_SAFETY_FACTOR / 64;
+    return e;
 }
 
 int eval(Chess* chess) {
@@ -3039,7 +3052,7 @@ int play(char* fen, int millis, char* game_history) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.8.0 (2025-12-27)\n");
+    printf("SigmaZero Chess Engine 2.8.1 (2025-12-27)\n");
     return 0;
 }
 
@@ -3075,7 +3088,7 @@ void help(void) {
 int king_safety_command(Chess* chess) {
     printf("Chess_king_safety() -> %d\n", Chess_king_safety(chess));
     return 0;
-}
+}   
 
 int move_scores_command(Chess* chess) {
     Move moves[MAX_LEGAL_MOVES];
