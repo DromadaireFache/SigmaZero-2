@@ -39,6 +39,8 @@ static atomic_size_t tt_stores = 0;
 
 #define ISLOWER(c) ((c) >= 'a' && (c) <= 'z')
 #define ISUPPER(c) ((c) >= 'A' && (c) <= 'Z')
+#define likely(cond) (!__builtin_expect(!(cond), 0))
+#define unlikely(cond) (__builtin_expect((cond), 0))
 
 #ifdef _WIN32
 #define TIME_TYPE clock_t
@@ -2001,7 +2003,7 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     size_t n_moves = 0;
 
     // If double check, only consider king moves
-    if (__builtin_expect(chess->enemy_attack_map.n_checks >= 2, 0)) {
+    if unlikely (chess->enemy_attack_map.n_checks >= 2) {
         int i = Chess_friendly_king_i(chess);
         return Chess_king_moves(chess, moves, i, captures_only);
     }
@@ -2558,7 +2560,7 @@ int moves(char* fen, int depth) {
     return 0;
 }
 
-int Chess_king_mobility(Chess *chess, int king_i, bool only_attacks) {
+int Chess_king_mobility(Chess* chess, int king_i, bool only_attacks) {
     bitboard_t friendly_bb = king_i == chess->king_white ? chess->bb_white : chess->bb_black;
     bitboard_t all_bb = chess->bb_white | chess->bb_black;
 
@@ -2580,7 +2582,7 @@ int Chess_king_mobility(Chess *chess, int king_i, bool only_attacks) {
     return __builtin_popcountll(moves) + __builtin_popcountll(attacks);
 }
 
-int Chess_king_safety(Chess *chess) {
+int Chess_king_safety(Chess* chess) {
     if (chess->fullmoves >= FULLMOVES_ENDGAME) return 0;
     uint8_t fullmoves_min = chess->fullmoves;
     uint8_t fullmoves_max = FULLMOVES_ENDGAME - chess->fullmoves;
@@ -2600,7 +2602,7 @@ int Chess_king_safety(Chess *chess) {
     // right
     if (king_white_col < 7) e -= Chess_king_mobility(chess, chess->king_white + 1, true);
     if (king_black_col < 7) e += Chess_king_mobility(chess, chess->king_black + 1, true);
-    
+
     e *= fullmoves_score * KING_SAFETY_FACTOR / 64;
     return e;
 }
@@ -2688,7 +2690,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     return evaluation;
 
     // Extend search if in check, otherwise don't
-    if (depth == 0) {
+    if likely (depth == 0) {
         if (extensions < MAX_EXTENSION && Chess_friendly_check(chess)) {
             depth++;
             extensions++;
@@ -3088,7 +3090,7 @@ void help(void) {
 int king_safety_command(Chess* chess) {
     printf("Chess_king_safety() -> %d\n", Chess_king_safety(chess));
     return 0;
-}   
+}
 
 int move_scores_command(Chess* chess) {
     Move moves[MAX_LEGAL_MOVES];
