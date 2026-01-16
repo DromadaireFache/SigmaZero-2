@@ -37,6 +37,13 @@ static atomic_size_t tt_collisions = 0;
 static atomic_size_t tt_stores = 0;
 #endif
 
+// Uncomment to enable node tracking (has performance cost)
+#define TRACK_NODES
+
+#ifdef TRACK_NODES
+static atomic_size_t nodes_searched = 0;
+#endif
+
 #define ISLOWER(c) ((c) >= 'a' && (c) <= 'z')
 #define ISUPPER(c) ((c) >= 'A' && (c) <= 'Z')
 #define likely(cond) (!__builtin_expect(!(cond), 0))
@@ -2033,7 +2040,7 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
 
 void Chess_score_move(Chess* chess, Move* move) {
     // Give very high scores to promotions
-    if (move->promotion == PROMOTE_QUEEN) {
+    if unlikely (move->promotion == PROMOTE_QUEEN) {
         move->score = PROMOTION_MOVE_SCORE;
         return;
     }
@@ -2042,7 +2049,7 @@ void Chess_score_move(Chess* chess, Move* move) {
     Piece victim = chess->board[move->to];
 
     // MVV - LVA
-    if (victim != EMPTY) {
+    if unlikely (victim != EMPTY) {
         move->score = Piece_victim_score(victim) - Piece_aggro_score(aggressor);
     } else {
         // Deduct points if attacked by enemy pawns
@@ -2504,9 +2511,9 @@ static inline bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     atomic_fetch_add(&tt_lookups, 1);
 #endif
 
-    if (item->key == key && depth <= item->depth &&
-        ((item->type == TT_EXACT) || (item->type == TT_LOWER && item->eval >= b) ||
-         (item->type == TT_UPPER && item->eval <= a))) {
+    if unlikely (item->key == key && depth <= item->depth &&
+                 ((item->type == TT_EXACT) || (item->type == TT_LOWER && item->eval >= b) ||
+                  (item->type == TT_UPPER && item->eval <= a))) {
 #ifdef TRACK_TT
         atomic_fetch_add(&tt_hits, 1);
 #endif
@@ -2675,6 +2682,10 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
 
 int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last_capture,
             int extensions) {
+#ifdef TRACK_NODES
+    atomic_fetch_add(&nodes_searched, 1);
+#endif
+
     if (depth == 0 && last_capture != EMPTY) {
         return minimax_captures_only(chess, endtime, QUIES_DEPTH, a, b);
     }
@@ -2943,6 +2954,10 @@ int play(char* fen, int millis, char* game_history) {
     atomic_store(&tt_stores, 0);
 #endif
 
+#ifdef TRACK_NODES
+    atomic_store(&nodes_searched, 0);
+#endif
+
     if (chess->fullmoves <= 5 && openings_db(chess)) {
         return 0;
     }
@@ -3021,14 +3036,14 @@ int play(char* fen, int millis, char* game_history) {
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
 #ifdef TRACK_BETA_CUTOFFS
-    size_t nodes = atomic_load(&total_nodes);
+    size_t cutoff_nodes = atomic_load(&total_nodes);
     size_t cutoffs = atomic_load(&beta_cutoffs);
     size_t first_cutoffs = atomic_load(&first_move_cutoffs);
     size_t cutoff_idx = atomic_load(&total_cutoff_index);
-    double cutoff_rate = nodes > 0 ? (double)cutoffs * 100.0 / nodes : 0;
+    double cutoff_rate = cutoff_nodes > 0 ? (double)cutoffs * 100.0 / cutoff_nodes : 0;
     double first_move_rate = cutoffs > 0 ? (double)first_cutoffs * 100.0 / cutoffs : 0;
     double avg_cutoff_index = cutoffs > 0 ? (double)cutoff_idx / cutoffs : 0;
-    printf("  \"nodes\": %lu,\n", (unsigned long)nodes);
+    printf("  \"cutoff_nodes\": %lu,\n", (unsigned long)cutoff_nodes);
     printf("  \"beta_cutoff_%%\": %.2f,\n", cutoff_rate);
     printf("  \"first_move_cutoff_%%\": %.2f,\n", first_move_rate);
     printf("  \"avg_cutoff_index\": %.2f,\n", avg_cutoff_index);
@@ -3043,6 +3058,11 @@ int play(char* fen, int millis, char* game_history) {
     printf("  \"tt_hit_rate_%%\": %.2f,\n", hit_rate);
     printf("  \"tt_collision_rate_%%\": %.2f,\n", collision_rate);
     printf("  \"TT_occupancy_%%\": %.2f,\n", TT_occupancy() * 100.0);
+#endif
+#ifdef TRACK_NODES
+    size_t nodes = atomic_load(&nodes_searched);
+    printf("  \"nodes\": %lu,\n", (unsigned long)nodes);
+    printf("  \"nps\": %.0lf,\n", cpu_time > 0.0 ? (double)nodes / cpu_time : 0.0);
 #endif
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
     printf("  \"move\": \"%s\"\n", Move_string(&best_move));

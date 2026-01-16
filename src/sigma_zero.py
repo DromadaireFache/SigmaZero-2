@@ -125,26 +125,19 @@ def time_move_gen() -> tuple[float, float]:
 
 if __name__ == "__main__":
     time_move_gen()
+    
+    print()
+    print("========================")
+    print()
 
-    # LIST = ["PIECE_PAWN", "PIECE_KNIGHT", "PIECE_KING", "PIECE_BISHOP", "PIECE_ROOK", "PIECE_QUEEN"]
-    # LIST = ["PAWN_ATTACKS", "KNIGHT_ATTACKS", "KING_ATTACKS", "BISHOP_ATTACKS", "ROOK_ATTACKS"]
-    # best_nps = float("-inf")
-    # best_order = None
-    # for perm in permutations(LIST):
-    #     with open("src/main.c", "r") as f:
-    #         content = f.read()
-    #     with open("src/main.c", "w") as f:
-    #         # content_new = content.replace("// TEST PIECES HERE", "\n    else ".join(perm))
-    #         content_new = content.replace("// TEST ATTACKS HERE", "\n    ".join(perm))
-    #         f.write(content_new)
-    #     print("\n", perm)
-    #     total, nps = time_move_gen()
-    #     if nps > best_nps:
-    #         best_nps = round(nps)
-    #         best_order = perm
-    #     print("Best nps:", best_nps)
-    #     with open("src/main.c", "w") as f:
-    #         f.write(content)
-
-    # print("\nBest order:", best_order)
-    # print("Best nps:", best_nps)
+    # Test nps
+    nps = []
+    for fen in FENS:
+        board = chess.Board(fen)
+        result = play(board, 1000)
+        print(f"FEN: {fen}")
+        print(f"NPS: {result.get('nps', 'N/A')}")
+        print()
+        nps.append(result.get("nps", 0))
+    avg_nps = sum(nps) / len(nps)
+    print(f"Average NPS: {avg_nps:.0f}")
