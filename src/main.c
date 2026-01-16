@@ -117,7 +117,7 @@ static inline bitboard_t bitboard_rook_mask(int i) {
 }
 
 // All pieces
-typedef enum {
+typedef enum __attribute__((__packed__)) {
     EMPTY = '.',
     WHITE_PAWN = 'P',
     BLACK_PAWN = 'p',
@@ -405,7 +405,7 @@ void Position_print(Position pos) {
     printf("Position: %s (row: %d, col: %d)\n", Position_to_string(&pos), pos.row, pos.col);
 }
 
-typedef enum {
+typedef enum __attribute__((__packed__)) {
     PROMOTE_QUEEN = 'q',
     PROMOTE_ROOK = 'r',
     PROMOTE_BISHOP = 'b',
@@ -1264,7 +1264,7 @@ Chess* Chess_from_fen(char* fen_arg) {
             pos.col += skip;
         } else {
             Piece piece = Piece_from_char(*c);
-            if (piece == -1) {
+            if (piece == EMPTY) {
                 FEN_PARSING_ERROR("Invalid piece");
             }
             Chess_add(board, piece, pos);
@@ -2474,7 +2474,7 @@ TTItem;
 TTItem tt[TT_LENGTH] = {0};
 
 // Store an entry with fine-grained locking
-void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
+static inline int TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
     TTItem* item = &tt[i];
 
@@ -2491,10 +2491,12 @@ void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
         item->depth = depth;
         item->type = node_type;
     }
+
+    return eval;
 }
 
 // Retrieve an entry with fine-grained locking
-bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
+static inline bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
     TTItem* item = &tt[i];
 
@@ -2684,18 +2686,14 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         return tt_eval;
     }
 
-#define RETURN_AND_STORE_TT(e, node_type)         \
-    int evaluation = (e);                         \
-    TT_store(hash, evaluation, depth, node_type); \
-    return evaluation;
-
     // Extend search if in check, otherwise don't
     if likely (depth == 0) {
         if (extensions < MAX_EXTENSION && Chess_friendly_check(chess)) {
             depth++;
             extensions++;
         } else {
-            RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
+            return TT_store(hash, chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), depth,
+                            TT_EXACT);
         }
     }
 
@@ -2715,10 +2713,10 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         bool in_check = chess->enemy_attack_map.n_checks > 0;
         if (in_check) {
             // Checkmate
-            RETURN_AND_STORE_TT(-1000000 - depth, TT_EXACT)
+            return TT_store(hash, -1000000 - depth, depth, TT_EXACT);
         } else {
             // draw by stalemate
-            RETURN_AND_STORE_TT(0, TT_EXACT)
+            return TT_store(hash, 0, depth, TT_EXACT);
         }
     }
 
@@ -2726,14 +2724,13 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
 
-        if (chess->board[move->to] == EMPTY) {
-            // Check both killer slots
-            if ((chess->killer_moves[0][depth].from == move->from &&
-                 chess->killer_moves[0][depth].to == move->to) ||
-                (chess->killer_moves[1][depth].from == move->from &&
-                 chess->killer_moves[1][depth].to == move->to)) {
-                move->score += KILLER_MOVE_BONUS;
-            }
+        // Check both killer slots
+        if likely (chess->board[move->to] == EMPTY) {
+            bool is_killer_move = (chess->killer_moves[0][depth].from == move->from &&
+                                   chess->killer_moves[0][depth].to == move->to) ||
+                                  (chess->killer_moves[1][depth].from == move->from &&
+                                   chess->killer_moves[1][depth].to == move->to);
+            move->score += is_killer_move * KILLER_MOVE_BONUS;
         }
     }
 
@@ -2784,14 +2781,14 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
                     chess->killer_moves[0][depth].to = move->to;
                 }
             }
-            RETURN_AND_STORE_TT(best_score, TT_LOWER)  // Failed high
+            return TT_store(hash, best_score, depth, TT_LOWER);  // Failed high
         }
     }
 
     if (best_score <= original_a) {
-        RETURN_AND_STORE_TT(best_score, TT_UPPER)  // Failed low
+        return TT_store(hash, best_score, depth, TT_UPPER);  // Failed low
     }
-    RETURN_AND_STORE_TT(best_score, TT_EXACT)
+    return TT_store(hash, best_score, depth, TT_EXACT);
 }
 
 // if is_white sort in descending order, otherwise ascending
