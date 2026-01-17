@@ -2511,9 +2511,18 @@ static inline bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     atomic_fetch_add(&tt_lookups, 1);
 #endif
 
-    if unlikely (item->key == key && depth <= item->depth &&
-                 ((item->type == TT_EXACT) || (item->type == TT_LOWER && item->eval >= b) ||
-                  (item->type == TT_UPPER && item->eval <= a))) {
+    if (item->key == key && depth <= item->depth) {
+        switch (item->type) {
+            case TT_EXACT:
+                break;
+            case TT_LOWER:
+                if (item->eval < b) return false;
+                break;
+            case TT_UPPER:
+                if (item->eval > a) return false;
+                break;
+        }
+
 #ifdef TRACK_TT
         atomic_fetch_add(&tt_hits, 1);
 #endif
@@ -2605,12 +2614,16 @@ int Chess_king_safety(Chess* chess) {
     e += Chess_king_mobility(chess, chess->king_black, false);
 
     // left
-    if (king_white_col > 0) e -= Chess_king_mobility(chess, chess->king_white - 1, true);
-    if (king_black_col > 0) e += Chess_king_mobility(chess, chess->king_black - 1, true);
+    if (king_white_col > 0 && chess->board[chess->king_white - 1] == EMPTY)
+        e -= Chess_king_mobility(chess, chess->king_white - 1, true);
+    if (king_black_col > 0 && chess->board[chess->king_black - 1] == EMPTY)
+        e += Chess_king_mobility(chess, chess->king_black - 1, true);
 
     // right
-    if (king_white_col < 7) e -= Chess_king_mobility(chess, chess->king_white + 1, true);
-    if (king_black_col < 7) e += Chess_king_mobility(chess, chess->king_black + 1, true);
+    if (king_white_col < 7 && chess->board[chess->king_white + 1] == EMPTY)
+        e -= Chess_king_mobility(chess, chess->king_white + 1, true);
+    if (king_black_col < 7 && chess->board[chess->king_black + 1] == EMPTY)
+        e += Chess_king_mobility(chess, chess->king_black + 1, true);
 
     e *= fullmoves_score * KING_SAFETY_FACTOR / 64;
     return e;
