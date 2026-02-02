@@ -1,6 +1,6 @@
 CC=gcc
 CFLAGS=-Wall -Werror -Wno-unused-function
-OPTIMIZE=-O3
+OPTIMIZE=-O3 -march=native -mtune=native
 
 # CFLAGS += -fsanitize=address -pthread -fno-omit-frame-pointer
 # LDFLAGS += -fsanitize=thread -pthread

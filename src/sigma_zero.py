@@ -131,10 +131,17 @@ if __name__ == "__main__":
     print()
 
     # Test nps
+    training_fens = []
+    with open("data/training.txt", "r") as f:
+        for line in f:
+            fen = line.strip().split(",", 1)[0]
+            if fen:
+                training_fens.append(fen)
+    
     nps = []
-    for fen in FENS:
+    for fen in training_fens:
         board = chess.Board(fen)
-        result = play(board, 1000)
+        result = play(board, 100)
         print(f"FEN: {fen}")
         print(f"NPS: {result.get('nps', 'N/A')}")
         print()

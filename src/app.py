@@ -77,8 +77,8 @@ class Api:
             "whiteCaptures": white_captures,
             "blackCaptures": black_captures,
             "captureDiff": capture_diff(),
-            "gameOver": board.is_game_over(claim_draw=True),
-            "result": board.result(claim_draw=True) if board.is_game_over(claim_draw=True) else None,
+            "gameOver": board.is_game_over(),
+            "result": board.result() if board.is_game_over() else None,
             "lastMove": last_move,
         }
 
