@@ -2078,7 +2078,7 @@ void Chess_score_move(Chess* chess, Move* move, int* score) {
 
 size_t Chess_legal_moves_scored(Chess* chess, Move* moves, int* scores, bool captures_only) {
     size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
-    int best_score = -INF;
+    int best_score = -INF, best_index = 0;
 
     // Give a score to each move
     for (int i = 0; i < n_moves; i++) {
@@ -2086,15 +2086,17 @@ size_t Chess_legal_moves_scored(Chess* chess, Move* moves, int* scores, bool cap
 
         // if this move has the best score swap with the first element of the list
         if (scores[i] > best_score) {
-            Move move_temp = moves[i];
-            moves[i] = moves[0];
-            moves[0] = move_temp;
-            int score_temp = scores[i];
-            scores[i] = scores[0];
-            scores[0] = score_temp;
-            best_score = scores[0];
+            best_score = scores[i];
+            best_index = i;
         }
     }
+
+    Move move_temp = moves[best_index];
+    moves[best_index] = moves[0];
+    moves[0] = move_temp;
+    int score_temp = scores[best_index];
+    scores[best_index] = scores[0];
+    scores[0] = score_temp;
 
     return n_moves;
 }
