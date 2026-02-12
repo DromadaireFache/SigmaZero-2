@@ -2078,10 +2078,22 @@ void Chess_score_move(Chess* chess, Move* move, int* score) {
 
 size_t Chess_legal_moves_scored(Chess* chess, Move* moves, int* scores, bool captures_only) {
     size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
+    int best_score = -INF;
 
     // Give a score to each move
     for (int i = 0; i < n_moves; i++) {
         Chess_score_move(chess, &moves[i], &scores[i]);
+
+        // if this move has the best score swap with the first element of the list
+        if (scores[i] > best_score) {
+            Move move_temp = moves[i];
+            moves[i] = moves[0];
+            moves[0] = move_temp;
+            int score_temp = scores[i];
+            scores[i] = scores[0];
+            scores[0] = score_temp;
+            best_score = scores[0];
+        }
     }
 
     return n_moves;
@@ -2648,7 +2660,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, true);
 
     for (int i = 0; i < n_moves; i++) {
-        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
+        if (i > 0 && i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
@@ -2751,7 +2763,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int original_a = a;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
-        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
+        if (i > 0 && i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
