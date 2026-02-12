@@ -139,12 +139,26 @@ if __name__ == "__main__":
                 training_fens.append(fen)
     
     nps = []
+    depths = []
+    worse_nps = ("", float("inf"))
     for fen in training_fens:
         board = chess.Board(fen)
         result = play(board, 100)
+        
+        # skip results with evals that are too high, these are checkmates
+        if abs(result.get("eval", 0)) > 1000:
+            continue
+        
         print(f"FEN: {fen}")
         print(f"NPS: {result.get('nps', 'N/A')}")
+        print(f"Depth: {result.get('depth', 'N/A')}")
         print()
         nps.append(result.get("nps", 0))
+        depths.append(result.get("depth", 0))
+        if result.get("nps", float("inf")) < worse_nps[1]:
+            worse_nps = (fen, result.get("nps", float("inf")))
     avg_nps = sum(nps) / len(nps)
+    avg_depth = sum(depths) / len(depths)
     print(f"Average NPS: {avg_nps:.0f}")
+    print(f"Average Depth: {avg_depth:.2f}")
+    print(f"Worst NPS: {worse_nps[1]:.0f} for FEN:\n{worse_nps[0]}")

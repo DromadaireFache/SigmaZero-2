@@ -12,6 +12,10 @@
 #include <string.h>
 #include <time.h>
 
+#if defined(__ARM_NEON) || defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 #include "consts.c"
 
 #define class typedef struct
@@ -424,7 +428,6 @@ class {
     uint8_t from;
     uint8_t to;
     Promotion promotion;  // 'q', 'r', 'b', 'n' or 0 for no promotion
-    int score;
 }
 Move;
 
@@ -2038,10 +2041,10 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     return n_moves;
 }
 
-void Chess_score_move(Chess* chess, Move* move) {
+void Chess_score_move(Chess* chess, Move* move, int* score) {
     // Give very high scores to promotions
     if unlikely (move->promotion == PROMOTE_QUEEN) {
-        move->score = PROMOTION_MOVE_SCORE;
+        *score = PROMOTION_MOVE_SCORE;
         return;
     }
 
@@ -2050,12 +2053,12 @@ void Chess_score_move(Chess* chess, Move* move) {
 
     // MVV - LVA
     if unlikely (victim != EMPTY) {
-        move->score = Piece_victim_score(victim) - Piece_aggro_score(aggressor);
+        *score = Piece_victim_score(victim) - Piece_aggro_score(aggressor);
     } else {
         // Deduct points if attacked by enemy pawns
 #define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)               \
     if ((condition) && chess->board[move->to + (offset)] == (pawn)) { \
-        move->score = -abs(Piece_value(aggressor));                   \
+        *score = -abs(Piece_value(aggressor));                        \
         return;                                                       \
     }
         Position pos = Position_from_index(move->to);
@@ -2069,58 +2072,39 @@ void Chess_score_move(Chess* chess, Move* move) {
         }
 
         // Not attacked by enemy pawns
-        move->score = 0;
+        *score = 0;
     }
 }
 
-int compare_moves(const void* a, const void* b) {
-    const Move* ma = (const Move*)a;
-    const Move* mb = (const Move*)b;
-    return mb->score - ma->score;
-}
-
-// Partial sort - only find N best moves
-void partial_sort_moves(Move* moves, size_t n_moves, size_t n_best) {
-    if (n_best > n_moves) n_best = n_moves;
-
-    for (int i = 0; i < n_best; i++) {
-        int best_idx = i;
-        for (int j = i + 1; j < n_moves; j++) {
-            if (moves[j].score > moves[best_idx].score) {
-                best_idx = j;
-            }
-        }
-        if (best_idx != i) {
-            Move temp = moves[i];
-            moves[i] = moves[best_idx];
-            moves[best_idx] = temp;
-        }
-    }
-}
-
-size_t Chess_legal_moves_scored(Chess* chess, Move* moves, bool captures_only) {
+size_t Chess_legal_moves_scored(Chess* chess, Move* moves, int* scores, bool captures_only) {
     size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
 
     // Give a score to each move
     for (int i = 0; i < n_moves; i++) {
-        Chess_score_move(chess, &moves[i]);
+        Chess_score_move(chess, &moves[i], &scores[i]);
     }
 
     return n_moves;
 }
 
-static inline void select_best_move(Move* moves, int start, int n_moves) {
+static inline void select_best_move(Move* moves, int* scores, int start, int n_moves) {
     int best = start;
+    int best_score = scores[start];
+
     for (int i = start + 1; i < n_moves; i++) {
-        if (moves[i].score > moves[best].score) {
+        if (scores[i] > best_score) {
+            best_score = scores[i];
             best = i;
         }
     }
 
     if (best != start) {
-        Move temp = moves[start];
+        Move temp1 = moves[start];
+        int temp2 = scores[start];
         moves[start] = moves[best];
-        moves[best] = temp;
+        scores[start] = scores[best];
+        moves[best] = temp1;
+        scores[best] = temp2;
     }
 }
 
@@ -2349,7 +2333,7 @@ size_t task_max_pushes(void) {
     return max_pushes;
 }
 
-static inline void task_maybe_stop_if_idle(void) {
+void task_maybe_stop_if_idle(void) {
     usleep(1000);
     if (atomic_load(&task_stack.active_workers) == 0 && task_size() == 0) {
         task_request_stop();
@@ -2660,10 +2644,11 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_scored(chess, moves, true);
+    int scores[MAX_LEGAL_MOVES];
+    size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, true);
 
     for (int i = 0; i < n_moves; i++) {
-        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, i, n_moves);
+        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
@@ -2731,7 +2716,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     }
 
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
+    int scores[MAX_LEGAL_MOVES];
+    size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, false);
 
     if (n_moves == 0) {
         bool in_check = chess->enemy_attack_map.n_checks > 0;
@@ -2754,7 +2740,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
                                    chess->killer_moves[0][depth].to == move->to) ||
                                   (chess->killer_moves[1][depth].from == move->from &&
                                    chess->killer_moves[1][depth].to == move->to);
-            move->score += is_killer_move * KILLER_MOVE_BONUS;
+            scores[i] += is_killer_move * KILLER_MOVE_BONUS;
         }
     }
 
@@ -2765,7 +2751,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int original_a = a;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
-        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, i, n_moves);
+        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
         Move* move = &moves[i];
 
         gamestate_t gamestate = chess->gamestate;
@@ -2861,7 +2847,8 @@ void* play_thread(void* arg) {
         atomic_fetch_sub(&task_stack.active_workers, 1);
 
         // Don't push moves that lead to checkmate
-        if (abs(score) >= 1000000 || task.dont_push_next || task.depth >= 62) {
+        bool is_checkmate = abs(score) >= 1000000;
+        if (is_checkmate || task.dont_push_next || task.depth >= 62) {
             task_maybe_stop_if_idle();
             continue;
         }
@@ -2978,8 +2965,9 @@ int play(char* fen, int millis, char* game_history) {
     TIME_TYPE start = TIME_NOW();
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
     Move moves[MAX_LEGAL_MOVES];
+    int scores[MAX_LEGAL_MOVES];
     result_t results[MAX_LEGAL_MOVES][64] = {0};
-    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
+    size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, false);
     if (n_moves < 1) return 1;
     task_init(results, n_moves);
 
@@ -2996,6 +2984,7 @@ int play(char* fen, int millis, char* game_history) {
         task_push(task);
     }
 
+    // printf("Finished filling up the task queue\n");
     // task_show();
 
     pthread_t* threads = calloc(cpu_count(), sizeof(pthread_t));
@@ -3124,18 +3113,29 @@ int king_safety_command(Chess* chess) {
 
 int move_scores_command(Chess* chess) {
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
-    bool elipses = false;
+    int scores[MAX_LEGAL_MOVES];
+    size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, false);
+    // bool elipses = false;
 
     for (int i = 0; i < n_moves; i++) {
-        select_best_move(moves, i, n_moves);
-        if (moves[i].score != 0) {
-            printf("%-5s %6d\n", Move_string(moves + i), moves[i].score);
-        } else if (!elipses) {
-            printf("...   %6d\n", 0);
-            elipses = true;
-        }
+        // select_best_move(moves, scores, i, n_moves);
+        // if (scores[i] != 0) {
+        printf("%-5s %6d\n", Move_string(moves + i), scores[i]);
+        // } else if (!elipses) {
+        //     printf("...   %6d\n", 0);
+        //     elipses = true;
+        // }
     }
+    return 0;
+}
+
+int minmax_command(Chess* chess, int depth) {
+    TIME_TYPE start = TIME_NOW();
+    int score = -minimax(chess, UINT64_MAX, depth - 1, -INF, INF, EMPTY, 0);
+    TIME_TYPE end = TIME_NOW();
+    double cpu_time = TIME_DIFF_S(end, start);
+    printf("score: %d\n", score);
+    printf("time : %.3lf,\n", cpu_time);
     return 0;
 }
 
@@ -3194,6 +3194,11 @@ int main(int argc, char** argv) {
         Chess* chess = Chess_from_fen(argv[2]);
         if (!chess) return 1;
         return move_scores_command(chess);
+    } else if (argc == 4 && strcmp(argv[1], "minmax") == 0) {
+        Chess* chess = Chess_from_fen(argv[2]);
+        int depth = atoi(argv[3]);
+        if (!chess) return 1;
+        return minmax_command(chess, depth);
     } else {
         help();
         return 1;
