@@ -2259,7 +2259,6 @@ struct {
     pthread_cond_t not_full;
     atomic_bool stop;
     atomic_size_t active_workers;
-    atomic_int move_depth[MAX_LEGAL_MOVES];
 } task_stack;
 
 void task_init(result_t (*results)[64], int n_moves) {
@@ -2271,10 +2270,6 @@ void task_init(result_t (*results)[64], int n_moves) {
     pthread_mutex_init(&task_stack.mutex, NULL);
     pthread_cond_init(&task_stack.not_empty, NULL);
     pthread_cond_init(&task_stack.not_full, NULL);
-
-    for (int i = 0; i < MAX_LEGAL_MOVES; i++) {
-        atomic_store(&task_stack.move_depth[i], 0);
-    }
 }
 
 void task_destroy(void) {
@@ -2310,8 +2305,6 @@ void task_push(task_t task) {
         return;
     }
 
-    task.depth = atomic_load(&task_stack.move_depth[task.move_index]) + 1;
-    atomic_fetch_add(&task_stack.move_depth[task.move_index], 1);
     task_stack.tasks[task_stack.sp++] = task;
     // task_show();
 
@@ -2345,27 +2338,6 @@ void task_maybe_stop_if_idle(void) {
     if (atomic_load(&task_stack.active_workers) == 0 && task_size() == 0) {
         task_request_stop();
     }
-}
-
-void task_remove_move_from_queue(int move_index) {
-    pthread_mutex_lock(&task_stack.mutex);
-    int count = 0;
-
-    // printf("removing %d: ", move_index);
-    // task_show();
-    for (int i = 0; i + count < task_stack.sp; i++) {
-        while (task_stack.tasks[i + count].move_index == move_index && i + count < task_stack.sp) {
-            count++;
-        }
-        if (i + count < task_stack.sp) {
-            task_stack.tasks[i] = task_stack.tasks[i + count];
-        }
-    }
-
-    task_stack.sp -= count;
-    // printf("removed  %d: ", move_index);
-    // task_show();
-    pthread_mutex_unlock(&task_stack.mutex);
 }
 
 void task_remove(int index) {
@@ -2870,15 +2842,14 @@ void* play_thread(void* arg) {
         }
 
         // Add move score
-        task.result[depth].score = score;
-        task.result[depth].reached = true;
+        task.result->score = score;
+        task.result->reached = true;
         atomic_fetch_sub(&task_stack.active_workers, 1);
 
         // Don't push moves that lead to checkmate
         bool is_checkmate = abs(score) >= 1000000;
         if (is_checkmate || task.dont_push_next || task.depth >= 62) {
             task_maybe_stop_if_idle();
-            if (is_checkmate) task_remove_move_from_queue(task.move_index);
             continue;
         }
 
@@ -2889,9 +2860,10 @@ void* play_thread(void* arg) {
         for (int i = 0; i < max_pushes; i++) {
             task_t task2 = {.chess = *chess,
                             .capture = capture,
+                            .depth = ++depth,
                             .move = move,
                             .move_index = task.move_index,
-                            .result = task.result,
+                            .result = ++task.result,
                             .dont_push_next = i + 1 < max_pushes};
             task_push(task2);
         }
@@ -2901,7 +2873,7 @@ void* play_thread(void* arg) {
 
 bool openings_db(Chess* chess) {
     char s[100];
-    snprintf(s, 100, "%" PRIx64, Chess_zhash(chess));
+    sprintf(s, "%" PRIx64, Chess_zhash(chess));
     srand((unsigned int)time(NULL));
 
     // Opening the database file openings.db
@@ -2999,17 +2971,16 @@ int play(char* fen, int millis, char* game_history) {
     if (n_moves < 1) return 1;
     task_init(results, n_moves);
 
-    int initial_task_count = n_moves > cpu_count() ? n_moves : cpu_count();
-    for (int i = 0; i < initial_task_count; i++) {
-        int move_index = i % n_moves;
+    for (int i = 0; i < n_moves; i++) {
         Chess chess_cp = *chess;
-        Move* move = &moves[move_index];
+        Move* move = &moves[i];
         Piece capture = Chess_make_move(&chess_cp, move);
         task_t task = {.chess = chess_cp,
                        .capture = capture,
-                       .move = moves[move_index],
-                       .move_index = move_index,
-                       .result = results[move_index]};
+                       .depth = 1,
+                       .move = moves[i],
+                       .move_index = i,
+                       .result = &results[i][1]};
         task_push(task);
     }
 
