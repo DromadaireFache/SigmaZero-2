@@ -2,7 +2,7 @@ CC=gcc
 CFLAGS=-Wall -Werror -Wno-unused-function
 OPTIMIZE=-O3 -march=native -mtune=native
 
-# CFLAGS += -fsanitize=address -pthread -fno-omit-frame-pointer
+# CFLAGS += -fsanitize=address -pthread -fno-omit-frame-pointer -g
 # LDFLAGS += -fsanitize=thread -pthread
 
 # Default target

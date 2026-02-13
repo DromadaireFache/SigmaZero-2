@@ -2354,7 +2354,7 @@ void task_remove_move_from_queue(int move_index) {
     // printf("removing %d: ", move_index);
     // task_show();
     for (int i = 0; i + count < task_stack.sp; i++) {
-        while (task_stack.tasks[i + count].move_index == move_index) {
+        while (task_stack.tasks[i + count].move_index == move_index && i + count < task_stack.sp) {
             count++;
         }
         if (i + count < task_stack.sp) {
@@ -2901,7 +2901,7 @@ void* play_thread(void* arg) {
 
 bool openings_db(Chess* chess) {
     char s[100];
-    sprintf(s, "%" PRIx64, Chess_zhash(chess));
+    snprintf(s, 100, "%" PRIx64, Chess_zhash(chess));
     srand((unsigned int)time(NULL));
 
     // Opening the database file openings.db
