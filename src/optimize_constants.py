@@ -6,6 +6,8 @@ import random
 import shutil
 import sys
 import time
+import concurrent.futures
+import subprocess
 
 import chess
 
@@ -16,7 +18,7 @@ except ModuleNotFoundError:
 
 TIME = 100          # milliseconds per move
 OLD = "V2.7"        # Old engine version to compete against
-RAND_NOISE = 0.1    # Random noise to add to constant mutations
+rand_noise = 0.1    # Random noise to add to constant mutations
 
 TIME_CUTOFF = 100   # milliseconds per move for cutoff training
 CUTOFF_CONSTS = [
@@ -37,6 +39,30 @@ CUTOFF_CONSTS = [
     "SELECT_MOVE_CUTOFF",
 ]
 MINMAX_VALUES = ["depth", "nodes", "first_move_cutoff_%", "beta_cutoff_%", "avg_cutoff_index"]
+
+EVAL_CONSTS = [
+    "PAWN_RANK_BONUS",
+    "PAWN_VALUE",
+    "KNIGHT_VALUE",
+    "BISHOP_VALUE",
+    "ROOK_VALUE",
+    "QUEEN_VALUE",
+    "KING_SAFETY_FACTOR",
+    "PS_BLACK_PAWN",
+    "PS_WHITE_PAWN",
+    "PS_BLACK_KNIGHT",
+    "PS_WHITE_KNIGHT",
+    "PS_BLACK_BISHOP",
+    "PS_WHITE_BISHOP",
+    "PS_BLACK_ROOK",
+    "PS_WHITE_ROOK",
+    "PS_BLACK_QUEEN",
+    "PS_WHITE_QUEEN",
+    "PS_BLACK_KING",
+    "PS_WHITE_KING",
+    "PS_BLACK_KING_ENDGAME",
+    "PS_WHITE_KING_ENDGAME",
+]
 
 # FENs to use for tournament
 FENS = []
@@ -164,12 +190,12 @@ def mutated_consts(consts: dict) -> dict:
         if isinstance(consts[key], list):
             for i in range(len(consts[key])):
                 if random.randint(1, math.ceil(len(constants_to_optimize) / 3)) == 1:
-                    change_percent = random.uniform(-RAND_NOISE, RAND_NOISE)
+                    change_percent = random.uniform(-rand_noise, rand_noise)
                     change_amount = round_up(consts[key][i] * change_percent)
                     new_consts[key][i] = consts[key][i] + change_amount
                     
         elif random.randint(1, math.ceil(len(constants_to_optimize) / 5)) == 1:
-            change_percent = random.uniform(-RAND_NOISE, RAND_NOISE)
+            change_percent = random.uniform(-rand_noise, rand_noise)
             change_amount = round_up(consts[key] * change_percent)
             new_consts[key] = max(consts[key] + change_amount, 0)
     
@@ -316,8 +342,11 @@ def log(message: str):
 
 def log_diff(old_consts: dict, new_consts: dict):
     for key in old_consts.keys():
-        if type(old_consts[key]) is not list and old_consts[key] != new_consts[key]:
-            log(f"  {key}: {old_consts[key]} -> {new_consts[key]}")
+        if old_consts[key] != new_consts[key]:
+            if isinstance(old_consts[key], list):
+                log(f"  {key}: updated array")
+            else:
+                log(f"  {key}: {old_consts[key]} -> {new_consts[key]}")
 
 
 # Training loop:
@@ -402,7 +431,7 @@ def get_average_cutoff(value_name: str) -> float:
 # 7. If average beta cutoff index is not improved, discard mutated constants and go back to step 3
 # 8. If average beta cutoff index is improved, keep mutated constants as best_consts and go back to step 3
 def train_cutoff(value_name: str, maximize: bool):
-    global best_consts, RAND_NOISE
+    global best_consts, rand_noise
     with open("src/main.c", "rt") as f:
         main_c = f.read()
     with open("src/main.c", "wt") as f:
@@ -418,7 +447,7 @@ def train_cutoff(value_name: str, maximize: bool):
     
     try:
         while True:
-            RAND_NOISE = max(0.1, og_rand_noise * (0.92 ** n_mutations))
+            rand_noise = max(0.1, og_rand_noise * (0.92 ** n_mutations))
             n_steps += 1
             log(f"=== {value_name} Training Step {n_steps} ===")
             log(f"{n_mutations} successful mutations so far.")
@@ -463,33 +492,9 @@ def train_cutoff(value_name: str, maximize: bool):
     # Cleanup
     if os.path.exists("src/consts_best.c"):
         os.remove("src/consts_best.c")
-
-
-if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        constants_to_optimize = list(best_consts.keys())
-    elif len(sys.argv) == 3 and sys.argv[1] == "--maximize":
-        # Train a predefined set of constants to maximize a value
-        value_name = sys.argv[2]
-        if value_name not in MINMAX_VALUES:
-            print(f"Value '{value_name}' is not recognized. Available values: {', '.join(MINMAX_VALUES)}")
-            sys.exit(1)
-        constants_to_optimize = CUTOFF_CONSTS
-        train_cutoff(value_name, True)
-        sys.exit(0)
-    elif len(sys.argv) == 3 and sys.argv[1] == "--minimize":
-        # Train a predefined set of constants to minimize a value        
-        value_name = sys.argv[2]
-        if value_name not in MINMAX_VALUES:
-            print(f"Value '{value_name}' is not recognized. Available values: {', '.join(MINMAX_VALUES)}")
-            sys.exit(1)
-        constants_to_optimize = CUTOFF_CONSTS
-        train_cutoff(value_name, False)
-        sys.exit(0)
-    else:
-        constants_to_optimize = [key for key in sys.argv[1:] if key in best_consts]
-        print("Optimizing only the following constants:", ", ".join(constants_to_optimize))
-    
+        
+        
+def optimize():
     # Calculate baseline score against old
     sigma_zero.make(OLD)
     os.system("make")
@@ -524,3 +529,156 @@ if __name__ == "__main__":
     os.remove(executable("sigma-zero-mutated"))
     if os.path.exists("src/consts_best.c"):
         os.remove("src/consts_best.c")
+
+        
+def train_eval():
+    # Clear log file
+    with open("optimize_constants.log", "w") as log_file:
+        log_file.write("=== Optimize Eval Log ===")
+
+    global best_consts, rand_noise
+    n_mutations = 0
+    n_steps = 0
+    og_rand_noise = 0.5
+    
+    loss = float(sigma_zero.command("eval_loss"))
+    initial_loss = loss
+    print(f"Initial eval loss: {loss:.0f}")
+    
+    def run_eval_loss(exe_path: str) -> float:
+        result = subprocess.run(
+            rf"{exe_path} eval_loss",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "eval_loss failed")
+        return float(result.stdout.strip())
+
+    def build_eval_executable(consts: dict, tag: str) -> str:
+        with open("src/consts.c", "w") as f:
+            f.write(make_const_file(consts))
+        if os.system("make") != 0:
+            raise RuntimeError("build failed")
+        exe_name = f"sigma-zero-eval-{tag}"
+        shutil.move(executable("sigma-zero"), executable(exe_name))
+        return executable(exe_name)
+
+    try:
+        while True:
+            rand_noise = max(0.1, og_rand_noise * (0.92 ** n_mutations))
+            n_steps += 1
+            log(f"=== Eval Training Step {n_steps} ===")
+            log(f"{n_mutations} successful mutations so far.")
+
+            batch_size = 10
+            max_workers = min(os.cpu_count() or 1, batch_size)
+
+            mutated_batch = []
+            for _ in range(batch_size):
+                attempt = 0
+                mut_consts = mutated_consts(best_consts)
+                while mut_consts == best_consts and attempt < 5:
+                    mut_consts = mutated_consts(best_consts)
+                    attempt += 1
+                if mut_consts != best_consts:
+                    mutated_batch.append(mut_consts)
+
+            if not mutated_batch:
+                log("Failed to generate any valid mutations. Retrying.")
+                continue
+
+            eval_bins = []
+            try:
+                for i, mut_consts in enumerate(mutated_batch):
+                    tag = f"{n_steps}-{i}"
+                    eval_bins.append(build_eval_executable(mut_consts, tag))
+
+                eval_results = [None] * len(eval_bins)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_map = {
+                        executor.submit(run_eval_loss, exe_path): idx
+                        for idx, exe_path in enumerate(eval_bins)
+                    }
+                    for future in concurrent.futures.as_completed(future_map):
+                        idx = future_map[future]
+                        try:
+                            eval_results[idx] = future.result()
+                        except Exception as e:
+                            log(f"Eval loss failed for candidate {idx}: {e}")
+
+                valid_candidates = [
+                    (idx, val) for idx, val in enumerate(eval_results) if val is not None
+                ]
+                if not valid_candidates:
+                    log("All eval_loss runs failed. Retrying.")
+                    continue
+
+                best_idx, best_loss_candidate = min(valid_candidates, key=lambda item: item[1])
+                log(f"Best candidate loss: {best_loss_candidate:.0f} (current {loss:.0f})")
+
+                if best_loss_candidate >= loss:
+                    log(
+                        f"No candidate improved eval loss: {best_loss_candidate:.0f} >= {loss:.0f}. Discarding batch."
+                    )
+                    continue
+
+                log(
+                    f"Mutated constants improved eval loss: {best_loss_candidate:.0f} < {loss:.0f}. Updating best constants."
+                )
+                log_diff(best_consts, mutated_batch[best_idx])
+                best_consts = mutated_batch[best_idx]
+                loss = best_loss_candidate
+                n_mutations += 1
+
+            finally:
+                for exe_path in eval_bins:
+                    if os.path.exists(exe_path):
+                        os.remove(exe_path)
+
+    except KeyboardInterrupt:
+        log("Eval training interrupted.")
+    except Exception as e:
+        log(f"Error during eval training: {e}")
+        
+    log(f"Final eval loss: {loss:.0f} after {n_mutations} successful mutations in {n_steps} steps (initial loss was {initial_loss:.0f}).")
+    with open("src/consts.c", "w") as f:
+        f.write(make_const_file(best_consts))
+    print("Final best constants written to src/consts.c")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 2 and sys.argv[1] == "--train-eval":
+        constants_to_optimize = EVAL_CONSTS
+        train_eval()
+    elif len(sys.argv) == 3 and sys.argv[1] == "--maximize":
+        # Train a predefined set of constants to maximize a value
+        value_name = sys.argv[2]
+        if value_name not in MINMAX_VALUES:
+            print(f"Value '{value_name}' is not recognized. Available values: {', '.join(MINMAX_VALUES)}")
+            sys.exit(1)
+        constants_to_optimize = CUTOFF_CONSTS
+        train_cutoff(value_name, True)
+    elif len(sys.argv) == 3 and sys.argv[1] == "--minimize":
+        # Train a predefined set of constants to minimize a value        
+        value_name = sys.argv[2]
+        if value_name not in MINMAX_VALUES:
+            print(f"Value '{value_name}' is not recognized. Available values: {', '.join(MINMAX_VALUES)}")
+            sys.exit(1)
+        constants_to_optimize = CUTOFF_CONSTS
+        train_cutoff(value_name, False)
+    elif len(sys.argv) >= 2 and sys.argv[1] == "--optimize":
+        if len(sys.argv) == 2:
+            constants_to_optimize = list(best_consts.keys())
+        else:
+            constants_to_optimize = [key for key in sys.argv[2:] if key in best_consts]
+        print("Optimizing only the following constants:", ", ".join(constants_to_optimize))
+        optimize()
+    else:
+        print("Usage:")
+        print("  python optimize_constants.py --optimize [CONST1 CONST2 ...]   # Optimize specified constants (or all if none specified)")
+        print("  python optimize_constants.py --maximize VALUE_NAME            # Optimize constants to maximize a specific value")
+        print("  python optimize_constants.py --minimize VALUE_NAME            # Optimize constants to minimize a specific value")
+        print("  python optimize_constants.py --train-eval                     # Train constants based on evaluation score (not implemented yet)")
+        sys.exit(1)

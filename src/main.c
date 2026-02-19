@@ -12,10 +12,6 @@
 #include <string.h>
 #include <time.h>
 
-#if defined(__ARM_NEON) || defined(__aarch64__)
-#include <arm_neon.h>
-#endif
-
 #include "consts.c"
 
 #define class typedef struct
@@ -1317,7 +1313,7 @@ Chess* Chess_from_fen(char* fen_arg) {
         FEN_PARSING_ERROR("Half move clock NaN");
     }
     int halfmoves = strtoul(fields[4], NULL, 10);
-    if (halfmoves > 99) {
+    if (halfmoves > 100) {
         FEN_PARSING_ERROR("Half move clock overflow");
     }
     board->halfmoves = (uint8_t)halfmoves;
@@ -2801,25 +2797,6 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     return TT_store(hash, best_score, depth, TT_EXACT);
 }
 
-// if is_white sort in descending order, otherwise ascending
-void bubble_sort(Move* moves, int* scores, size_t n_moves) {
-    bool swapped;
-    do {
-        swapped = false;
-        for (int i = 1; i < n_moves; i++) {
-            if (scores[i - 1] < scores[i]) {
-                Move tmp_move = moves[i - 1];
-                moves[i - 1] = moves[i];
-                moves[i] = tmp_move;
-                int tmp_score = scores[i - 1];
-                scores[i - 1] = scores[i];
-                scores[i] = tmp_score;
-                swapped = true;
-            }
-        }
-    } while (swapped);
-}
-
 void* play_thread(void* arg) {
     TIME_TYPE endtime = *(TIME_TYPE*)arg;
     task_t task;
@@ -3139,6 +3116,45 @@ int minmax_command(Chess* chess, int depth) {
     return 0;
 }
 
+int compute_eval_loss() {
+    FILE* f = fopen("data/chessData.csv", "r");
+    if (f == NULL) {
+        fprintf(stderr, "Could not open file: data/chessData.csv");
+        return 1;
+    }
+
+    const int MAX_ERROR_CP = 300; // clamp per-sample error to ±3.0 eval
+    int fens_count = 0;
+    uint64_t total_loss = 0;
+    char line[1024];
+
+    while (fgets(line, sizeof(line), f)) {
+        char *fen = strtok(line, ",");
+        char *stockfish_eval_str = strtok(NULL, ",");
+        if (stockfish_eval_str[0] == '#') continue; // skip checkmates
+
+        int stockfish_eval = atoi(stockfish_eval_str);
+        if (abs(stockfish_eval) > 1000) continue; // skip evals > 10
+
+        Chess* chess = Chess_from_fen(fen);
+        if (chess == NULL) continue; // failed to parse FEN
+        int sigmazero_eval = eval(chess);
+
+        // clamp error
+        int diff = sigmazero_eval - stockfish_eval;
+        if (diff > MAX_ERROR_CP) diff = MAX_ERROR_CP;
+        else if (diff < -MAX_ERROR_CP) diff = -MAX_ERROR_CP;
+
+        uint64_t loss = (uint64_t)(diff * diff);
+        total_loss += loss;
+        fens_count++;
+    }
+
+    printf("%lg\n", fens_count ? (double)total_loss / fens_count : 0.0);
+    fclose(f);
+    return 0;
+}
+
 int test() {
     Chess* chess = Chess_from_fen("8/1k6/8/4R3/8/8/4K3/8 w - - 0 1");
     if (!chess) return 1;
@@ -3199,6 +3215,8 @@ int main(int argc, char** argv) {
         int depth = atoi(argv[3]);
         if (!chess) return 1;
         return minmax_command(chess, depth);
+    } else if (strcmp(argv[1], "eval_loss") == 0) {
+        return compute_eval_loss();
     } else {
         help();
         return 1;
