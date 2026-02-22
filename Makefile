@@ -11,6 +11,9 @@ all: sigma-zero
 sigma-zero: src/main.c src/consts.c magicbb/moves.o
 	$(CC) $(CFLAGS) $(OPTIMIZE) -o sigma-zero magicbb/moves.o src/main.c
 
+quickly: src/main.c src/consts.c magicbb/moves.o
+	$(CC) $(CFLAGS) -o sigma-zero magicbb/moves.o src/main.c
+
 # Pattern rule to build any .c file as an executable
 %: src/versions/%.c magicbb/moves.o
 	$(CC) $(CFLAGS) $(OPTIMIZE) -o old magicbb/moves.o $<

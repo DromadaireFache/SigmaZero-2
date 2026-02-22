@@ -3050,7 +3050,7 @@ int play(char* fen, int millis, char* game_history) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.8.2 (2026-02-12)\n");
+    printf("SigmaZero Chess Engine 2.8.2 (2026-02-22)\n");
     return 0;
 }
 
@@ -3066,8 +3066,6 @@ void help(void) {
     printf(HELP_WIDTH " %s\n", "", "  FEN: Position in FEN notation");
     printf(HELP_WIDTH " %s\n", "", "  millis: Time limit in milliseconds");
     printf(HELP_WIDTH " %s\n", "", "  history: Optional game history");
-    printf("\n");
-    printf(HELP_WIDTH " %s\n", "fancy <FEN> <millis> [history]", "Play with enhanced scoring");
     printf("\n");
     printf(HELP_WIDTH " %s\n", "moves <FEN> <depth>", "Count legal moves at depth");
     printf(HELP_WIDTH " %s\n", "", "  depth: Search depth (perft)");
@@ -3142,8 +3140,13 @@ int compute_eval_loss() {
 
         // clamp error
         int diff = sigmazero_eval - stockfish_eval;
-        if (diff > MAX_ERROR_CP) diff = MAX_ERROR_CP;
-        else if (diff < -MAX_ERROR_CP) diff = -MAX_ERROR_CP;
+        if (abs(diff) > MAX_ERROR_CP) continue;
+        // if (abs(diff) > MAX_ERROR_CP) {
+        //     printf("Big diff %s -> %d | %d\n", fen, sigmazero_eval, stockfish_eval);
+        // }
+
+        // if (diff > MAX_ERROR_CP) diff = MAX_ERROR_CP;
+        // else if (diff < -MAX_ERROR_CP) diff = -MAX_ERROR_CP;
 
         uint64_t loss = (uint64_t)(diff * diff);
         total_loss += loss;

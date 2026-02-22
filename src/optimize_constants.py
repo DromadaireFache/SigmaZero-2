@@ -175,13 +175,13 @@ with open("src/consts.c", "r") as f:
 shutil.copyfile("src/consts.c", "src/consts_backup.c")
 
 
-def round_up(n: float) -> int:
+def round_up(n: float, change_percent: float = 0.0) -> int:
     if n > 0:
-        return max(1, round(n))
+        return max(1, round(n * change_percent))
     elif n < 0:
-        return min(-1, round(n))
+        return min(-1, round(n * change_percent))
     else:
-        return 0
+        return 1 if change_percent >= 0 else -1
 
 
 def mutated_consts(consts: dict) -> dict:
@@ -191,12 +191,12 @@ def mutated_consts(consts: dict) -> dict:
             for i in range(len(consts[key])):
                 if random.randint(1, math.ceil(len(constants_to_optimize) / 3)) == 1:
                     change_percent = random.uniform(-rand_noise, rand_noise)
-                    change_amount = round_up(consts[key][i] * change_percent)
+                    change_amount = round_up(consts[key][i], change_percent)
                     new_consts[key][i] = consts[key][i] + change_amount
                     
         elif random.randint(1, math.ceil(len(constants_to_optimize) / 5)) == 1:
             change_percent = random.uniform(-rand_noise, rand_noise)
-            change_amount = round_up(consts[key] * change_percent)
+            change_amount = round_up(consts[key], change_percent)
             new_consts[key] = max(consts[key] + change_amount, 0)
     
     return new_consts
@@ -559,7 +559,7 @@ def train_eval():
     def build_eval_executable(consts: dict, tag: str) -> str:
         with open("src/consts.c", "w") as f:
             f.write(make_const_file(consts))
-        if os.system("make") != 0:
+        if os.system("make quickly") != 0:
             raise RuntimeError("build failed")
         exe_name = f"sigma-zero-eval-{tag}"
         shutil.move(executable("sigma-zero"), executable(exe_name))
@@ -680,5 +680,5 @@ if __name__ == "__main__":
         print("  python optimize_constants.py --optimize [CONST1 CONST2 ...]   # Optimize specified constants (or all if none specified)")
         print("  python optimize_constants.py --maximize VALUE_NAME            # Optimize constants to maximize a specific value")
         print("  python optimize_constants.py --minimize VALUE_NAME            # Optimize constants to minimize a specific value")
-        print("  python optimize_constants.py --train-eval                     # Train constants based on evaluation score (not implemented yet)")
+        print("  python optimize_constants.py --train-eval                     # Train constants based on evaluation score")
         sys.exit(1)
