@@ -2800,18 +2800,36 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
 void* play_thread(void* arg) {
     TIME_TYPE endtime = *(TIME_TYPE*)arg;
     task_t task;
+    int score;
 
     while (1) {
         if (!task_pop(&task, endtime)) break;
         if (task.depth >= 64) continue;
-
         Chess* chess = &task.chess;
         int depth = task.depth;
         Piece capture = task.capture;
         Move move = task.move;
         memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
 
-        int score = -minimax(chess, endtime, depth - 1, -INF, INF, capture, 0);
+        if (task.depth > 3 && task.result[-1].reached) { // aspiration window
+            Chess chess_copy;
+            int window_alpha = ASP_WINDOW_ALPHA_INIT, window_beta = ASP_WINDOW_BETA_INIT;
+            int prev_score = task.result[-1].score;
+            
+            while (1) {
+                memcpy(&chess_copy, chess, sizeof(Chess));
+                int alpha = prev_score - window_alpha;
+                int beta = prev_score + window_beta;
+                score = -minimax(&chess_copy, endtime, depth - 1, -beta, -alpha, capture, 0);
+                if (TIME_NOW() > endtime) break;
+                if (score <= alpha) window_alpha *= ASP_WINDOW_ALPHA_FACTOR / 64;
+                else if (score >= beta) window_beta *= ASP_WINDOW_BETA_FACTOR / 64;
+                else break;
+            }
+
+        } else {
+            score = -minimax(chess, endtime, depth - 1, -INF, INF, capture, 0);
+        }
 
         if (TIME_NOW() > endtime) {
             task_request_stop();
@@ -2850,7 +2868,7 @@ void* play_thread(void* arg) {
 
 bool openings_db(Chess* chess) {
     char s[100];
-    sprintf(s, "%" PRIx64, Chess_zhash(chess));
+    snprintf(s, 100, "%" PRIx64, Chess_zhash(chess));
     srand((unsigned int)time(NULL));
 
     // Opening the database file openings.db
@@ -3179,7 +3197,7 @@ int main(int argc, char** argv) {
     if (argc < 2 || strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0 ||
         strcmp(argv[1], "-h") == 0) {
         help();
-        return argc > 1;
+        return argc <= 1;
     } else if (strcmp(argv[1], "version") == 0 || strcmp(argv[1], "--version") == 0 ||
                strcmp(argv[1], "-v") == 0) {
         return version();
