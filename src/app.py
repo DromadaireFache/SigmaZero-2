@@ -141,7 +141,6 @@ class Api:
             board.push(move)
             previous_states = previous_states[: move_index + 1] + [PreviousState.current()]
             move_index += 1
-            # print("NNUE Eval:", evaluator(nnue.fen_to_tensor(board.fen()).unsqueeze(0)).item())
             return True
         return False
 
@@ -184,6 +183,8 @@ class Api:
             result = sigma_zero.play(board, millis)
         elif version.lower() == "aggressive":
             result = sigma_zero.fancy(board, millis)
+        elif version.lower() == "nnue":
+            result = nnue.play(board, millis, evaluator)
         else:
             sigma_zero.make(version)
             result = sigma_zero.old_play(board, millis)
