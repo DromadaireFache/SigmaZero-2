@@ -114,6 +114,8 @@ best_consts = {
     "ASP_WINDOW_ALPHA_FACTOR": 128,
     "ASP_WINDOW_BETA_FACTOR": 128,
     "TT_MOVE_BONUS": 20000,
+    "REDUCTION_FACTOR": 28,
+    "REDUCTION_CONSTANT": 48,
     "PS_BLACK_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, -50, -52, -50, -50, -50, -50, -50, -48, -9, -10, -20, -33, -30, -20, -11, -10, -4, -2, -10, -24, -26, -10, -6, -6, 0, 0, 0, -20, -20, 0, 0, 0, -4, 4, 9, 0, 0, 11, 5, -6, -5, -10, -10, 20, 20, -10, -10, -4, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_WHITE_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, 6, 9, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 11, 23, 25, 11, 5, 5, 10, 9, 19, 30, 30, 20, 10, 10, 50, 50, 48, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_BLACK_KNIGHT": [50, 40, 31, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 37, 30, 0, -10, -15, -15, -10, 0, 32, 33, -5, -15, -19, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 33, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 37, 50, 40, 30, 32, 30, 30, 40, 52],
@@ -677,7 +679,12 @@ if __name__ == "__main__":
         if len(sys.argv) == 2:
             constants_to_optimize = list(best_consts.keys())
         else:
-            constants_to_optimize = [key for key in sys.argv[2:] if key in best_consts]
+            constants_to_optimize = []
+            for const_name in sys.argv[2:]:
+                if const_name not in best_consts:
+                    print(f"Constant '{const_name}' is not recognized. Available constants: {', '.join(best_consts.keys())}")
+                    sys.exit(1)
+                constants_to_optimize.append(const_name)
         print("Optimizing only the following constants:", ", ".join(constants_to_optimize))
         optimize()
     else:

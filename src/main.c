@@ -38,7 +38,7 @@ static atomic_size_t tt_stores = 0;
 #endif
 
 // Uncomment to enable node tracking (has performance cost)
-// #define TRACK_NODES
+#define TRACK_NODES
 
 #ifdef TRACK_NODES
 static atomic_size_t nodes_searched = 0;
@@ -2682,7 +2682,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
 static inline int compute_reduction(int depth, int i) {
     int log_depth = 8 * sizeof(int) - __builtin_clz(depth) - 1;
     int log_i = 8 * sizeof(int) - __builtin_clz(i) - 1;
-    return log_depth * log_i / 3;
+    return (log_depth * log_i * REDUCTION_FACTOR + REDUCTION_CONSTANT) / 64;
 }
 
 int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last_capture,
@@ -3156,6 +3156,32 @@ void help(void) {
     printf("  sigma-zero eval \"8/8/8/4k3/8/8/4K3/8 w - - 0 1\"\n");
 }
 
+int eval_command(Chess* chess, int depth) {
+    if (depth == 0) {
+        printf("%lg", (double)eval(chess) / 100.0);
+    } else {
+        for (int d = 0; d <= depth; d++) {
+#ifdef TRACK_NODES
+            size_t base_nodes = atomic_load(&nodes_searched);
+#endif
+
+            TIME_TYPE start = TIME_NOW();
+            double e = (double)-minimax(chess, UINT64_MAX, d, -INF, INF, EMPTY, 0) / 100.0;
+            TIME_TYPE end = TIME_NOW();
+            double cpu_time = TIME_DIFF_S(end, start);
+            
+#ifdef TRACK_NODES
+            size_t nodes = atomic_load(&nodes_searched) - base_nodes;
+            printf("Depth %d: %lg reached in %.3lg seconds with %zu nodes\n", d, e, cpu_time,
+                   nodes);
+#else
+            printf("Depth %d: %lg reached in %.3lg seconds\n", d, e, cpu_time);
+#endif
+        }
+    }
+    return 0;
+}
+
 int king_safety_command(Chess* chess) {
     printf("Chess_king_safety() -> %d\n", Chess_king_safety(chess));
     return 0;
@@ -3185,7 +3211,7 @@ int minmax_command(Chess* chess, int depth) {
     TIME_TYPE end = TIME_NOW();
     double cpu_time = TIME_DIFF_S(end, start);
     printf("score: %d\n", score);
-    printf("time : %.3lf,\n", cpu_time);
+    printf("time : %.3lf\n", cpu_time);
     return 0;
 }
 
@@ -3270,11 +3296,11 @@ int main(int argc, char** argv) {
     } else if (argc == 4 && strcmp(argv[1], "moves") == 0) {
         int depth = atoi(argv[3]);
         return moves(argv[2], depth);
-    } else if (argc == 3 && strcmp(argv[1], "eval") == 0) {
+    } else if (argc == 4 && strcmp(argv[1], "eval") == 0) {
         Chess* chess = Chess_from_fen(argv[2]);
+        int depth = atoi(argv[3]);
         if (!chess) return 1;
-        printf("%f\n", (double)eval(chess) / 100);
-        return 0;
+        return eval_command(chess, depth);
     } else if (argc == 3 && strcmp(argv[1], "hash") == 0) {
         Chess* chess = Chess_from_fen(argv[2]);
         if (!chess) return 1;
