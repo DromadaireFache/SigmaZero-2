@@ -2788,21 +2788,21 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
         } else {
             // Late move reduction condition
-            // bool reduction_condition =
-            //     depth >= 3 && chess->fullmoves < FULLMOVES_ENDGAME && !in_check && capture == EMPTY;
-            // int r = reduction_condition ? compute_reduction(depth, i) : 0;
+            bool reduction_condition =
+                depth >= 3 && chess->fullmoves < FULLMOVES_ENDGAME && !in_check && capture == EMPTY;
+            int r = reduction_condition ? compute_reduction(depth, i) : 0;
 
             // Clamp reduction so we don't go below depth 1
-            // int reduced_depth = depth - 1 - r;
-            // if (reduced_depth < 0) reduced_depth = 0;
+            int reduced_depth = depth - 1 - r;
+            if (reduced_depth < 0) reduced_depth = 0;
 
             // search with a narrow window and reduction first
-            // score = -minimax(chess, endtime, reduced_depth, -a - 1, -a, capture, extensions);
+            score = -minimax(chess, endtime, reduced_depth, -a - 1, -a, capture, extensions);
 
             // if reduction caused potential improvement re-search
-            // if (r > 0 && score > a) {
+            if (r > 0 && score > a) {
                 score = -minimax(chess, endtime, depth - 1, -a - 1, -a, capture, extensions);
-            // }
+            }
 
             // if score exceeds alpha do full search
             if (score > a) {
