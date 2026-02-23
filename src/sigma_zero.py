@@ -159,6 +159,10 @@ if __name__ == "__main__":
             worse_nps = (fen, result.get("nps", float("inf")))
     avg_nps = sum(nps) / len(nps)
     avg_depth = sum(depths) / len(depths)
-    print(f"Average NPS: {avg_nps:.0f}")
-    print(f"Average Depth: {avg_depth:.2f}")
+    std_nps = (sum((x - avg_nps) ** 2 for x in nps) / len(nps)) ** 0.5
+    std_depth = (sum((x - avg_depth) ** 2 for x in depths) / len(depths)) ** 0.5
+    se_nps = std_nps / len(nps) ** 0.5
+    se_depth = std_depth / len(depths) ** 0.5
+    print(f"Average NPS: {avg_nps:,.0f} ± {se_nps:,.0f}")
+    print(f"Average Depth: {avg_depth:.2f} ± {se_depth:.2f}")
     print(f"Worst NPS: {worse_nps[1]:.0f} for FEN:\n{worse_nps[0]}")

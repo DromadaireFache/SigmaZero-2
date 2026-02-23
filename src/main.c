@@ -2451,6 +2451,8 @@ class {
     int eval;
     uint8_t depth;
     uint8_t type;  // TTNodeType
+    uint8_t best_from;
+    uint8_t best_to;
 }
 TTItem;
 
@@ -2461,7 +2463,8 @@ TTItem;
 TTItem tt[TT_LENGTH] = {0};
 
 // Store an entry with fine-grained locking
-static inline int TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
+static inline int TT_store(uint64_t key, int eval, int depth, TTNodeType node_type,
+                           uint8_t best_from, uint8_t best_to) {
     size_t i = key & (TT_LENGTH - 1);
     TTItem* item = &tt[i];
 
@@ -2477,6 +2480,8 @@ static inline int TT_store(uint64_t key, int eval, int depth, TTNodeType node_ty
         item->eval = eval;
         item->depth = depth;
         item->type = node_type;
+        item->best_from = best_from;
+        item->best_to = best_to;
     }
 
     return eval;
@@ -2698,7 +2703,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             extensions++;
         } else {
             return TT_store(hash, chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), depth,
-                            TT_EXACT);
+                            TT_EXACT, 0, 0);
         }
     }
 
@@ -2719,13 +2724,25 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         bool in_check = chess->enemy_attack_map.n_checks > 0;
         if (in_check) {
             // Checkmate
-            return TT_store(hash, -1000000 - depth, depth, TT_EXACT);
+            return TT_store(hash, -1000000 - depth, depth, TT_EXACT, 0, 0);
         } else {
             // draw by stalemate
-            return TT_store(hash, 0, depth, TT_EXACT);
+            return TT_store(hash, 0, depth, TT_EXACT, 0, 0);
         }
     }
 
+    // Prioritize TT best move
+    size_t tt_i = hash & (TT_LENGTH - 1);
+    TTItem* tt_item = &tt[tt_i];
+    if (tt_item->key == hash) {
+        for (int i = 0; i < n_moves; i++) {
+            if (moves[i].from == tt_item->best_from && moves[i].to == tt_item->best_to) {
+                scores[i] += TT_MOVE_BONUS;
+                break;
+            }
+        }
+    }
+    
     // Add score for killer move heuristic
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
@@ -2740,12 +2757,14 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
     }
 
+
 #ifdef TRACK_BETA_CUTOFFS
     atomic_fetch_add(&total_nodes, 1);
 #endif
 
     int original_a = a;
     int best_score = -INF;
+    Move best_move = moves[0];
     for (int i = 0; i < n_moves; i++) {
         if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
         Move* move = &moves[i];
@@ -2758,7 +2777,19 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, move);
 
-        int score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
+        int score;
+        if (i == 0) {
+            // principal variation search
+            score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
+        } else {
+            // search with a narrow window first
+            score = -minimax(chess, endtime, depth - 1, -a - 1, -a, capture, extensions);
+
+            // if score exceeds alpha do full search
+            if (score > a) {
+                score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
+            }
+        }
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
@@ -2770,6 +2801,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
 
         if (score > best_score) {
             best_score = score;
+            best_move = *move;
             if (score > a) a = score;
         }
         if (score >= b) {
@@ -2787,14 +2819,20 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
                     chess->killer_moves[0][depth].to = move->to;
                 }
             }
-            return TT_store(hash, best_score, depth, TT_LOWER);  // Failed high
+            return TT_store(hash, best_score, depth, TT_LOWER,
+                            best_move.from, best_move.to);  // Failed high
         }
     }
 
+#ifdef TRACK_BETA_CUTOFFS
+    atomic_fetch_add(&total_cutoff_index, n_moves - 1);
+#endif
     if (best_score <= original_a) {
-        return TT_store(hash, best_score, depth, TT_UPPER);  // Failed low
+        return TT_store(hash, best_score, depth, TT_UPPER,
+                        best_move.from, best_move.to);  // Failed low
     }
-    return TT_store(hash, best_score, depth, TT_EXACT);
+    return TT_store(hash, best_score, depth, TT_EXACT,
+                    best_move.from, best_move.to);
 }
 
 void* play_thread(void* arg) {
@@ -2811,20 +2849,21 @@ void* play_thread(void* arg) {
         Move move = task.move;
         memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
 
-        if (task.depth > 3 && task.result[-1].reached) { // aspiration window
-            Chess chess_copy;
+        if (task.depth > 1 && task.result[-1].reached) {  // aspiration window
             int window_alpha = ASP_WINDOW_ALPHA_INIT, window_beta = ASP_WINDOW_BETA_INIT;
             int prev_score = task.result[-1].score;
-            
+
             while (1) {
-                memcpy(&chess_copy, chess, sizeof(Chess));
                 int alpha = prev_score - window_alpha;
                 int beta = prev_score + window_beta;
-                score = -minimax(&chess_copy, endtime, depth - 1, -beta, -alpha, capture, 0);
+                score = -minimax(chess, endtime, depth - 1, -beta, -alpha, capture, 0);
                 if (TIME_NOW() > endtime) break;
-                if (score <= alpha) window_alpha *= ASP_WINDOW_ALPHA_FACTOR / 64;
-                else if (score >= beta) window_beta *= ASP_WINDOW_BETA_FACTOR / 64;
-                else break;
+                if (score <= alpha)
+                    window_alpha *= ASP_WINDOW_ALPHA_FACTOR / 64;
+                else if (score >= beta)
+                    window_beta *= ASP_WINDOW_BETA_FACTOR / 64;
+                else
+                    break;
             }
 
         } else {
@@ -3038,7 +3077,7 @@ int play(char* fen, int millis, char* game_history) {
     size_t first_cutoffs = atomic_load(&first_move_cutoffs);
     size_t cutoff_idx = atomic_load(&total_cutoff_index);
     double cutoff_rate = cutoff_nodes > 0 ? (double)cutoffs * 100.0 / cutoff_nodes : 0;
-    double first_move_rate = cutoffs > 0 ? (double)first_cutoffs * 100.0 / cutoffs : 0;
+    double first_move_rate = cutoffs > 0 ? (double)first_cutoffs * 100.0 / cutoff_nodes : 0;
     double avg_cutoff_index = cutoffs > 0 ? (double)cutoff_idx / cutoffs : 0;
     printf("  \"cutoff_nodes\": %lu,\n", (unsigned long)cutoff_nodes);
     printf("  \"beta_cutoff_%%\": %.2f,\n", cutoff_rate);
@@ -3139,21 +3178,21 @@ int compute_eval_loss() {
         return 1;
     }
 
-    const int MAX_ERROR_CP = 300; // clamp per-sample error to ±3.0 eval
+    const int MAX_ERROR_CP = 300;  // clamp per-sample error to ±3.0 eval
     int fens_count = 0;
     uint64_t total_loss = 0;
     char line[1024];
 
     while (fgets(line, sizeof(line), f)) {
-        char *fen = strtok(line, ",");
-        char *stockfish_eval_str = strtok(NULL, ",");
-        if (stockfish_eval_str[0] == '#') continue; // skip checkmates
+        char* fen = strtok(line, ",");
+        char* stockfish_eval_str = strtok(NULL, ",");
+        if (stockfish_eval_str[0] == '#') continue;  // skip checkmates
 
         int stockfish_eval = atoi(stockfish_eval_str);
-        if (abs(stockfish_eval) > 1000) continue; // skip evals > 10
+        if (abs(stockfish_eval) > 1000) continue;  // skip evals > 10
 
         Chess* chess = Chess_from_fen(fen);
-        if (chess == NULL) continue; // failed to parse FEN
+        if (chess == NULL) continue;  // failed to parse FEN
         int sigmazero_eval = eval(chess);
 
         // clamp error
