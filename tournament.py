@@ -6,7 +6,7 @@ import chess.pgn
 import src.optimize_constants as optimize_constants
 
 TIME = 100  # milliseconds per move
-OLD_BOT = "V2.7"
+OLD_BOT = "V2.8"
 FENS = []
 
 with open("data/FENs.txt", "r") as f:

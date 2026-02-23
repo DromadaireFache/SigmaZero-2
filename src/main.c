@@ -38,7 +38,7 @@ static atomic_size_t tt_stores = 0;
 #endif
 
 // Uncomment to enable node tracking (has performance cost)
-#define TRACK_NODES
+// #define TRACK_NODES
 
 #ifdef TRACK_NODES
 static atomic_size_t nodes_searched = 0;
@@ -2679,6 +2679,12 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     return best_score;
 }
 
+static inline int compute_reduction(int depth, int i) {
+    int log_depth = 8 * sizeof(int) - __builtin_clz(depth) - 1;
+    int log_i = 8 * sizeof(int) - __builtin_clz(i) - 1;
+    return log_depth * log_i / 3;
+}
+
 int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last_capture,
             int extensions) {
 #ifdef TRACK_NODES
@@ -2719,9 +2725,9 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
     size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, false);
+    bool in_check = chess->enemy_attack_map.n_checks > 0;
 
     if (n_moves == 0) {
-        bool in_check = chess->enemy_attack_map.n_checks > 0;
         if (in_check) {
             // Checkmate
             return TT_store(hash, -1000000 - depth, depth, TT_EXACT, 0, 0);
@@ -2742,7 +2748,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             }
         }
     }
-    
+
     // Add score for killer move heuristic
     for (int i = 0; i < n_moves; i++) {
         Move* move = &moves[i];
@@ -2756,7 +2762,6 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             scores[i] += is_killer_move * KILLER_MOVE_BONUS;
         }
     }
-
 
 #ifdef TRACK_BETA_CUTOFFS
     atomic_fetch_add(&total_nodes, 1);
@@ -2782,8 +2787,22 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             // principal variation search
             score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
         } else {
-            // search with a narrow window first
-            score = -minimax(chess, endtime, depth - 1, -a - 1, -a, capture, extensions);
+            // Late move reduction condition
+            // bool reduction_condition =
+            //     depth >= 3 && chess->fullmoves < FULLMOVES_ENDGAME && !in_check && capture == EMPTY;
+            // int r = reduction_condition ? compute_reduction(depth, i) : 0;
+
+            // Clamp reduction so we don't go below depth 1
+            // int reduced_depth = depth - 1 - r;
+            // if (reduced_depth < 0) reduced_depth = 0;
+
+            // search with a narrow window and reduction first
+            // score = -minimax(chess, endtime, reduced_depth, -a - 1, -a, capture, extensions);
+
+            // if reduction caused potential improvement re-search
+            // if (r > 0 && score > a) {
+                score = -minimax(chess, endtime, depth - 1, -a - 1, -a, capture, extensions);
+            // }
 
             // if score exceeds alpha do full search
             if (score > a) {
@@ -2819,8 +2838,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
                     chess->killer_moves[0][depth].to = move->to;
                 }
             }
-            return TT_store(hash, best_score, depth, TT_LOWER,
-                            best_move.from, best_move.to);  // Failed high
+            return TT_store(hash, best_score, depth, TT_LOWER, best_move.from,
+                            best_move.to);  // Failed high
         }
     }
 
@@ -2828,11 +2847,10 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     atomic_fetch_add(&total_cutoff_index, n_moves - 1);
 #endif
     if (best_score <= original_a) {
-        return TT_store(hash, best_score, depth, TT_UPPER,
-                        best_move.from, best_move.to);  // Failed low
+        return TT_store(hash, best_score, depth, TT_UPPER, best_move.from,
+                        best_move.to);  // Failed low
     }
-    return TT_store(hash, best_score, depth, TT_EXACT,
-                    best_move.from, best_move.to);
+    return TT_store(hash, best_score, depth, TT_EXACT, best_move.from, best_move.to);
 }
 
 void* play_thread(void* arg) {
@@ -3107,7 +3125,7 @@ int play(char* fen, int millis, char* game_history) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.8.2 (2026-02-22)\n");
+    printf("SigmaZero Chess Engine 2.9.0 (2026-02-22)\n");
     return 0;
 }
 
