@@ -2784,32 +2784,22 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             // principal variation search
             score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
         } else {
-            // TODO extract reduced depth logic to a function
-            // TODO check if this without the fullmoves condition
             // Late move reduction condition
-            bool reduction_condition = depth >= 3 && !in_check && capture == EMPTY;
+            bool reduction_condition = depth >= 2 && !in_check && capture == EMPTY;
             int r = reduction_condition ? compute_reduction(depth, i) : 0;
 
             // Reduce less aggressively in endgames
             if (chess->fullmoves >= FULLMOVES_ENDGAME && r > 1) r = r / 2;
 
-            // Don't reduce killer moves as much
-            // TODO extract is_killer logic to a function
-            bool is_killer = (chess->killer_moves[0][depth - 1].from == move->from &&
-                              chess->killer_moves[0][depth - 1].to == move->to) ||
-                             (chess->killer_moves[1][depth - 1].from == move->from &&
-                              chess->killer_moves[1][depth - 1].to == move->to);
-            if (is_killer && r > 1) r = 1;
-
             // Clamp reduction so we don't go below depth 1
-            int reduced_depth = depth - r;
-            if (reduced_depth < 1) reduced_depth = 1;
+            int reduced_depth = depth - 1 - r;
+            if (reduced_depth < 0) reduced_depth = 0;
 
             // search with a narrow window and reduction first
-            score = -minimax(chess, endtime, reduced_depth - 1, -a - 1, -a, capture, extensions);
+            score = -minimax(chess, endtime, reduced_depth, -a - 1, -a, capture, extensions);
 
             // if reduction caused potential improvement re-search
-            if (reduced_depth != depth && score > a) {
+            if (r > 0 && score > a) {
                 score = -minimax(chess, endtime, depth - 1, -a - 1, -a, capture, extensions);
             }
 
