@@ -8,6 +8,7 @@ import sys
 import time
 import concurrent.futures
 import subprocess
+import matplotlib.pyplot as plt
 
 import chess
 
@@ -64,6 +65,23 @@ EVAL_CONSTS = [
     "PS_WHITE_KING_ENDGAME",
 ]
 
+PRUNING_CONSTS = [
+    "KILLER_MOVE_BONUS",
+    "PAWN_VICTIM_SCORE",
+    "KNIGHT_VICTIM_SCORE",
+    "BISHOP_VICTIM_SCORE",
+    "ROOK_VICTIM_SCORE",
+    "QUEEN_VICTIM_SCORE",
+    "KING_VICTIM_SCORE",
+    "PAWN_AGGRO_SCORE",
+    "KNIGHT_AGGRO_SCORE",
+    "BISHOP_AGGRO_SCORE",
+    "ROOK_AGGRO_SCORE",
+    "QUEEN_AGGRO_SCORE",
+    "KING_AGGRO_SCORE",
+    "TT_MOVE_BONUS",
+]
+
 # FENs to use for tournament
 FENS = []
 with open("data/FENs.txt", "r") as f:
@@ -93,17 +111,17 @@ best_consts = {
     "FULLMOVES_ENDGAME": 55,
     "QUIES_DEPTH": 9,
     "MAX_EXTENSION": 2,
-    "KILLER_MOVE_BONUS": 59,
-    "PAWN_VICTIM_SCORE": 88,
-    "KNIGHT_VICTIM_SCORE": 127,
-    "BISHOP_VICTIM_SCORE": 116,
-    "ROOK_VICTIM_SCORE": 126,
-    "QUEEN_VICTIM_SCORE": 167,
-    "KING_VICTIM_SCORE": 88,
-    "PAWN_AGGRO_SCORE": 28,
-    "KNIGHT_AGGRO_SCORE": 55,
-    "BISHOP_AGGRO_SCORE": 64,
-    "ROOK_AGGRO_SCORE": 64,
+    "KILLER_MOVE_BONUS": 37,
+    "PAWN_VICTIM_SCORE": 97,
+    "KNIGHT_VICTIM_SCORE": 126,
+    "BISHOP_VICTIM_SCORE": 139,
+    "ROOK_VICTIM_SCORE": 188,
+    "QUEEN_VICTIM_SCORE": 257,
+    "KING_VICTIM_SCORE": 0,
+    "PAWN_AGGRO_SCORE": 37,
+    "KNIGHT_AGGRO_SCORE": 61,
+    "BISHOP_AGGRO_SCORE": 67,
+    "ROOK_AGGRO_SCORE": 80,
     "QUEEN_AGGRO_SCORE": 96,
     "KING_AGGRO_SCORE": 37,
     "SELECT_MOVE_CUTOFF": 12,
@@ -114,8 +132,6 @@ best_consts = {
     "ASP_WINDOW_ALPHA_FACTOR": 128,
     "ASP_WINDOW_BETA_FACTOR": 128,
     "TT_MOVE_BONUS": 20000,
-    "REDUCTION_FACTOR": 28,
-    "REDUCTION_CONSTANT": 48,
     "PS_BLACK_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, -50, -52, -50, -50, -50, -50, -50, -48, -9, -10, -20, -33, -30, -20, -11, -10, -4, -2, -10, -24, -26, -10, -6, -6, 0, 0, 0, -20, -20, 0, 0, 0, -4, 4, 9, 0, 0, 11, 5, -6, -5, -10, -10, 20, 20, -10, -10, -4, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_WHITE_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, 6, 9, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 11, 23, 25, 11, 5, 5, 10, 9, 19, 30, 30, 20, 10, 10, 50, 50, 48, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_BLACK_KNIGHT": [50, 40, 31, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 37, 30, 0, -10, -15, -15, -10, 0, 32, 33, -5, -15, -19, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 33, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 37, 50, 40, 30, 32, 30, 30, 40, 52],
@@ -653,7 +669,63 @@ def train_eval():
     with open("src/consts.c", "w") as f:
         f.write(make_const_file(best_consts))
     print("Final best constants written to src/consts.c")
-
+    
+    
+def optimize_pruning(const: str, min_value: int, max_value: int):
+    def count_nodes() -> int:
+        result = sigma_zero.command("minmax 6", True)
+        return result["nodes"]
+    
+    log(f"=== Optimizing pruning constant '{const}' within range [{min_value}, {max_value}] ===")
+    best_const = best_consts[const]
+    best_value = count_nodes()
+    log(f"Tested {const}={best_const} -> Nodes: {best_value}")
+    nodes_results = {}
+    nodes_results[best_const] = best_value
+    
+    step = max(1, (max_value - min_value) // 25)
+    best_consts[const] = min_value
+    
+    def test_const():
+        if best_consts[const] in nodes_results:
+            return
+        
+        nonlocal best_value, best_const
+        with open("src/consts.c", "w") as f:
+            f.write(make_const_file(best_consts))
+        os.system("make")
+        nodes = count_nodes()
+        log(f"Tested {const}={best_consts[const]} -> Nodes: {nodes}")
+        nodes_results[best_consts[const]] = nodes
+        
+        if (nodes < best_value and nodes > 0) or best_value <= 0:
+            best_value = nodes
+            best_const = best_consts[const]
+    
+    # coarse search for min_value to max_value
+    while best_consts[const] <= max_value:
+        test_const()
+        best_consts[const] += step
+            
+    # fine search around best_const
+    for c in range(max(min_value, best_const - step), min(max_value, best_const + step) + 1):
+        best_consts[const] = c
+        test_const()
+        
+    best_consts[const] = best_const
+    print(f"Best {const}: {best_const} with Nodes: {best_value}")
+    with open("src/consts.c", "w") as f:
+        f.write(make_const_file(best_consts))
+        
+    # Plot results
+    values, nodes = zip(*sorted(nodes_results.items()))
+    plt.figure(figsize=(10, 6))
+    plt.plot(values, nodes, marker='o')
+    plt.title(f"Effect of {const} on Nodes Searched")
+    plt.xlabel(const)
+    plt.ylabel("Nodes Searched")
+    plt.show()
+    
 
 if __name__ == "__main__":
     if len(sys.argv) == 2 and sys.argv[1] == "--train-eval":
@@ -687,10 +759,22 @@ if __name__ == "__main__":
                 constants_to_optimize.append(const_name)
         print("Optimizing only the following constants:", ", ".join(constants_to_optimize))
         optimize()
+    elif len(sys.argv) == 5 and sys.argv[1] == "--opt-pruning":
+        const = sys.argv[2]
+        if not const in best_consts.keys() and not isinstance(best_consts[const], int):
+            print(f"Constant '{const}' is not recognized. Available constants: {', '.join(best_consts.keys())}")
+            sys.exit(1)
+        min_value = int(sys.argv[3])
+        max_value = int(sys.argv[4])
+        if not (min_value <= best_consts[const] <= max_value):
+            print(f"Current value of {const} ({best_consts[const]}) is not within the specified range [{min_value}, {max_value}].")
+            sys.exit(1)
+        optimize_pruning(const, min_value, max_value)
     else:
         print("Usage:")
         print("  python optimize_constants.py --optimize [CONST1 CONST2 ...]   # Optimize specified constants (or all if none specified)")
         print("  python optimize_constants.py --maximize VALUE_NAME            # Optimize constants to maximize a specific value")
         print("  python optimize_constants.py --minimize VALUE_NAME            # Optimize constants to minimize a specific value")
         print("  python optimize_constants.py --train-eval                     # Train constants based on evaluation score")
+        print("  python optimize_constants.py --opt-pruning CONST MIN MAX      # Optimize a pruning constant within a specified range")
         sys.exit(1)

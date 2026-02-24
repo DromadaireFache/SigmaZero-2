@@ -1229,13 +1229,10 @@ void Chess_init_bb(Chess* chess) {
     }
 }
 
-Chess* Chess_from_fen(char* fen_arg) {
+Chess* Chess_from_fen(char* fen) {
 #define FEN_PARSING_ERROR(details)                                \
     fprintf(stderr, "FEN Parsing error: " details ": %s\n", fen); \
     return NULL
-
-    char fen[128];
-    strncpy(fen, fen_arg, sizeof(fen) - 1);
 
     static Chess chess_struct;
     Chess* board = &chess_struct;  // empty board
@@ -2682,7 +2679,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
 static inline int compute_reduction(int depth, int i) {
     int log_depth = 8 * sizeof(int) - __builtin_clz(depth) - 1;
     int log_i = 8 * sizeof(int) - __builtin_clz(i) - 1;
-    return (log_depth * log_i * REDUCTION_FACTOR + REDUCTION_CONSTANT) / 64;
+    return log_depth * log_i / 3;
 }
 
 int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last_capture,
@@ -2787,20 +2784,32 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             // principal variation search
             score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
         } else {
+            // TODO extract reduced depth logic to a function
+            // TODO check if this without the fullmoves condition
             // Late move reduction condition
-            bool reduction_condition =
-                depth >= 3 && chess->fullmoves < FULLMOVES_ENDGAME && !in_check && capture == EMPTY;
+            bool reduction_condition = depth >= 3 && !in_check && capture == EMPTY;
             int r = reduction_condition ? compute_reduction(depth, i) : 0;
 
+            // Reduce less aggressively in endgames
+            if (chess->fullmoves >= FULLMOVES_ENDGAME && r > 1) r = r / 2;
+
+            // Don't reduce killer moves as much
+            // TODO extract is_killer logic to a function
+            bool is_killer = (chess->killer_moves[0][depth - 1].from == move->from &&
+                              chess->killer_moves[0][depth - 1].to == move->to) ||
+                             (chess->killer_moves[1][depth - 1].from == move->from &&
+                              chess->killer_moves[1][depth - 1].to == move->to);
+            if (is_killer && r > 1) r = 1;
+
             // Clamp reduction so we don't go below depth 1
-            int reduced_depth = depth - 1 - r;
-            if (reduced_depth < 0) reduced_depth = 0;
+            int reduced_depth = depth - r;
+            if (reduced_depth < 1) reduced_depth = 1;
 
             // search with a narrow window and reduction first
-            score = -minimax(chess, endtime, reduced_depth, -a - 1, -a, capture, extensions);
+            score = -minimax(chess, endtime, reduced_depth - 1, -a - 1, -a, capture, extensions);
 
             // if reduction caused potential improvement re-search
-            if (r > 0 && score > a) {
+            if (reduced_depth != depth && score > a) {
                 score = -minimax(chess, endtime, depth - 1, -a - 1, -a, capture, extensions);
             }
 
@@ -2877,9 +2886,9 @@ void* play_thread(void* arg) {
                 score = -minimax(chess, endtime, depth - 1, -beta, -alpha, capture, 0);
                 if (TIME_NOW() > endtime) break;
                 if (score <= alpha)
-                    window_alpha *= ASP_WINDOW_ALPHA_FACTOR / 64;
+                    window_alpha *= 2;
                 else if (score >= beta)
-                    window_beta *= ASP_WINDOW_BETA_FACTOR / 64;
+                    window_beta *= 2;
                 else
                     break;
             }
@@ -3160,16 +3169,45 @@ int eval_command(Chess* chess, int depth) {
     if (depth == 0) {
         printf("%lg", (double)eval(chess) / 100.0);
     } else {
+        int score = 0;
+
         for (int d = 0; d <= depth; d++) {
 #ifdef TRACK_NODES
             size_t base_nodes = atomic_load(&nodes_searched);
 #endif
 
             TIME_TYPE start = TIME_NOW();
-            double e = (double)-minimax(chess, UINT64_MAX, d, -INF, INF, EMPTY, 0) / 100.0;
+            int window_alpha = ASP_WINDOW_ALPHA_INIT, window_beta = ASP_WINDOW_BETA_INIT;
+
+            if (d == 0) {
+                score = -minimax(chess, UINT64_MAX, d, -INF, INF, EMPTY, 0);
+            } else {
+                int prev_score = score;
+                while (1) {
+                    int alpha = prev_score - window_alpha;
+                    int beta = prev_score + window_beta;
+                    score = -minimax(chess, UINT64_MAX, d, -beta, -alpha, EMPTY, 0);
+                    if (score <= alpha) {
+                        if (window_alpha > 100) {
+                            window_alpha = INF;
+                        } else {
+                            window_alpha *= 2;
+                        }
+                    } else if (score >= beta) {
+                        if (window_beta > 100) {
+                            window_beta = -INF;
+                        } else {
+                            window_beta *= 2;
+                        }
+                    } else
+                        break;
+                }
+            }
+
             TIME_TYPE end = TIME_NOW();
             double cpu_time = TIME_DIFF_S(end, start);
-            
+            double e = (double)score / 100.0;
+
 #ifdef TRACK_NODES
             size_t nodes = atomic_load(&nodes_searched) - base_nodes;
             printf("Depth %d: %lg reached in %.3lg seconds with %zu nodes\n", d, e, cpu_time,
@@ -3179,6 +3217,11 @@ int eval_command(Chess* chess, int depth) {
 #endif
         }
     }
+
+#ifdef TRACK_NODES
+    size_t nodes = atomic_load(&nodes_searched);
+    printf("%zu total nodes\n", nodes);
+#endif
     return 0;
 }
 
@@ -3205,13 +3248,29 @@ int move_scores_command(Chess* chess) {
     return 0;
 }
 
-int minmax_command(Chess* chess, int depth) {
+int minmax_command(int depth) {
+    FILE* f = fopen("data/training.txt", "rt");
+    if (f == NULL) return 1;
+    char fen[1024];
     TIME_TYPE start = TIME_NOW();
-    int score = -minimax(chess, UINT64_MAX, depth - 1, -INF, INF, EMPTY, 0);
+
+    while (fgets(fen, 1024, f)) {
+        memset(tt, 0, sizeof(tt));
+        fen[strcspn(fen, "\r\n")] = 0;
+        Chess* chess = Chess_from_fen(fen);
+        if (chess == NULL) continue;
+        minimax(chess, UINT64_MAX, depth, -INF, INF, EMPTY, 0);
+    }
+
     TIME_TYPE end = TIME_NOW();
     double cpu_time = TIME_DIFF_S(end, start);
-    printf("score: %d\n", score);
-    printf("time : %.3lf\n", cpu_time);
+    printf("{\n");
+    printf("    \"time\" : %.3lf,\n", cpu_time);
+#ifdef TRACK_NODES
+    size_t nodes = atomic_load(&nodes_searched);
+    printf("    \"nodes\": %zu\n", nodes);
+#endif
+    printf("}\n");
     return 0;
 }
 
@@ -3314,11 +3373,9 @@ int main(int argc, char** argv) {
         Chess* chess = Chess_from_fen(argv[2]);
         if (!chess) return 1;
         return move_scores_command(chess);
-    } else if (argc == 4 && strcmp(argv[1], "minmax") == 0) {
-        Chess* chess = Chess_from_fen(argv[2]);
-        int depth = atoi(argv[3]);
-        if (!chess) return 1;
-        return minmax_command(chess, depth);
+    } else if (argc == 3 && strcmp(argv[1], "minmax") == 0) {
+        int depth = atoi(argv[2]);
+        return minmax_command(depth);
     } else if (strcmp(argv[1], "eval_loss") == 0) {
         return compute_eval_loss();
     } else {
