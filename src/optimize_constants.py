@@ -18,7 +18,7 @@ except ModuleNotFoundError:
     from . import sigma_zero
 
 TIME = 100          # milliseconds per move
-OLD = "V2.7"        # Old engine version to compete against
+OLD = "V2.8"        # Old engine version to compete against
 rand_noise = 0.1    # Random noise to add to constant mutations
 
 TIME_CUTOFF = 100   # milliseconds per move for cutoff training
@@ -99,7 +99,7 @@ with open("data/training.txt", "r") as f:
         if fen:
             CUTOFF_FENS.append(fen)
 
-best_consts = {
+best_consts: dict = {
     "PAWN_RANK_BONUS": 7,
     "PAWN_VALUE": 113,
     "KNIGHT_VALUE": 340,
@@ -130,6 +130,11 @@ best_consts = {
     "ASP_WINDOW_ALPHA_INIT": 20,
     "ASP_WINDOW_BETA_INIT": 20,
     "TT_MOVE_BONUS": 20000,
+    "FP_DEPTH": 13,
+    "FP_BASE": 116,
+    "FP_FACTOR": 104,
+    "RFP_BASE": 195,
+    "RFP_FACTOR": 124,
     "PS_BLACK_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, -50, -52, -50, -50, -50, -50, -50, -48, -9, -10, -20, -33, -30, -20, -11, -10, -4, -2, -10, -24, -26, -10, -6, -6, 0, 0, 0, -20, -20, 0, 0, 0, -4, 4, 9, 0, 0, 11, 5, -6, -5, -10, -10, 20, 20, -10, -10, -4, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_WHITE_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, 6, 9, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 11, 23, 25, 11, 5, 5, 10, 9, 19, 30, 30, 20, 10, 10, 50, 50, 48, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0],
     "PS_BLACK_KNIGHT": [50, 40, 31, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 37, 30, 0, -10, -15, -15, -10, 0, 32, 33, -5, -15, -19, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 33, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 37, 50, 40, 30, 32, 30, 30, 40, 52],
@@ -171,10 +176,10 @@ def make_const_file(consts: dict) -> str:
     
     for key, value in consts.items():
         if isinstance(value, list):
-            array_values = ", ".join(str(v) for v in value)
+            array_values = ", ".join(str(int(v)) for v in value)
             ps_values += f"const int {key}[] = {{{array_values}}};\n"
         else:
-            constant_params += f"#define {key} {value}\n"
+            constant_params += f"#define {key} {int(value)}\n"
 
     text = "#include <inttypes.h>\n\n"
     text += "// Constant parameters\n"
@@ -299,16 +304,17 @@ def play_game(fen: str, is_white: bool) -> dict:
     return results
 
 
-def tournament(exec1: str, exec2: str, required_score: int, exit_on_interrupt: bool=False) -> int:
+def tournament_result(exec1: str, exec2: str, required_score: int = 0, exit_on_interrupt: bool=False, n_games: int = 100) -> dict:
     sigma_zero.EXE_FILE = exec1
     sigma_zero.OLD_EXE_FILE = exec2
     sigma_zero._COMPILED.add("make")
+    n_games = min(n_games, len(FENS))
     
     start = time.perf_counter()
     results = {"wins": 0, "losses": 0, "draws": 0, "avg_depth_new": 0, "avg_depth_old": 0}
-    for i, fen in enumerate(FENS):
+    for i, fen in enumerate(FENS[:n_games]):
         try:
-            print(f"Game {i+1}/{len(FENS)}")
+            print(f"Game {i+1}/{n_games}")
             result = play_game(fen, is_white=(i % 2 == 0))
             print("End FEN:", result.get("end_fen", "N/A"))
             print(f"Time SigmaZero: {result['time_new']:.2f}s, Old: {result['time_old']:.2f}s")
@@ -330,20 +336,24 @@ def tournament(exec1: str, exec2: str, required_score: int, exit_on_interrupt: b
                 print("Result: Draw", end=" ")
             print(f"({results['wins']}W/{results['losses']}L/{results['draws']}D)\n")
 
-            best_possible_score = 100 - i + results['wins'] - results['losses']
+            best_possible_score = n_games - i + results['wins'] - results['losses']
             if best_possible_score <= required_score:
                 print("Stopping tournament, impossible to achieve required score at this point.")
-                return False, 0
+                return results
         except KeyboardInterrupt as e:
             if exit_on_interrupt:
                 print("Tournament interrupted.")
                 break
             else:
                 raise e
+            
+    # calculate elo difference
+    elo = 400 * math.log10((results['wins'] + 0.5 * results['draws']) / (results['losses'] + 0.5 * results['draws']))
+    results['elo'] = elo
 
     print(f"Tournament completed in {time.perf_counter() - start:.2f} seconds.")
     print("Tournament Results:")
-    print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}")
+    print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}, {elo:+.2f} Elo")
     
     depth_diff = results["avg_depth_new"] - results["avg_depth_old"]
     depth_diff = ("+" if depth_diff >= 0 else "") + f"{depth_diff:.2f}"
@@ -351,8 +361,18 @@ def tournament(exec1: str, exec2: str, required_score: int, exit_on_interrupt: b
         f"Average Depth SigmaZero: {results['avg_depth_new']:.2f}, Old: {results['avg_depth_old']:.2f} ({depth_diff})"
     )
     
+    return results
+
+
+def tournament(exec1: str, exec2: str, required_score: int = 0, exit_on_interrupt: bool=False) -> tuple[bool, int]:
+    results = tournament_result(exec1, exec2, required_score=required_score, exit_on_interrupt=exit_on_interrupt)
     score = results['wins'] - results['losses']
     return score > required_score, score
+
+
+def tournament_elo(exec1: str, exec2: str, n_games: int = 100) -> float:
+    results = tournament_result(exec1, exec2, required_score=-100, n_games=n_games)
+    return results['elo']
 
 
 def log(message: str):

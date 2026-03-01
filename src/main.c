@@ -2734,6 +2734,21 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
     }
 
+    // Futility pruning
+    if (!in_check && last_capture == EMPTY && depth < FP_DEPTH) {
+        int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
+
+        int margin = FP_BASE + depth * FP_FACTOR;
+        if (e + margin <= a) {
+            return TT_store(hash, a, depth, TT_UPPER, 0, 0);  // Failed low
+        }
+        
+        margin = RFP_BASE + depth * RFP_FACTOR;
+        if (e - 2 * margin >= b) {
+            return TT_store(hash, b, depth, TT_LOWER, 0, 0);  // Failed high
+        }
+    }
+
     // Prioritize TT best move
     size_t tt_i = hash & (TT_LENGTH - 1);
     TTItem* tt_item = &tt[tt_i];
@@ -3124,7 +3139,7 @@ int play(char* fen, int millis, char* game_history) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.9.0 (2026-02-22)\n");
+    printf("SigmaZero Chess Engine 2.9.2 (2026-02-27)\n");
     return 0;
 }
 

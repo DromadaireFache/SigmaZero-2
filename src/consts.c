@@ -31,6 +31,11 @@
 #define ASP_WINDOW_ALPHA_INIT 20
 #define ASP_WINDOW_BETA_INIT 20
 #define TT_MOVE_BONUS 20000
+#define FP_DEPTH 13
+#define FP_BASE 116
+#define FP_FACTOR 104
+#define RFP_BASE 195
+#define RFP_FACTOR 124
 
 // Piece square values
 const int PS_BLACK_PAWN[] = {0, 0, 0, 0, 0, 0, 0, 0, -50, -52, -50, -50, -50, -50, -50, -48, -9, -10, -20, -33, -30, -20, -11, -10, -4, -2, -10, -24, -26, -10, -6, -6, 0, 0, 0, -20, -20, 0, 0, 0, -4, 4, 9, 0, 0, 11, 5, -6, -5, -10, -10, 20, 20, -10, -10, -4, 0, 0, 0, 0, 0, 0, 0, 0};
