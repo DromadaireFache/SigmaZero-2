@@ -2560,8 +2560,9 @@ int moves(char* fen, int depth) {
     return 0;
 }
 
-int Chess_king_mobility(Chess* chess, int king_i, bool only_attacks) {
-    bitboard_t friendly_bb = king_i == chess->king_white ? chess->bb_white : chess->bb_black;
+int Chess_king_mobility(Chess* chess, bool is_white, int king_i, bool only_attacks) {
+    bitboard_t friendly_bb = is_white ? chess->bb_white : chess->bb_black;
+    bitboard_t enemy_bb = is_white ? chess->bb_black : chess->bb_white;
     bitboard_t all_bb = chess->bb_white | chess->bb_black;
 
     // Rook moves
@@ -2577,9 +2578,9 @@ int Chess_king_mobility(Chess* chess, int king_i, bool only_attacks) {
     moves |= BISHOP_MOVES[king_i][index];
     moves &= ~friendly_bb;
 
-    bitboard_t attacks = moves & (chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white);
-    if (only_attacks) return __builtin_popcountll(attacks);
-    return __builtin_popcountll(moves) + __builtin_popcountll(attacks);
+    bitboard_t attacks = moves & enemy_bb;
+    if (only_attacks) return KING_SAFETY_FACTOR1 * __builtin_popcountll(attacks);
+    return KING_SAFETY_FACTOR2 * __builtin_popcountll(moves) + KING_SAFETY_FACTOR3 * __builtin_popcountll(attacks);
 }
 
 int Chess_king_safety(Chess* chess) {
@@ -2592,22 +2593,22 @@ int Chess_king_safety(Chess* chess) {
     int e = 0;
 
     // at position
-    e -= Chess_king_mobility(chess, chess->king_white, false);
-    e += Chess_king_mobility(chess, chess->king_black, false);
+    e -= Chess_king_mobility(chess, true, chess->king_white, false);
+    e += Chess_king_mobility(chess, false, chess->king_black, false);
 
     // left
     if (king_white_col > 0 && chess->board[chess->king_white - 1] == EMPTY)
-        e -= Chess_king_mobility(chess, chess->king_white - 1, true);
+        e -= Chess_king_mobility(chess, true, chess->king_white - 1, true);
     if (king_black_col > 0 && chess->board[chess->king_black - 1] == EMPTY)
-        e += Chess_king_mobility(chess, chess->king_black - 1, true);
+        e += Chess_king_mobility(chess, false, chess->king_black - 1, true);
 
     // right
     if (king_white_col < 7 && chess->board[chess->king_white + 1] == EMPTY)
-        e -= Chess_king_mobility(chess, chess->king_white + 1, true);
+        e -= Chess_king_mobility(chess, true, chess->king_white + 1, true);
     if (king_black_col < 7 && chess->board[chess->king_black + 1] == EMPTY)
-        e += Chess_king_mobility(chess, chess->king_black + 1, true);
+        e += Chess_king_mobility(chess, false, chess->king_black + 1, true);
 
-    e *= fullmoves_score * KING_SAFETY_FACTOR / 64;
+    e = e * fullmoves_score / 64;
     return e;
 }
 
@@ -2742,7 +2743,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         if (e + margin <= a) {
             return TT_store(hash, a, depth, TT_UPPER, 0, 0);  // Failed low
         }
-        
+
         margin = RFP_BASE + depth * RFP_FACTOR;
         if (e - 2 * margin >= b) {
             return TT_store(hash, b, depth, TT_LOWER, 0, 0);  // Failed high
