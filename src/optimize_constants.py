@@ -126,7 +126,9 @@ best_consts: dict = {
     "KING_AGGRO_SCORE": 37,
     "SELECT_MOVE_CUTOFF": 12,
     "PRIORITY_LINES": 4,
-    "KING_SAFETY_FACTOR": 16,
+    "KING_SAFETY_FACTOR1": 25,
+    "KING_SAFETY_FACTOR2": 7,
+    "KING_SAFETY_FACTOR3": 43,
     "ASP_WINDOW_ALPHA_INIT": 20,
     "ASP_WINDOW_BETA_INIT": 20,
     "TT_MOVE_BONUS": 20000,
@@ -268,7 +270,7 @@ def play_game(fen: str, is_white: bool) -> dict:
     print(sigma_zero.command("--version", exe=sigma_zero.EXE_FILE))
     print(sigma_zero.command("--version", exe=sigma_zero.OLD_EXE_FILE))
 
-    while not board.is_game_over(claim_draw=True):
+    while not board.is_game_over(claim_draw=True) and number_of_moves < 150:
         if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
             result = sigma_zero.play(board, TIME)
             results["time_new"] += result.get("time", 0)
@@ -293,6 +295,8 @@ def play_game(fen: str, is_white: bool) -> dict:
         results["score"] = 1 if is_white else -1
     elif board.result(claim_draw=True) == "0-1":
         results["score"] = -1 if is_white else 1
+    elif number_of_moves >= 150:
+        print("Game drawn by move limit")
     else:
         what_draw(board)
 
