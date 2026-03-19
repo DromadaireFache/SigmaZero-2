@@ -38,7 +38,7 @@ static atomic_size_t tt_stores = 0;
 #endif
 
 // Uncomment to enable node tracking (has performance cost)
-#define TRACK_NODES
+// #define TRACK_NODES
 
 #ifdef TRACK_NODES
 static atomic_size_t nodes_searched = 0;

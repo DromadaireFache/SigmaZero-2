@@ -41,7 +41,11 @@ def make(version: str | None = None):
 def command(cmd: str, JSON: bool = False, exe: str = None) -> str | Any:
     make()
     exe = exe or EXE_FILE
-    result = subprocess.run(rf"{exe} {cmd}", shell=True, capture_output=True, text=True)
+    try:
+        result = subprocess.run(rf"{exe} {cmd}", shell=True, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        print(f"Command timed out: {cmd}")
+        return {"error": "Command timed out"}
     if JSON:
         try:
             return json.loads(result.stdout)
