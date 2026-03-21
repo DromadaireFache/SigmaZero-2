@@ -3319,7 +3319,7 @@ int compute_eval_loss() {
     uint64_t total_loss = 0;
     char line[1024];
 
-    while (fgets(line, sizeof(line), f)) {
+    while (fgets(line, sizeof(line), f) && fens_count < 100000) {
         char* fen = strtok(line, ",");
         char* stockfish_eval_str = strtok(NULL, ",");
         if (stockfish_eval_str[0] == '#') continue;  // skip checkmates
@@ -3329,7 +3329,8 @@ int compute_eval_loss() {
 
         Chess* chess = Chess_from_fen(fen);
         if (chess == NULL) continue;  // failed to parse FEN
-        int sigmazero_eval = eval(chess);
+        // int sigmazero_eval = eval(chess);
+        int sigmazero_eval = minimax(chess, UINT64_MAX, 3, -INF, INF, EMPTY, 0);
 
         // clamp error
         int diff = sigmazero_eval - stockfish_eval;
@@ -3344,6 +3345,7 @@ int compute_eval_loss() {
         uint64_t loss = (uint64_t)(diff * diff);
         total_loss += loss;
         fens_count++;
+        free(chess);
     }
 
     printf("%lg\n", fens_count ? (double)total_loss / fens_count : 0.0);

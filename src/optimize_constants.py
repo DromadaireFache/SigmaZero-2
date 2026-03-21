@@ -48,7 +48,9 @@ EVAL_CONSTS = [
     "BISHOP_VALUE",
     "ROOK_VALUE",
     "QUEEN_VALUE",
-    "KING_SAFETY_FACTOR",
+    "KING_SAFETY_FACTOR1",
+    "KING_SAFETY_FACTOR2",
+    "KING_SAFETY_FACTOR3",
     "PS_BLACK_PAWN",
     "PS_WHITE_PAWN",
     "PS_BLACK_KNIGHT",
@@ -587,10 +589,6 @@ def train_eval():
     n_steps = 0
     og_rand_noise = 0.5
     
-    loss = float(sigma_zero.command("eval_loss"))
-    initial_loss = loss
-    print(f"Initial eval loss: {loss:.0f}")
-    
     def run_eval_loss(exe_path: str) -> float:
         result = subprocess.run(
             rf"{exe_path} eval_loss",
@@ -601,6 +599,10 @@ def train_eval():
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "eval_loss failed")
         return float(result.stdout.strip())
+    
+    initial_loss = run_eval_loss(executable("sigma-zero"))
+    loss = initial_loss
+    print(f"Initial eval loss: {initial_loss:.0f}")
 
     def build_eval_executable(consts: dict, tag: str) -> str:
         with open("src/consts.c", "w") as f:
@@ -623,13 +625,8 @@ def train_eval():
 
             mutated_batch = []
             for _ in range(batch_size):
-                attempt = 0
                 mut_consts = mutated_consts(best_consts)
-                while mut_consts == best_consts and attempt < 5:
-                    mut_consts = mutated_consts(best_consts)
-                    attempt += 1
-                if mut_consts != best_consts:
-                    mutated_batch.append(mut_consts)
+                mutated_batch.append(mut_consts)
 
             if not mutated_batch:
                 log("Failed to generate any valid mutations. Retrying.")
@@ -686,7 +683,7 @@ def train_eval():
     except KeyboardInterrupt:
         log("Eval training interrupted.")
     except Exception as e:
-        log(f"Error during eval training: {e}")
+        log(f"Error during eval training: {e.with_traceback(None)}")
         
     log(f"Final eval loss: {loss:.0f} after {n_mutations} successful mutations in {n_steps} steps (initial loss was {initial_loss:.0f}).")
     with open("src/consts.c", "w") as f:
