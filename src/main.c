@@ -522,6 +522,8 @@ class {
     bitboard_t bb_white;       // Bitboard of all white pieces
     bitboard_t bb_black;       // Bitboard of all black pieces
     Move killer_moves[2][64];  // Used for move ordering [id][depth]
+    bool white_has_castled;
+    bool black_has_castled;
 }
 Chess;
 
@@ -935,6 +937,7 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->eval += Piece_value_at(WHITE_ROOK, 5);
         chess->bb_white &= ~bitboard_from_index(7);  // Remove rook from h1
         chess->bb_white |= bitboard_from_index(5);   // Add rook to f1
+        chess->white_has_castled = true;
     } else if (moving_piece == WHITE_KING && move->from == 4 && move->to == 2) {
         // White queenside
         chess->board[3] = WHITE_ROOK;
@@ -945,6 +948,7 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->eval += Piece_value_at(WHITE_ROOK, 3);
         chess->bb_white &= ~bitboard_from_index(0);  // Remove rook from a1
         chess->bb_white |= bitboard_from_index(3);   // Add rook to d1
+        chess->white_has_castled = true;
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 62) {
         // Black kingside
         chess->board[61] = BLACK_ROOK;
@@ -955,6 +959,7 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->eval += Piece_value_at(BLACK_ROOK, 61);
         chess->bb_black &= ~bitboard_from_index(63);  // Remove rook from h8
         chess->bb_black |= bitboard_from_index(61);   // Add rook to f8
+        chess->black_has_castled = true;
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 58) {
         // Black queenside
         chess->board[59] = BLACK_ROOK;
@@ -965,6 +970,7 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->eval += Piece_value_at(BLACK_ROOK, 59);
         chess->bb_black &= ~bitboard_from_index(56);  // Remove rook from a8
         chess->bb_black |= bitboard_from_index(59);   // Add rook to d8
+        chess->black_has_castled = true;
     }
 
     // Handle en passant capture
@@ -1093,6 +1099,11 @@ void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
             } else {  // king side castling
                 chess->board[8 * pos.row + 7] = chess->board[8 * pos.row + 5];
                 chess->board[8 * pos.row + 5] = EMPTY;
+            }
+            if (moving_piece == WHITE_KING) {
+                chess->white_has_castled = false;
+            } else {
+                chess->black_has_castled = false;
             }
         }
 
@@ -1234,8 +1245,8 @@ Chess* Chess_from_fen(char* fen) {
     fprintf(stderr, "FEN Parsing error: " details ": %s\n", fen); \
     return NULL
 
-    static Chess chess_struct;
-    Chess* board = &chess_struct;  // empty board
+    Chess* board = malloc(sizeof(Chess));  // empty board
+    memset(board, 0, sizeof(Chess));
     Chess_empty_board(board);
 
     // Split FEN into fields
@@ -1328,6 +1339,8 @@ Chess* Chess_from_fen(char* fen) {
     Chess_init_eval(board);
     Chess_init_bb(board);
     board->zhash = Chess_zhash(board);
+    board->white_has_castled = false;
+    board->black_has_castled = false;
     return board;
 }
 
@@ -1390,18 +1403,29 @@ void Chess_print_fen(Chess* chess) {
     putchar('\n');
 }
 
-void ZHashStack_game_history(ZHashStack* zhstack, char* _game_history) {
-    char* game_history = calloc(strlen(_game_history) + 1, sizeof(char));
-    strcpy(game_history, _game_history);
-
+void Chess_game_history(Chess* chess, char* game_history) {
+    game_history = strdup(game_history);
     char* saveptr;
     char* fen = strtok_r(game_history, ",", &saveptr);
+    int prev_king_pos = 255;
 
     while (fen) {
-        Chess* chess = Chess_from_fen(fen);
-        if (!chess) return;
-        uint64_t hash = Chess_zhash(chess);
-        ZHashStack_push(zhstack, hash);
+        Chess* prev = Chess_from_fen(fen);
+        if (!prev) {
+            chess->zhstack.sp++;
+            continue;
+        }
+        uint64_t hash = Chess_zhash(prev);
+        ZHashStack_push(&chess->zhstack, hash);
+
+        // Update castling info
+        if (prev->turn == TURN_BLACK) {  // Last move was white
+            if (abs(prev->king_white - prev_king_pos) == 2) chess->white_has_castled = true;
+            prev_king_pos = prev->king_black;
+        } else {
+            if (abs(prev->king_black - prev_king_pos) == 2) chess->black_has_castled = true;
+            prev_king_pos = prev->king_white;
+        }
 
         fen = strtok_r(NULL, ",", &saveptr);
     }
@@ -2580,7 +2604,8 @@ int Chess_king_mobility(Chess* chess, bool is_white, int king_i, bool only_attac
 
     bitboard_t attacks = moves & enemy_bb;
     if (only_attacks) return KING_SAFETY_FACTOR1 * __builtin_popcountll(attacks);
-    return KING_SAFETY_FACTOR2 * __builtin_popcountll(moves) + KING_SAFETY_FACTOR3 * __builtin_popcountll(attacks);
+    return KING_SAFETY_FACTOR2 * __builtin_popcountll(moves) +
+           KING_SAFETY_FACTOR3 * __builtin_popcountll(attacks);
 }
 
 int Chess_king_safety(Chess* chess) {
@@ -2627,6 +2652,10 @@ int eval(Chess* chess) {
     int black_king_value = PS_BLACK_KING[chess->king_black] * (FULLMOVES_ENDGAME - fullmoves);
     black_king_value += PS_BLACK_KING_ENDGAME[chess->king_black] * fullmoves;
     e += black_king_value / FULLMOVES_ENDGAME;
+
+    // Add bonus if king has castled
+    e += chess->white_has_castled * CASTLE_BONUS;
+    e -= chess->black_has_castled * CASTLE_BONUS;
 
     e += Chess_king_safety(chess);
     return e;
@@ -2997,15 +3026,13 @@ bool openings_db(Chess* chess) {
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
 int play(char* fen, int millis, char* game_history) {
-    ZHashStack zhstack = {0};
-    if (game_history != NULL) {
-        ZHashStack_game_history(&zhstack, game_history);
-    }
-
     Chess* chess = Chess_from_fen(fen);
     if (!chess) return 1;
     if (millis < 1) return 1;
-    memcpy(&chess->zhstack, &zhstack, sizeof(ZHashStack));
+
+    if (game_history != NULL) {
+        Chess_game_history(chess, game_history);
+    }
 
 #ifdef TRACK_BETA_CUTOFFS
     atomic_store(&total_nodes, 0);
