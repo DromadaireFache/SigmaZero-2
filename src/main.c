@@ -3335,12 +3335,6 @@ int compute_eval_loss() {
         // clamp error
         int diff = sigmazero_eval - stockfish_eval;
         if (abs(diff) > MAX_ERROR_CP) continue;
-        // if (abs(diff) > MAX_ERROR_CP) {
-        //     printf("Big diff %s -> %d | %d\n", fen, sigmazero_eval, stockfish_eval);
-        // }
-
-        // if (diff > MAX_ERROR_CP) diff = MAX_ERROR_CP;
-        // else if (diff < -MAX_ERROR_CP) diff = -MAX_ERROR_CP;
 
         uint64_t loss = (uint64_t)(diff * diff);
         total_loss += loss;

@@ -600,6 +600,7 @@ def train_eval():
             raise RuntimeError(result.stderr.strip() or "eval_loss failed")
         return float(result.stdout.strip())
     
+    subprocess.run("make quickly", shell=True, check=True)
     initial_loss = run_eval_loss(executable("sigma-zero"))
     loss = initial_loss
     print(f"Initial eval loss: {initial_loss:.0f}")
@@ -620,8 +621,8 @@ def train_eval():
             log(f"=== Eval Training Step {n_steps} ===")
             log(f"{n_mutations} successful mutations so far.")
 
-            batch_size = 10
-            max_workers = min(os.cpu_count() or 1, batch_size)
+            batch_size = os.cpu_count()
+            max_workers = os.cpu_count()
 
             mutated_batch = []
             for _ in range(batch_size):
