@@ -354,8 +354,15 @@ def tournament_result(exec1: str, exec2: str, required_score: int = 0, exit_on_i
             else:
                 raise e
             
-    # calculate elo difference
-    elo = 400 * math.log10((results['wins'] + 0.5 * results['draws']) / (results['losses'] + 0.5 * results['draws']))
+    # Calculate Elo difference. Add a small pseudocount for sweep cases to avoid division by zero.
+    score_for = results['wins'] + 0.5 * results['draws']
+    score_against = results['losses'] + 0.5 * results['draws']
+    if score_for == 0 and score_against == 0:
+        elo = 0.0
+    elif score_for == 0 or score_against == 0:
+        elo = 400 * math.log10((score_for + 0.5) / (score_against + 0.5))
+    else:
+        elo = 400 * math.log10(score_for / score_against)
     results['elo'] = elo
 
     print(f"Tournament completed in {time.perf_counter() - start:.2f} seconds.")
