@@ -2816,18 +2816,16 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
     }
 
-    int static_eval = 12345;  // Random uninitialized value
-
     // Futility pruning
     if (!in_check && last_capture == EMPTY && depth < FP_DEPTH) {
-        static_eval = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
+        int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
         int margin = FP_BASE + depth * FP_FACTOR;
-        if (static_eval + margin <= a) {
+        if (e + margin <= a) {
             return TT_store(hash, a, depth, TT_UPPER, 0, 0);  // Failed low
         }
 
         margin = RFP_BASE + depth * RFP_FACTOR;
-        if (static_eval - 2 * margin >= b) {
+        if (e - 2 * margin >= b) {
             return TT_store(hash, b, depth, TT_LOWER, 0, 0);  // Failed high
         }
     }
@@ -2835,17 +2833,12 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     // Null move pruning
     bool is_null_move_allowed = extensions < MAX_EXTENSION;
     if (!in_check && depth >= 3 && is_null_move_allowed && Chess_has_non_pawn_material(chess)) {
-        if (static_eval == 12345) static_eval = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
-        
-        if (static_eval >= b) {
-            gamestate_t gamestate = Chess_make_null_move(chess);
-            int R = (depth >= 6) ? 3 : 2;
-            int score = -minimax(chess, endtime, depth - 1 - R, -b, -b + 1, EMPTY, MAX_EXTENSION);
-            Chess_unmake_null_move(chess, gamestate);
-    
-            if (score >= b) return b;  // Null move cutoff
-        }
+        gamestate_t gamestate = Chess_make_null_move(chess);
+        int R = (depth >= 6) ? 3 : 2;
+        int score = -minimax(chess, endtime, depth - 1 - R, -b, -b + 1, EMPTY, MAX_EXTENSION);
+        Chess_unmake_null_move(chess, gamestate);
 
+        if (score >= b) return b;  // Null move cutoff
     }
 
     // Prioritize TT best move
