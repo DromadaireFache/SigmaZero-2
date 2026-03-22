@@ -2816,8 +2816,10 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
     }
 
+    bool is_pv = (b - a > 1);  // True if we are in a principal variation node
+
     // Futility pruning
-    if (!in_check && last_capture == EMPTY && depth < FP_DEPTH) {
+    if (!is_pv && !in_check && last_capture == EMPTY && depth < FP_DEPTH) {
         int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
         int margin = FP_BASE + depth * FP_FACTOR;
         if (e + margin <= a) {
@@ -2832,7 +2834,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
 
     // Null move pruning
     bool is_null_move_allowed = extensions < MAX_EXTENSION;
-    if (!in_check && depth >= 3 && is_null_move_allowed && Chess_has_non_pawn_material(chess)) {
+    if (!is_pv && !in_check && depth >= 3 && is_null_move_allowed &&
+        Chess_has_non_pawn_material(chess)) {
         gamestate_t gamestate = Chess_make_null_move(chess);
         int R = (depth >= 6) ? 3 : 2;
         int score = -minimax(chess, endtime, depth - 1 - R, -b, -b + 1, EMPTY, MAX_EXTENSION);
@@ -2874,6 +2877,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     int original_a = a;
     int best_score = -INF;
     Move best_move = moves[0];
+    bool found_pv = false;  // Used for PVS
     for (int i = 0; i < n_moves; i++) {
         if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
         Move* move = &moves[i];
@@ -2887,13 +2891,14 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         Piece capture = Chess_make_move(chess, move);
 
         int score;
-        if (i == 0) {
+        if (!found_pv) {
             // principal variation search
             score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
         } else {
             // Late move reduction condition
             bool reduction_condition = depth >= 2 && !in_check && capture == EMPTY;
             int r = reduction_condition ? compute_reduction(depth, i) : 0;
+            r -= is_pv; // Reduce less if this is PV node
 
             // Reduce less aggressively in endgames
             if (chess->fullmoves >= FULLMOVES_ENDGAME && r > 1) r = r / 2;
@@ -2927,7 +2932,10 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         if (score > best_score) {
             best_score = score;
             best_move = *move;
-            if (score > a) a = score;
+            if (score > a) {
+                a = score;
+                found_pv = true;
+            }
         }
         if (score >= b) {
 #ifdef TRACK_BETA_CUTOFFS
