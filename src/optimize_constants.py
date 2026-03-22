@@ -1,7 +1,6 @@
 import copy
 import math
 import os
-from pprint import pprint
 import random
 import shutil
 import sys
@@ -101,60 +100,6 @@ with open("data/training.txt", "r") as f:
         if fen:
             CUTOFF_FENS.append(fen)
 
-best_consts: dict = {
-    "PAWN_RANK_BONUS": 7,
-    "PAWN_VALUE": 113,
-    "KNIGHT_VALUE": 340,
-    "BISHOP_VALUE": 377,
-    "ROOK_VALUE": 508,
-    "QUEEN_VALUE": 958,
-    "KING_VALUE": 400,
-    "PROMOTION_MOVE_SCORE": 9232,
-    "FULLMOVES_ENDGAME": 55,
-    "QUIES_DEPTH": 9,
-    "MAX_EXTENSION": 2,
-    "KILLER_MOVE_BONUS": 59,
-    "PAWN_VICTIM_SCORE": 88,
-    "KNIGHT_VICTIM_SCORE": 127,
-    "BISHOP_VICTIM_SCORE": 116,
-    "ROOK_VICTIM_SCORE": 126,
-    "QUEEN_VICTIM_SCORE": 167,
-    "KING_VICTIM_SCORE": 88,
-    "PAWN_AGGRO_SCORE": 28,
-    "KNIGHT_AGGRO_SCORE": 55,
-    "BISHOP_AGGRO_SCORE": 64,
-    "ROOK_AGGRO_SCORE": 64,
-    "QUEEN_AGGRO_SCORE": 96,
-    "KING_AGGRO_SCORE": 37,
-    "SELECT_MOVE_CUTOFF": 12,
-    "PRIORITY_LINES": 4,
-    "KING_SAFETY_FACTOR1": 25,
-    "KING_SAFETY_FACTOR2": 7,
-    "KING_SAFETY_FACTOR3": 43,
-    "ASP_WINDOW_ALPHA_INIT": 20,
-    "ASP_WINDOW_BETA_INIT": 20,
-    "TT_MOVE_BONUS": 20000,
-    "FP_DEPTH": 13,
-    "FP_BASE": 116,
-    "FP_FACTOR": 104,
-    "RFP_BASE": 195,
-    "RFP_FACTOR": 124,
-    "CASTLE_BONUS": 30,
-    "PS_BLACK_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, -50, -52, -50, -50, -50, -50, -50, -48, -9, -10, -20, -33, -30, -20, -11, -10, -4, -2, -10, -24, -26, -10, -6, -6, 0, 0, 0, -20, -20, 0, 0, 0, -4, 4, 9, 0, 0, 11, 5, -6, -5, -10, -10, 20, 20, -10, -10, -4, 0, 0, 0, 0, 0, 0, 0, 0],
-    "PS_WHITE_PAWN": [0, 0, 0, 0, 0, 0, 0, 0, 6, 9, 10, -20, -20, 10, 10, 5, 5, -5, -10, 0, 0, -10, -5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, 5, 11, 23, 25, 11, 5, 5, 10, 9, 19, 30, 30, 20, 10, 10, 50, 50, 48, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0],
-    "PS_BLACK_KNIGHT": [50, 40, 31, 30, 30, 30, 40, 50, 40, 20, 0, 0, 0, 0, 20, 37, 30, 0, -10, -15, -15, -10, 0, 32, 33, -5, -15, -19, -20, -15, -5, 30, 30, 0, -15, -20, -20, -15, 0, 30, 33, -5, -10, -15, -15, -10, -5, 30, 40, 20, 0, -5, -5, 0, 20, 37, 50, 40, 30, 32, 30, 30, 40, 52],
-    "PS_WHITE_KNIGHT": [-50, -40, -30, -30, -30, -30, -40, -50, -40, -20, 0, 5, 5, 0, -20, -40, -30, 5, 10, 15, 15, 10, 5, -30, -30, 0, 15, 21, 20, 16, 0, -31, -30, 5, 15, 20, 20, 15, 5, -30, -30, 0, 9, 15, 14, 11, 0, -31, -40, -20, 0, 0, 0, 0, -20, -40, -50, -40, -30, -30, -30, -30, -40, -50],
-    "PS_BLACK_BISHOP": [19, 9, 9, 11, 10, 9, 9, 20, 10, 0, 0, 0, 0, 0, 0, 10, 10, 0, -5, -10, -10, -5, 0, 10, 9, -5, -4, -10, -10, -5, -5, 10, 10, 0, -11, -10, -10, -10, 0, 10, 9, -11, -10, -10, -11, -10, -10, 10, 11, -5, 0, 0, 0, 0, -4, 10, 20, 10, 10, 10, 10, 10, 10, 18],
-    "PS_WHITE_BISHOP": [-20, -10, -10, -11, -10, -10, -11, -20, -10, 4, 0, 0, 0, 0, 7, -10, -10, 10, 10, 9, 9, 10, 10, -10, -10, 0, 9, 10, 10, 10, 0, -10, -10, 6, 6, 10, 10, 5, 5, -10, -10, 0, 5, 10, 10, 4, 0, -10, -10, 0, 0, 0, 0, 0, 0, -10, -20, -10, -10, -9, -10, -10, -10, -20],
-    "PS_BLACK_ROOK": [0, 0, 0, 0, 0, 0, 0, 0, -3, -10, -11, -10, -10, -10, -11, -4, 6, 0, 0, 0, 0, 0, 0, 5, 6, 0, 0, 0, 0, 0, 0, 4, 5, 0, 0, 0, 0, 0, 0, 4, 5, 0, 0, 0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, -4, -5, 0, 0, 0],
-    "PS_WHITE_ROOK": [0, 0, 0, 5, 5, 0, 0, 0, -4, 0, 0, 0, 0, 0, 0, -4, -5, 0, 0, 0, 0, 0, 0, -5, -4, 0, 0, 0, 0, 0, 0, -5, -6, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -4, 5, 10, 10, 10, 9, 10, 10, 5, 0, 0, 0, 0, 0, 0, 0, 0],
-    "PS_BLACK_QUEEN": [20, 10, 10, 4, 5, 10, 10, 20, 10, 0, 0, 0, 0, 0, 0, 10, 10, 0, -5, -5, -4, -5, 0, 10, 5, 0, -5, -5, -4, -3, 0, 5, 0, 0, -4, -5, -5, -5, 0, 5, 10, -5, -5, -5, -5, -5, 0, 10, 10, 0, -5, 0, 0, 0, 0, 10, 20, 10, 9, 5, 5, 10, 10, 20],
-    "PS_WHITE_QUEEN": [-21, -10, -11, -5, -5, -10, -10, -20, -10, 0, 5, 0, 0, 0, 0, -9, -10, 5, 5, 5, 5, 5, 0, -10, 0, 0, 6, 5, 5, 5, 0, -5, -5, 0, 5, 5, 5, 5, 0, -5, -9, 0, 5, 5, 5, 5, 0, -10, -10, 0, 0, 0, 0, 0, 0, -10, -20, -10, -10, -5, -5, -10, -10, -22],
-    "PS_BLACK_KING": [30, 39, 39, 53, 50, 40, 40, 31, 30, 40, 43, 50, 50, 36, 40, 30, 27, 40, 40, 50, 47, 39, 40, 31, 30, 40, 33, 50, 50, 40, 40, 30, 20, 25, 30, 40, 40, 30, 30, 20, 10, 20, 21, 21, 20, 21, 20, 10, -20, -20, 0, 0, 0, 0, -20, -20, -20, -30, -9, 0, 0, -10, -32, -20],
-    "PS_WHITE_KING": [20, 27, 11, 0, 0, 10, 28, 20, 18, 20, 0, 0, 0, 0, 20, 18, -10, -20, -20, -20, -21, -20, -22, -10, -21, -31, -31, -40, -40, -31, -30, -20, -30, -40, -40, -50, -50, -40, -40, -27, -27, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -51, -50, -40, -40, -30, -30, -37, -40, -50, -56, -40, -36, -29],
-    "PS_BLACK_KING_ENDGAME": [50, 40, 30, 20, 20, 28, 40, 48, 30, 19, 11, 0, 0, 10, 20, 30, 31, 10, -20, -30, -30, -20, 10, 32, 30, 10, -29, -37, -40, -30, 9, 33, 30, 10, -31, -40, -40, -30, 9, 30, 30, 10, -21, -30, -30, -20, 11, 27, 30, 31, 0, 0, 0, 0, 30, 29, 50, 30, 27, 29, 32, 30, 30, 50],
-    "PS_WHITE_KING_ENDGAME": [-50, -28, -30, -30, -29, -30, -30, -50, -30, -30, 0, 0, 0, 0, -30, -32, -30, -10, 20, 30, 30, 20, -11, -30, -32, -10, 30, 41, 40, 30, -10, -32, -30, -10, 30, 40, 39, 30, -10, -30, -30, -9, 19, 31, 30, 20, -10, -30, -30, -20, -10, 0, 0, -10, -20, -30, -50, -40, -30, -20, -21, -29, -40, -49],
-}
 
 ZOBRIST_CONSTANTS = """
 // Zobrist hashing values
@@ -194,13 +139,41 @@ def make_const_file(consts: dict) -> str:
     text += ZOBRIST_CONSTANTS + "\n"
     return text
 
-# Make sure consts.c is updated with the best constants
+
+# Read the current constants from consts.c
+best_consts = {}
 with open("src/consts.c", "r") as f:
     current_consts = f.read()
-    if current_consts != make_const_file(best_consts):
-        print("best constants are not updated in optimize_constants.py")
-        sys.exit(1)
     
+    for line in current_consts.splitlines():
+        if line.startswith("#define "):
+            parts = line.split()
+            assert len(parts) == 3
+            const_name = parts[1]
+            const_value = int(parts[2])
+            best_consts[const_name] = const_value
+        elif line.startswith("const int "):
+            assert "[]" in line and "{" in line and "};" in line
+            const_name = line.split()[2].removesuffix("[]")
+            array_values = line[line.find("{")+1:line.find("}")].split(",")
+            best_consts[const_name] = [int(v.strip()) for v in array_values]
+        else:
+            continue
+
+
+# If consts.c != consts_backup.c, ask for confirmation
+if os.path.exists("src/consts_backup.c"):
+    with open("src/consts.c", "r") as f:
+        current_consts = f.read()
+    with open("src/consts_backup.c", "r") as f:
+        backup_consts = f.read()
+    
+    if current_consts != backup_consts:
+        print("Warning: src/consts.c has been modified since the last backup.")
+        response = input("Do you want to continue and overwrite the backup? (y/n) ")
+        if response.lower() != "y":
+            print("Exiting without making changes.")
+            sys.exit(0)
 
 # Make a backup copy of consts.c
 shutil.copyfile("src/consts.c", "src/consts_backup.c")

@@ -1,3 +1,4 @@
+from datetime import timedelta
 import os
 from pprint import pprint
 import optimize_constants
@@ -7,6 +8,7 @@ from random import random
 import math
 import shutil
 import copy
+import matplotlib.pyplot as plt
 
 
 type Consts = dict[str, float | list[float]]
@@ -29,16 +31,15 @@ def generate_delta(consts: Consts) -> Consts:
     return delta
 
 
-def perturbation_magnitude(consts: Consts, ck: float) -> Consts:
-    """Per-parameter perturbation magnitudes: max(1, round(ck * |theta_i|))."""
+def perturbation_magnitude(consts: Consts, ck: float, scalar_floor: int = 2) -> Consts:
     mag: Consts = {}
     for key, value in consts.items():
         if isinstance(value, list):
+            # PSQT: floor of 1 is fine, values are typically large
             mag[key] = [max(1, int(round(ck * max(1.0, abs(v))))) for v in value]
         elif isinstance(value, (int, float)):
-            mag[key] = max(1, int(round(ck * max(1.0, abs(value)))))
-        else:
-            raise ValueError(f"Unsupported type for constant '{key}': {type(value)}")
+            # Scalars: higher floor so gradient denominator isn't always 2
+            mag[key] = max(scalar_floor, int(round(ck * max(1.0, abs(value)))))
     return mag
 
 
@@ -65,7 +66,9 @@ def zeros_like_consts(consts: Consts) -> Consts:
     return out
 
 
-def apply_integer_accumulated_step(consts: Consts, gradient: Consts, ak: float, residuals: Consts) -> tuple[Consts, Consts, int]:
+def apply_integer_accumulated_step(
+    consts: Consts, gradient: Consts, ak: float, residuals: Consts
+) -> tuple[Consts, Consts, int]:
     """
     Apply SPSA step while respecting integer constants in consts.c generation.
 
@@ -94,13 +97,15 @@ def apply_integer_accumulated_step(consts: Consts, gradient: Consts, ak: float, 
             updated_consts[key] = new_values
             updated_residuals[key] = new_residuals
         else:
-            raw_step = res + ak * grad  # type: ignore[operator]
+            raw_step = res + ak * grad
             int_step = math.floor(raw_step) if raw_step >= 0 else math.ceil(raw_step)
             if int_step != 0:
                 nonzero_steps += 1
-            # Match consts.c scalar behavior.
-            updated_consts[key] = max(1.0, value + int_step)
-            updated_residuals[key] = raw_step - int_step
+            new_value = max(1.0, value + int_step)
+            # Compute residual based on the step actually applied, not int_step
+            actual_step = new_value - value
+            updated_consts[key] = new_value
+            updated_residuals[key] = raw_step - actual_step
 
     return updated_consts, updated_residuals, nonzero_steps
 
@@ -110,10 +115,7 @@ def apply_perturbation(consts: Consts, delta: Consts, mag: Consts, sign: int) ->
     out: Consts = {}
     for key, value in consts.items():
         if isinstance(value, list):
-            out[key] = [
-                v + sign * mag[key][i] * delta[key][i]  # type: ignore[index]
-                for i, v in enumerate(value)
-            ]
+            out[key] = [v + sign * mag[key][i] * delta[key][i] for i, v in enumerate(value)]  # type: ignore[index]
         else:
             out[key] = value + sign * mag[key] * delta[key]  # type: ignore[index]
     return out
@@ -133,7 +135,7 @@ def evaluate_pair(plus_exe: str, minus_exe: str, n_games: int) -> tuple[float, f
     score_diff_raw = wins - losses in [-n_games, n_games]
     score_diff_norm = (wins - losses) / n_games in [-1, 1]
     """
-    results = optimize_constants.tournament_result(plus_exe, minus_exe, required_score=-10**9, n_games=n_games)
+    results = optimize_constants.tournament_result(plus_exe, minus_exe, required_score=-(10**9), n_games=n_games)
     score_diff_raw = float(results["wins"] - results["losses"])
     score_diff_norm = score_diff_raw / max(1, n_games)
     return score_diff_raw, score_diff_norm, float(results["elo"])
@@ -187,7 +189,10 @@ def spsa(
     consts: Consts = copy.deepcopy(optimize_constants.best_consts)
     best_consts: Consts = copy.deepcopy(consts)
     residuals: Consts = zeros_like_consts(consts)
-    best_elo = float("-inf")
+    checkpoint_ran = False
+    best_elo = 0
+    checkpoint_elos: list[float] = []
+    print(f"Trainable params: {len(consts)} keys")
 
     baseline_exe = optimize_constants.executable("baseline_engine")
     plus_exe = optimize_constants.executable("perturbed_plus_engine")
@@ -228,23 +233,37 @@ def spsa(
                 build_engine(consts, current_exe)
                 elo = evaluate_vs_baseline(current_exe, baseline_exe, n_games=checkpoint_games)
                 print(f"  Checkpoint vs baseline: {elo:+.1f} Elo ({checkpoint_games} games)")
+                checkpoint_ran = True
                 if elo > best_elo:
                     best_elo = elo
                     best_consts = copy.deepcopy(consts)
                     print(f"  New best checkpoint constants: {best_elo:+.1f} Elo")
-    
+                checkpoint_elos.append(elo)
     except KeyboardInterrupt:
         print("SPSA optimization interrupted by user. Writing current best constants to src/consts.c.")
-         
+
     finally:
-        if best_elo != float("-inf"):
-            consts = best_consts
+        consts = best_consts if checkpoint_ran else consts
         with open("src/consts.c", "w") as f:
             f.write(optimize_constants.make_const_file(consts))
         print("Final best constants written to src/consts.c")
         for exe in [baseline_exe, plus_exe, minus_exe, current_exe]:
             if os.path.exists(exe):
                 os.remove(exe)
+
+        # Make a graph of checkpoint Elo over time if we have multiple checkpoints
+        if len(checkpoint_elos) > 1:
+            plt.plot(
+                range(checkpoint_every, checkpoint_every * len(checkpoint_elos) + 1, checkpoint_every),
+                checkpoint_elos,
+                marker="o",
+            )
+            plt.title(f"SPSA Checkpoint Elo Over Iterations ({n_games} games/iter)")
+            plt.xlabel("Iteration")
+            plt.ylabel("Elo vs Baseline")
+            plt.grid()
+            plt.savefig("spsa_checkpoint_elo.png")
+            print("Checkpoint Elo graph saved as spsa_checkpoint_elo.png")
 
 
 if __name__ == "__main__":
@@ -253,7 +272,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--A", type=float, default=20, help="SPSA constant A, which controls the stability of the algorithm."
     )
-    parser.add_argument("--a", type=float, default=2.0, help="SPSA constant a, which controls the initial step size.")
+    parser.add_argument("--a", type=float, default=4, help="SPSA constant a, which controls the initial step size.")
     parser.add_argument(
         "--c", type=float, default=0.2, help="SPSA constant c, which controls the magnitude of the perturbation."
     )
@@ -272,6 +291,14 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    time_estimate = timedelta(
+        seconds=(
+            args.iterations * args.games
+            + (args.iterations // args.checkpoint_every * args.checkpoint_games if args.checkpoint_every > 0 else 0)
+        )
+        * 12  # Rough estimate: 12 seconds per game pair on CPU
+    )
+    print(f"Estimated total runtime: {time_estimate}")
     spsa(
         args.iterations,
         args.A,
