@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -11,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <assert.h>
 
 #include "consts.c"
 
@@ -1010,7 +1010,7 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     if (moving_piece == WHITE_PAWN) {
         chess->pawn_row_sum += index_row(move->to - move->from + 1);
         if (target_piece == BLACK_PAWN) chess->pawn_row_sum -= index_row(move->to) - 6;
-        
+
         if (move->promotion != NO_PROMOTION) {
             chess->pawn_row_sum -= index_row(move->to) - 1;
             chess->number_of_pawns--;
@@ -1190,7 +1190,7 @@ void Chess_unmake_null_move(Chess* chess, gamestate_t gamestate) {
 
 bool Chess_has_non_pawn_material(Chess* chess) {
     int number_of_piece = __builtin_popcountll(chess->bb_white | chess->bb_black);
-    return number_of_piece - chess->number_of_pawns > 2; // 2 because of the kings
+    return number_of_piece - chess->number_of_pawns > 2;  // 2 because of the kings
 }
 
 // Parse and make a user move in algebraic notation (e.g. "e2e4")
@@ -2816,29 +2816,36 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
     }
 
+    int static_eval = 12345;  // Random uninitialized value
+
     // Futility pruning
-    int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
     if (!in_check && last_capture == EMPTY && depth < FP_DEPTH) {
+        static_eval = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
         int margin = FP_BASE + depth * FP_FACTOR;
-        if (e + margin <= a) {
+        if (static_eval + margin <= a) {
             return TT_store(hash, a, depth, TT_UPPER, 0, 0);  // Failed low
         }
 
         margin = RFP_BASE + depth * RFP_FACTOR;
-        if (e - 2 * margin >= b) {
+        if (static_eval - 2 * margin >= b) {
             return TT_store(hash, b, depth, TT_LOWER, 0, 0);  // Failed high
         }
     }
 
     // Null move pruning
     bool is_null_move_allowed = extensions < MAX_EXTENSION;
-    if (e >= b && !in_check && depth >= 3 && is_null_move_allowed && Chess_has_non_pawn_material(chess)) {
-        gamestate_t gamestate = Chess_make_null_move(chess);
-        int R = (depth >= 6) ? 3 : 2;
-        int score = -minimax(chess, endtime, depth - 1 - R, -b, -b + 1, EMPTY, MAX_EXTENSION);
-        Chess_unmake_null_move(chess, gamestate);
+    if (!in_check && depth >= 3 && is_null_move_allowed && Chess_has_non_pawn_material(chess)) {
+        if (static_eval == 12345) static_eval = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
+        
+        if (static_eval >= b) {
+            gamestate_t gamestate = Chess_make_null_move(chess);
+            int R = (depth >= 6) ? 3 : 2;
+            int score = -minimax(chess, endtime, depth - 1 - R, -b, -b + 1, EMPTY, MAX_EXTENSION);
+            Chess_unmake_null_move(chess, gamestate);
+    
+            if (score >= b) return b;  // Null move cutoff
+        }
 
-        if (score >= b) return b;  // Null move cutoff
     }
 
     // Prioritize TT best move
