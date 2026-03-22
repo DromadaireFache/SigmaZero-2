@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <assert.h>
 
 #include "consts.c"
 
@@ -524,6 +525,7 @@ class {
     Move killer_moves[2][64];  // Used for move ordering [id][depth]
     bool white_has_castled;
     bool black_has_castled;
+    uint8_t number_of_pawns;
 }
 Chess;
 
@@ -627,6 +629,13 @@ void Chess_find_kings(Chess* chess) {
         } else if (piece == BLACK_KING) {
             chess->king_black = i;
         }
+    }
+}
+
+void Chess_find_pawns(Chess* chess) {
+    for (int i = 0; i < 64; i++) {
+        Piece piece = chess->board[i];
+        if (piece == WHITE_PAWN || piece == BLACK_PAWN) chess->number_of_pawns++;
     }
 }
 
@@ -875,6 +884,9 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->halfmoves = 0;
     }
 
+    // Update number of pawns
+    if (Piece_is_pawn(target_piece)) chess->number_of_pawns--;
+
     // Update fullmove number
     if (chess->turn == TURN_BLACK) {
         chess->fullmoves++;
@@ -982,6 +994,7 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->board[move->to - 8] = EMPTY;
         chess->pawn_row_sum += 2;
         chess->bb_black &= ~bitboard_from_index(move->to - 8);
+        chess->number_of_pawns--;
     } else if (moving_piece == BLACK_PAWN && index_col(move->from) != index_col(move->to) &&
                target_piece == EMPTY) {
         // Black pawn capturing en passant
@@ -990,29 +1003,31 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->board[move->to + 8] = EMPTY;
         chess->pawn_row_sum -= 2;
         chess->bb_white &= ~bitboard_from_index(move->to + 8);
+        chess->number_of_pawns--;
     }
 
     // Handle promotion and update pawn row sum number
     if (moving_piece == WHITE_PAWN) {
         chess->pawn_row_sum += index_row(move->to - move->from + 1);
         if (target_piece == BLACK_PAWN) chess->pawn_row_sum -= index_row(move->to) - 6;
+        
+        if (move->promotion != NO_PROMOTION) {
+            chess->pawn_row_sum -= index_row(move->to) - 1;
+            chess->number_of_pawns--;
+        }
 
         switch (move->promotion) {
             case PROMOTE_QUEEN:
                 moving_piece = WHITE_QUEEN;
-                chess->pawn_row_sum -= index_row(move->to) - 1;
                 break;
             case PROMOTE_ROOK:
                 moving_piece = WHITE_ROOK;
-                chess->pawn_row_sum -= index_row(move->to) - 1;
                 break;
             case PROMOTE_BISHOP:
                 moving_piece = WHITE_BISHOP;
-                chess->pawn_row_sum -= index_row(move->to) - 1;
                 break;
             case PROMOTE_KNIGHT:
                 moving_piece = WHITE_KNIGHT;
-                chess->pawn_row_sum -= index_row(move->to) - 1;
                 break;
             default:
                 break;
@@ -1021,22 +1036,23 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->pawn_row_sum += index_row(move->to - move->from - 1);
         if (target_piece == WHITE_PAWN) chess->pawn_row_sum -= index_row(move->to) - 1;
 
+        if (move->promotion != NO_PROMOTION) {
+            chess->pawn_row_sum -= index_row(move->to) - 6;
+            chess->number_of_pawns--;
+        }
+
         switch (move->promotion) {
             case PROMOTE_QUEEN:
                 moving_piece = BLACK_QUEEN;
-                chess->pawn_row_sum -= index_row(move->to) - 6;
                 break;
             case PROMOTE_ROOK:
                 moving_piece = BLACK_ROOK;
-                chess->pawn_row_sum -= index_row(move->to) - 6;
                 break;
             case PROMOTE_BISHOP:
                 moving_piece = BLACK_BISHOP;
-                chess->pawn_row_sum -= index_row(move->to) - 6;
                 break;
             case PROMOTE_KNIGHT:
                 moving_piece = BLACK_KNIGHT;
-                chess->pawn_row_sum -= index_row(move->to) - 6;
                 break;
             default:
                 break;
@@ -1079,6 +1095,7 @@ void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
         case PROMOTE_QUEEN:
         case PROMOTE_ROOK:
             moving_piece = chess->turn == TURN_WHITE ? WHITE_PAWN : BLACK_PAWN;
+            chess->number_of_pawns++;
             break;
         default:
             moving_piece = chess->board[move->to];
@@ -1087,6 +1104,7 @@ void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
 
     chess->board[move->from] = moving_piece;
     chess->board[move->to] = capture;
+    if (Piece_is_pawn(capture)) chess->number_of_pawns++;
 
     if (Piece_is_king(moving_piece)) {
         // castling
@@ -1124,6 +1142,7 @@ void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
             } else {
                 chess->board[col + 24] = WHITE_PAWN;
             }
+            chess->number_of_pawns++;
         }
     }
 
@@ -1162,6 +1181,11 @@ void Chess_unmake_null_move(Chess* chess, gamestate_t gamestate) {
     // Switch turn
     chess->zhash ^= ZHASH_WHITE ^ ZHASH_BLACK;
     chess->turn = !chess->turn;
+}
+
+bool Chess_has_non_pawn_material(Chess* chess) {
+    int number_of_piece = __builtin_popcountll(chess->bb_white | chess->bb_black);
+    return number_of_piece - chess->number_of_pawns > 2;
 }
 
 // Parse and make a user move in algebraic notation (e.g. "e2e4")
@@ -1358,6 +1382,7 @@ Chess* Chess_from_fen(char* fen) {
     }
     board->fullmoves = (uint8_t)fullmoves;
     Chess_find_kings(board);
+    Chess_find_pawns(board);
     Chess_init_eval(board);
     Chess_init_bb(board);
     board->zhash = Chess_zhash(board);
@@ -2803,14 +2828,13 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
 
     // Null move pruning
     bool is_null_move_allowed = extensions < MAX_EXTENSION;
-    bool has_non_pawn_material = true;  // TODO, implement for zugzwang in endgames with only pawns
-    if (!in_check && depth >= 3 && is_null_move_allowed && has_non_pawn_material) {
+    if (!in_check && depth >= 3 && is_null_move_allowed && Chess_has_non_pawn_material(chess)) {
         gamestate_t gamestate = Chess_make_null_move(chess);
         const int R = 2;
         int score = -minimax(chess, endtime, depth - 1 - R, -b, -b + 1, EMPTY, MAX_EXTENSION);
         Chess_unmake_null_move(chess, gamestate);
 
-        if (score >= b) return b; // Null move cutoff
+        if (score >= b) return b;  // Null move cutoff
     }
 
     // Prioritize TT best move
@@ -3201,7 +3225,7 @@ int play(char* fen, int millis, char* game_history) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.9.2 (2026-02-27)\n");
+    printf("SigmaZero Chess Engine 2.9.4 (2026-03-22)\n");
     return 0;
 }
 
