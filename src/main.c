@@ -1142,6 +1142,28 @@ void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
     }
 }
 
+gamestate_t Chess_make_null_move(Chess* chess) {
+    gamestate_t gamestate = chess->gamestate;
+    Chess_en_passant_set(chess, -1);
+    chess->zhash ^= ZHASH_STATE[chess->gamestate] ^ ZHASH_STATE[gamestate];
+
+    // Switch turn
+    chess->zhash ^= ZHASH_WHITE ^ ZHASH_BLACK;
+    chess->turn = !chess->turn;
+
+    // No need to update half move or full move clock since it won't matter much
+    return gamestate;
+}
+
+void Chess_unmake_null_move(Chess* chess, gamestate_t gamestate) {
+    chess->zhash ^= ZHASH_STATE[chess->gamestate] ^ ZHASH_STATE[gamestate];
+    chess->gamestate = gamestate;
+
+    // Switch turn
+    chess->zhash ^= ZHASH_WHITE ^ ZHASH_BLACK;
+    chess->turn = !chess->turn;
+}
+
 // Parse and make a user move in algebraic notation (e.g. "e2e4")
 // No validation is done, so the move must be legal
 Piece Chess_user_move(Chess* chess, char* move_input) {
@@ -2777,6 +2799,18 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         if (e - 2 * margin >= b) {
             return TT_store(hash, b, depth, TT_LOWER, 0, 0);  // Failed high
         }
+    }
+
+    // Null move pruning
+    bool is_null_move_allowed = extensions < MAX_EXTENSION;
+    bool has_non_pawn_material = true;  // TODO, implement for zugzwang in endgames with only pawns
+    if (!in_check && depth >= 3 && is_null_move_allowed && has_non_pawn_material) {
+        gamestate_t gamestate = Chess_make_null_move(chess);
+        const int R = 2;
+        int score = -minimax(chess, endtime, depth - 1 - R, -b, -b + 1, EMPTY, MAX_EXTENSION);
+        Chess_unmake_null_move(chess, gamestate);
+
+        if (score >= b) return b; // Null move cutoff
     }
 
     // Prioritize TT best move
