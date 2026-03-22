@@ -1170,11 +1170,16 @@ gamestate_t Chess_make_null_move(Chess* chess) {
     chess->zhash ^= ZHASH_WHITE ^ ZHASH_BLACK;
     chess->turn = !chess->turn;
 
+    // Push zhash
+    ZHashStack_push(&chess->zhstack, chess->zhash);
+
     // No need to update half move or full move clock since it won't matter much
     return gamestate;
 }
 
 void Chess_unmake_null_move(Chess* chess, gamestate_t gamestate) {
+    ZHashStack_pop(&chess->zhstack);
+
     chess->zhash ^= ZHASH_STATE[chess->gamestate] ^ ZHASH_STATE[gamestate];
     chess->gamestate = gamestate;
 
@@ -1185,7 +1190,7 @@ void Chess_unmake_null_move(Chess* chess, gamestate_t gamestate) {
 
 bool Chess_has_non_pawn_material(Chess* chess) {
     int number_of_piece = __builtin_popcountll(chess->bb_white | chess->bb_black);
-    return number_of_piece - chess->number_of_pawns > 2;
+    return number_of_piece - chess->number_of_pawns > 2; // 2 because of the kings
 }
 
 // Parse and make a user move in algebraic notation (e.g. "e2e4")
