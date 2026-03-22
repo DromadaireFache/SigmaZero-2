@@ -2817,9 +2817,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     }
 
     // Futility pruning
+    int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
     if (!in_check && last_capture == EMPTY && depth < FP_DEPTH) {
-        int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
-
         int margin = FP_BASE + depth * FP_FACTOR;
         if (e + margin <= a) {
             return TT_store(hash, a, depth, TT_UPPER, 0, 0);  // Failed low
@@ -2833,9 +2832,9 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
 
     // Null move pruning
     bool is_null_move_allowed = extensions < MAX_EXTENSION;
-    if (!in_check && depth >= 3 && is_null_move_allowed && Chess_has_non_pawn_material(chess)) {
+    if (e >= b && !in_check && depth >= 3 && is_null_move_allowed && Chess_has_non_pawn_material(chess)) {
         gamestate_t gamestate = Chess_make_null_move(chess);
-        const int R = 2;
+        int R = (depth >= 6) ? 3 : 2;
         int score = -minimax(chess, endtime, depth - 1 - R, -b, -b + 1, EMPTY, MAX_EXTENSION);
         Chess_unmake_null_move(chess, gamestate);
 
