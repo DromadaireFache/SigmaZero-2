@@ -673,34 +673,34 @@ def train_eval():
     
     
 def optimize_pruning(const: str, min_value: int, max_value: int):
-    def count_nodes() -> int:
+    def first_move_cutoff_pc() -> int:
         result = sigma_zero.command("minmax 6", True)
-        return result["nodes"]
+        return result["first_move_cutoff_%"]
     
     log(f"=== Optimizing pruning constant '{const}' within range [{min_value}, {max_value}] ===")
     best_const = best_consts[const]
-    best_value = count_nodes()
-    log(f"Tested {const}={best_const} -> Nodes: {best_value}")
-    nodes_results = {}
-    nodes_results[best_const] = best_value
+    best_value = first_move_cutoff_pc()
+    log(f"Tested {const}={best_const} -> first_move_cutoff_%: {best_value}")
+    results = {}
+    results[best_const] = best_value
     
     step = max(1, (max_value - min_value) // 25)
     best_consts[const] = min_value
     
     def test_const():
-        if best_consts[const] in nodes_results:
+        if best_consts[const] in results:
             return
         
         nonlocal best_value, best_const
         with open("src/consts.c", "w") as f:
             f.write(make_const_file(best_consts))
-        os.system("make")
-        nodes = count_nodes()
-        log(f"Tested {const}={best_consts[const]} -> Nodes: {nodes}")
-        nodes_results[best_consts[const]] = nodes
+        subprocess.run("make")
+        cutoff_pc = first_move_cutoff_pc()
+        log(f"Tested {const}={best_consts[const]} -> first_move_cutoff_%: {cutoff_pc}")
+        results[best_consts[const]] = cutoff_pc
         
-        if (nodes < best_value and nodes > 0) or best_value <= 0:
-            best_value = nodes
+        if (cutoff_pc > best_value and cutoff_pc > 0) or best_value <= 0:
+            best_value = cutoff_pc
             best_const = best_consts[const]
     
     # coarse search for min_value to max_value
@@ -712,19 +712,22 @@ def optimize_pruning(const: str, min_value: int, max_value: int):
     for c in range(max(min_value, best_const - step), min(max_value, best_const + step) + 1):
         best_consts[const] = c
         test_const()
-        
+    
+    best_value = max(results.values())
+    best_equivalents = {c for c, v in results.items() if v == best_value}
+    best_const = int(sum(best_equivalents) / len(best_equivalents))
     best_consts[const] = best_const
-    print(f"Best {const}: {best_const} with Nodes: {best_value}")
+    print(f"Best {const}: {best_const} with first_move_cutoff_%: {best_value}")
     with open("src/consts.c", "w") as f:
         f.write(make_const_file(best_consts))
         
     # Plot results
-    values, nodes = zip(*sorted(nodes_results.items()))
+    values, nodes = zip(*sorted(results.items()))
     plt.figure(figsize=(10, 6))
     plt.plot(values, nodes, marker='o')
-    plt.title(f"Effect of {const} on Nodes Searched")
+    plt.title(f"Effect of {const} on first_move_cutoff_%")
     plt.xlabel(const)
-    plt.ylabel("Nodes Searched")
+    plt.ylabel("first_move_cutoff_%")
     plt.show()
     
 

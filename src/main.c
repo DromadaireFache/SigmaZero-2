@@ -2124,23 +2124,6 @@ void Chess_score_move(Chess* chess, Move* move, int* score) {
     if unlikely (victim != EMPTY) {
         *score = Piece_victim_score(victim) - Piece_aggro_score(aggressor);
     } else {
-        // Deduct points if attacked by enemy pawns
-#define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)               \
-    if ((condition) && chess->board[move->to + (offset)] == (pawn)) { \
-        *score = -abs(Piece_value(aggressor));                        \
-        return;                                                       \
-    }
-        Position pos = Position_from_index(move->to);
-
-        if (chess->turn == TURN_WHITE && aggressor != WHITE_PAWN) {
-            ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col < 7, 9, BLACK_PAWN)
-            ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col > 0, 7, BLACK_PAWN)
-        } else if (chess->turn == TURN_BLACK && aggressor != BLACK_PAWN) {
-            ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col < 7, -7, WHITE_PAWN)
-            ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col > 0, -9, WHITE_PAWN)
-        }
-
-        // Not attacked by enemy pawns
         *score = 0;
     }
 }
@@ -3363,7 +3346,14 @@ int minmax_command(int depth) {
     printf("    \"time\" : %.3lf,\n", cpu_time);
 #ifdef TRACK_NODES
     size_t nodes = atomic_load(&nodes_searched);
-    printf("    \"nodes\": %zu\n", nodes);
+    printf("    \"nodes\": %zu,\n", nodes);
+#endif
+#ifdef TRACK_BETA_CUTOFFS
+    size_t cutoff_nodes = atomic_load(&total_nodes);
+    size_t cutoffs = atomic_load(&beta_cutoffs);
+    size_t first_cutoffs = atomic_load(&first_move_cutoffs);
+    double first_move_rate = cutoffs > 0 ? (double)first_cutoffs * 100.0 / cutoff_nodes : 0;
+    printf("    \"first_move_cutoff_%%\": %.2f\n", first_move_rate);
 #endif
     printf("}\n");
     return 0;
