@@ -2124,7 +2124,10 @@ void Chess_score_move(Chess* chess, Move* move, int* score) {
     if unlikely (victim != EMPTY) {
         *score = Piece_victim_score(victim) - Piece_aggro_score(aggressor);
     } else {
-        *score = 0;
+        // +2.12% improvement in first_move_cutoff_%
+        *score = (abs(Piece_value_at(aggressor, move->to)) -
+                  abs(Piece_value_at(aggressor, move->from))) /
+                 4;
     }
 }
 
@@ -3312,16 +3315,16 @@ int move_scores_command(Chess* chess) {
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
     size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, false);
-    // bool elipses = false;
+    bool elipses = false;
 
     for (int i = 0; i < n_moves; i++) {
-        // select_best_move(moves, scores, i, n_moves);
-        // if (scores[i] != 0) {
-        printf("%-5s %6d\n", Move_string(moves + i), scores[i]);
-        // } else if (!elipses) {
-        //     printf("...   %6d\n", 0);
-        //     elipses = true;
-        // }
+        select_best_move(moves, scores, i, n_moves);
+        if (scores[i] != 0) {
+            printf("%-5s %6d\n", Move_string(moves + i), scores[i]);
+        } else if (!elipses) {
+            printf("...   %6d\n", 0);
+            elipses = true;
+        }
     }
     return 0;
 }
@@ -3331,6 +3334,7 @@ int minmax_command(int depth) {
     if (f == NULL) return 1;
     char fen[1024];
     TIME_TYPE start = TIME_NOW();
+    int fens = 0;
 
     while (fgets(fen, 1024, f)) {
         memset(tt, 0, sizeof(tt));
@@ -3338,12 +3342,15 @@ int minmax_command(int depth) {
         Chess* chess = Chess_from_fen(fen);
         if (chess == NULL) continue;
         minimax(chess, UINT64_MAX, depth, -INF, INF, EMPTY, 0);
+        fens++;
+        if (TIME_DIFF_S(TIME_NOW(), start) > 60) break;
     }
 
     TIME_TYPE end = TIME_NOW();
     double cpu_time = TIME_DIFF_S(end, start);
     printf("{\n");
     printf("    \"time\" : %.3lf,\n", cpu_time);
+    printf("    \"fens\" : %d,\n", fens);
 #ifdef TRACK_NODES
     size_t nodes = atomic_load(&nodes_searched);
     printf("    \"nodes\": %zu,\n", nodes);

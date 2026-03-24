@@ -5,9 +5,14 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+import random
+import requests
+import zstandard # type: ignore
+import pickle as pkl
 
 import chess
 import chess.polyglot
+import chess.pgn
 import torch
 from torch import nn
 import tqdm
@@ -217,6 +222,94 @@ class ReplayBuffer:
         tensors = torch.stack([t for t, _ in batch])
         targets = torch.tensor([o for _, o in batch], dtype=torch.float32)
         return tensors, targets
+    
+    
+# Helper to load Lichess database of real games for initial learning
+def load_buffer_from_lichess_db(capacity: int = 200_000) -> ReplayBuffer:
+    """Load Lichess game database from data/lichess_db.pkl.
+
+    Returns a list of (FEN, outcome) tuples where outcome ∈ {1.0, 0.5, 0.0}.
+    """
+    if os.path.exists("data/lichess_db.pkl"):
+        print("Loading Lichess database from data/lichess_db.pkl...")
+        with open("data/lichess_db.pkl", "rb") as f:
+            return pkl.load(f)
+    
+    url = "https://database.lichess.org/standard/lichess_db_standard_rated_2014-01.pgn.zst"
+    print("Downloading Lichess database (111MB compressed)...")
+    r = requests.get(url, stream=True)
+    dctx = zstandard.ZstdDecompressor()
+    with open("data/lichess_db.txt", "wb") as f:
+        with dctx.stream_reader(r.raw) as reader:
+            while True:
+                chunk = reader.read(65536)
+                if not chunk:
+                    break
+                f.write(chunk)
+    
+    # Parse PGNs lines into (FEN, outcome) tuples
+    buffer = ReplayBuffer(capacity=capacity)
+    with open("data/lichess_db.txt") as f:
+        game_count = 0
+        position_count = 0
+        skipped_elo = 0
+        
+        while position_count < buffer.capacity:
+            game = chess.pgn.read_game(f)
+            if game is None:
+                break
+            
+            game_count += 1
+            
+            # Check elo filters
+            white_elo = game.headers.get("WhiteElo")
+            black_elo = game.headers.get("BlackElo")
+            
+            # Filter by elo (both players > 2000)
+            if not white_elo or not black_elo:
+                continue
+            try:
+                white_elo = int(white_elo)
+                black_elo = int(black_elo)
+            except ValueError:
+                continue
+            
+            if white_elo < 2000 or black_elo < 2000:
+                skipped_elo += 1
+                continue
+            
+            # Get game outcome
+            result = game.headers.get("Result", "*")
+            if result == "1-0":
+                outcome = 1.0
+            elif result == "0-1":
+                outcome = 0.0
+            elif result == "1/2-1/2":
+                outcome = 0.5
+            else:
+                continue
+            
+            # Extract positions from game
+            board = chess.Board()
+            positions = []
+            for move in game.mainline_moves():
+                positions.append(fen_to_tensor(board.fen()))
+                board.push(move)
+            
+            if positions:
+                buffer.add_game(positions, outcome, augment=False)
+                position_count += len(positions)
+            
+            if game_count % 100 == 0:
+                print(f"Loaded {game_count} games ({position_count} positions) from Lichess database...")
+        
+        print(f"Lichess database loaded: {game_count} games ({position_count} positions, "
+              f"{skipped_elo} skipped for elo)")
+    
+    if os.path.exists("data/lichess_db.txt"):
+        os.remove("data/lichess_db.txt")
+    pkl.dump(buffer, open("data/lichess_db.pkl", "wb"))
+    return buffer
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -225,17 +318,19 @@ class ReplayBuffer:
 @torch.no_grad()
 def self_play_game(
     evaluator: NNUEEvaluator,
-    max_moves: int = 400,
+    initial_fen: str,
+    max_moves: int = 150,
     temperature: float = 1.5,
     temp_drop_ply: int = 20,
     resign_threshold: float = 0.03,
     resign_count: int = 10,
+    return_draws: bool = True,
 ) -> tuple[list[torch.Tensor], float]:
     """Play one game of self-play using 1-ply batch evaluation.
 
     Returns (positions, outcome) where outcome ∈ {1.0, 0.5, 0.0}.
     """
-    board = chess.Board()
+    board = chess.Board(initial_fen)
     positions: list[torch.Tensor] = []
     consec_low = 0
 
@@ -281,20 +376,20 @@ def self_play_game(
         board.push(legal_moves[idx])
 
     # Final result
-    result_str = board.result(claim_draw=True)
+    result_str = board.result()
     if result_str == "1-0":
         return positions, 1.0
     elif result_str == "0-1":
         return positions, 0.0
-    return positions, 0.5
+    return (positions, 0.5) if return_draws else None
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Self-play training loop
 # ──────────────────────────────────────────────────────────────────────
 def self_play_train(
-    num_iterations: int = 100,
-    games_per_iter: int = 100,
+    num_iterations: int = 30,
+    games_per_iter: int = 30,
     epochs_per_iter: int = 5,
     batch_size: int = 256,
     buffer_capacity: int = 200_000,
@@ -320,13 +415,27 @@ def self_play_train(
         torch.device("cpu")
     )
     print(f"Using device: {device}")
+    
+    # Get starting FENs for self-play
+    with open("data/puzzles.txt", "r") as f:
+        puzzle_fens = [line.split(",")[0].strip() for line in f if line.strip()]
+    if not puzzle_fens:
+        print("No starting positions found in data/puzzles.txt")
+        return
+    with open("data/FENs.txt", "r") as f:
+        opening_fens = [line.strip() for line in f if line.strip()]
+    if not opening_fens:
+        print("No starting positions found in data/FENs.txt")
+        return
 
     evaluator = NNUEEvaluator(channels=128, num_blocks=8)
+    new_evaluator = True
     if os.path.exists("nnue_evaluator.pth"):
         try:
             evaluator.load_state_dict(
                 torch.load("nnue_evaluator.pth", map_location="cpu",
                            weights_only=True))
+            new_evaluator = False
             print("Resumed from existing checkpoint")
         except Exception:
             print("Could not load checkpoint — starting from scratch")
@@ -340,6 +449,29 @@ def self_play_train(
     criterion = nn.BCEWithLogitsLoss()
     buffer = ReplayBuffer(buffer_capacity)
 
+    # Learn from actual games to get off the ground, then switch to pure self-play
+    if new_evaluator:
+        buffer = load_buffer_from_lichess_db(1_000_000)
+        
+        print(f"\n{'═' * 60}")
+        print(f"  Initial training on Lichess database")
+        print(f"{'═' * 60}")
+        train_on_replay_buffer(
+            100,
+            batch_size,
+            device,
+            evaluator,
+            optimizer,
+            criterion,
+            buffer,
+            1000
+        )
+        
+        # Save checkpoint before starting self-play
+        torch.save(evaluator.state_dict(), "nnue_evaluator.pth")
+        print(f"  Initial checkpoint saved")
+
+    # Learn via self-play iterations
     for iteration in range(1, num_iterations + 1):
         iter_start = time.perf_counter()
         print(f"\n{'═' * 60}")
@@ -356,11 +488,23 @@ def self_play_train(
         results = {"W": 0, "B": 0, "D": 0}
         total_positions = 0
 
-        for _ in tqdm.tqdm(range(games_per_iter), desc="Self-play"):
-            positions, outcome = self_play_game(
-                cpu_model, max_moves=400,
-                temperature=temperature, temp_drop_ply=temp_drop_ply)
-            buffer.add_game(positions, outcome, augment=True)
+        for i in tqdm.tqdm(range(games_per_iter), desc="Self-play"):
+            # 50% of games with puzzle positions, 50% from opening position FENs
+            if i % 2 == 0:
+                # Play until we get a non-draw result (engine is too weak to learn much from draws)
+                self_play_result = None
+                while self_play_result is None:
+                    self_play_result = self_play_game(
+                        cpu_model, random.choice(puzzle_fens), max_moves=150,
+                        temperature=temperature, temp_drop_ply=temp_drop_ply, return_draws=False)
+            else:
+                # We allow draws from the opening positions
+                self_play_result = self_play_game(
+                    cpu_model, random.choice(opening_fens), max_moves=150,
+                    temperature=temperature, temp_drop_ply=temp_drop_ply)
+
+            positions, outcome = self_play_result
+            buffer.add_game(positions, outcome, augment=False)
             total_positions += len(positions)
             if outcome == 1.0:
                 results["W"] += 1
@@ -381,28 +525,40 @@ def self_play_train(
         evaluator.train()
         steps_per_epoch = max(1, len(buffer) // batch_size)
 
-        for epoch in range(1, epochs_per_iter + 1):
-            epoch_loss = 0.0
-            for _ in range(steps_per_epoch):
-                tensors, targets = buffer.sample_batch(batch_size)
-                tensors = tensors.to(device)
-                targets = targets.to(device)
-
-                optimizer.zero_grad(set_to_none=True)
-                logits = evaluator(tensors).squeeze(-1)
-                loss = criterion(logits, targets)
-                loss.backward()
-                nn.utils.clip_grad_norm_(evaluator.parameters(), max_norm=1.0)
-                optimizer.step()
-                epoch_loss += loss.item()
-
-            avg = epoch_loss / steps_per_epoch
-            print(f"    Epoch {epoch}/{epochs_per_iter}  loss {avg:.4f}")
+        train_on_replay_buffer(
+            epochs_per_iter,
+            batch_size,
+            device,
+            evaluator,
+            optimizer,
+            criterion,
+            buffer,
+            steps_per_epoch
+        )
 
         # ── 3. Save checkpoint ───────────────────────────────────────
         torch.save(evaluator.state_dict(), "nnue_evaluator.pth")
         elapsed = time.perf_counter() - iter_start
         print(f"  Checkpoint saved  ({elapsed:.1f}s)")
+
+def train_on_replay_buffer(epochs_per_iter, batch_size, device, evaluator, optimizer, criterion, buffer, steps_per_epoch):
+    for epoch in range(1, epochs_per_iter + 1):
+        epoch_loss = 0.0
+        for _ in range(steps_per_epoch):
+            tensors, targets = buffer.sample_batch(batch_size)
+            tensors = tensors.to(device)
+            targets = targets.to(device)
+
+            optimizer.zero_grad(set_to_none=True)
+            logits = evaluator(tensors).squeeze(-1)
+            loss = criterion(logits, targets)
+            loss.backward()
+            nn.utils.clip_grad_norm_(evaluator.parameters(), max_norm=1.0)
+            optimizer.step()
+            epoch_loss += loss.item()
+
+        avg = epoch_loss / steps_per_epoch
+        print(f"    Epoch {epoch}/{epochs_per_iter}  loss {avg:.4f}")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -792,5 +948,23 @@ if __name__ == "__main__":
             logit = model(t).item()
             wp = 1.0 / (1.0 + math.exp(-max(-20, min(20, logit))))
         print(f"NNUE logit: {logit:.4f}  P(white wins): {wp:.1%}")
+        
+        # Evaluate every legal moves resulting position and print the 3 best ones
+        board = chess.Board(sys.argv[1])
+        move_scores = {}
+        for move in board.legal_moves:
+            board.push(move)
+            t = fen_to_tensor(board.fen()).unsqueeze(0)
+            with torch.no_grad():
+                logit = model(t).item()
+                wp = 1.0 / (1.0 + math.exp(-max(-20, min(20, logit))))
+            move_scores[move.uci()] = wp
+            board.pop()
+        
+        best_moves = sorted(move_scores.items(), key=lambda x: x[1] if board.turn == chess.WHITE else 1 - x[1], reverse=True)[:3]
+        print("\nTop moves:")
+        for move, score in best_moves:
+            print(f"  {move}: P(white wins) = {score:.1%}")
+        
     else:
         self_play_train()

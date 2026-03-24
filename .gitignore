@@ -19,3 +19,4 @@ gmon.out
 profile*
 *.er
 magicbb/moves.o
+lichess_db.pkl
