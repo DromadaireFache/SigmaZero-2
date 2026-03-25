@@ -4,6 +4,7 @@ import sys
 import webview
 import chess
 import sigma_zero
+import nn_engine
 import nnue
 
 
@@ -32,7 +33,9 @@ class PreviousState:
 
 move_index = 0
 previous_states = [PreviousState.current()]
-evaluator = nnue.load_model("nnue_evaluator.pth")
+
+evaluator = nn_engine.load_model("NN_evaluator.pth") if os.path.exists("NN_evaluator.pth") else None
+nnue_model = nnue.load_model("nnue.pth") if os.path.exists("nnue.pth") else None
 
 
 def capture_diff() -> int:
@@ -183,8 +186,10 @@ class Api:
             result = sigma_zero.play(board, millis)
         elif version.lower() == "aggressive":
             result = sigma_zero.fancy(board, millis)
+        elif version.lower() == "nn":
+            result = nn_engine.play(board, millis, evaluator)
         elif version.lower() == "nnue":
-            result = nnue.play(board, millis, evaluator)
+            result = nnue.play(board, millis, nnue_model)
         else:
             sigma_zero.make(version)
             result = sigma_zero.old_play(board, millis)

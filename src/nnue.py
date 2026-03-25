@@ -1,970 +1,256 @@
-import math
 import os
-import random
-import sys
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-import random
-import requests
-import zstandard # type: ignore
-import pickle as pkl
 
-import chess
-import chess.polyglot
-import chess.pgn
 import torch
-from torch import nn
-import tqdm
+import torch.nn as nn
+import chess
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import argparse
+import sys
+import sigma_zero
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Number of input planes:
-#   12 piece planes (P N B R Q K × white/black)
-#    1 side-to-move plane (all 1s if white to move, all 0s otherwise)
-#    4 castling-rights planes (K/Q white, k/q black – full plane 1/0)
-#    1 en-passant plane (the target square marked 1)
-#   ── total: 18 planes of 8×8
-# ──────────────────────────────────────────────────────────────────────
-NUM_PLANES = 18
+class SigmoidScaledMSELoss(nn.Module):
+    def __init__(self, k: float):
+        super(SigmoidScaledMSELoss, self).__init__()
+        self.k = k
+
+    def forward(self, predictions: torch.Tensor, targets: torch.Tensor):
+        scaled_predictions = torch.sigmoid(predictions / self.k)
+        scaled_targets = torch.sigmoid(targets / self.k)
+        return torch.mean((scaled_predictions - scaled_targets) ** 2)
 
 
-def fen_to_tensor(fen: str) -> torch.Tensor:
-    """Encode a FEN string into an 18×8×8 float tensor."""
-    board = chess.Board(fen)
-    tensor = torch.zeros(NUM_PLANES, 8, 8, dtype=torch.float32)
-    piece_to_index = {
-        chess.PAWN: 0, chess.KNIGHT: 1, chess.BISHOP: 2,
-        chess.ROOK: 3, chess.QUEEN: 4, chess.KING: 5,
-    }
-
-    # --- 12 piece planes ---
-    for square in chess.SQUARES:
-        piece = board.piece_at(square)
-        if piece:
-            color_offset = 0 if piece.color == chess.WHITE else 6
-            idx = piece_to_index[piece.piece_type] + color_offset
-            row = chess.square_rank(square)
-            col = chess.square_file(square)
-            tensor[idx, row, col] = 1.0
-
-    # --- side-to-move plane (plane 12) ---
-    if board.turn == chess.WHITE:
-        tensor[12, :, :] = 1.0
-
-    # --- castling rights (planes 13-16) ---
-    if board.has_kingside_castling_rights(chess.WHITE):
-        tensor[13, :, :] = 1.0
-    if board.has_queenside_castling_rights(chess.WHITE):
-        tensor[14, :, :] = 1.0
-    if board.has_kingside_castling_rights(chess.BLACK):
-        tensor[15, :, :] = 1.0
-    if board.has_queenside_castling_rights(chess.BLACK):
-        tensor[16, :, :] = 1.0
-
-    # --- en-passant plane (plane 17) ---
-    if board.ep_square is not None:
-        row = chess.square_rank(board.ep_square)
-        col = chess.square_file(board.ep_square)
-        tensor[17, row, col] = 1.0
-
-    return tensor
-
-
-def _mirror_tensor(tensor: torch.Tensor) -> torch.Tensor:
-    """Colour-flip augmentation: swap white/black pieces, flip ranks,
-    swap side-to-move and castling planes."""
-    aug = torch.zeros_like(tensor)
-    # Swap white pieces (0-5) ↔ black pieces (6-11) AND flip ranks
-    aug[0:6] = tensor[6:12].flip(1)
-    aug[6:12] = tensor[0:6].flip(1)
-    # Invert side-to-move
-    aug[12] = 1.0 - tensor[12]
-    # Swap castling rights white ↔ black
-    aug[13] = tensor[15]
-    aug[14] = tensor[16]
-    aug[15] = tensor[13]
-    aug[16] = tensor[14]
-    # Flip en-passant rank
-    aug[17] = tensor[17].flip(0)
-    return aug
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Residual block used in the convolutional trunk
-# ──────────────────────────────────────────────────────────────────────
-class ResBlock(nn.Module):
-    def __init__(self, channels: int):
-        super().__init__()
-        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(channels)
-        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(channels)
+class NNUE(nn.Module):
+    def __init__(self, dropout_p: float = 0.10):
+        super(NNUE, self).__init__()
+        self.fc1 = nn.Linear(769, 128)
+        self.fc2 = nn.Linear(128, 32)
+        self.fc3 = nn.Linear(32, 1)
+        self.drop1 = nn.Dropout(dropout_p)
+        self.drop2 = nn.Dropout(dropout_p)
 
     def forward(self, x):
-        residual = x
-        out = torch.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out = torch.relu(out + residual)
-        return out
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Squeeze-and-Excitation block – cheap global context for each channel
-# ──────────────────────────────────────────────────────────────────────
-class SEBlock(nn.Module):
-    def __init__(self, channels: int, reduction: int = 4):
-        super().__init__()
-        mid = max(channels // reduction, 1)
-        self.fc1 = nn.Linear(channels, mid)
-        self.fc2 = nn.Linear(mid, channels)
-
-    def forward(self, x):
-        b, c, _, _ = x.shape
-        w = x.mean(dim=(2, 3))             # global avg pool → (B, C)
-        w = torch.relu(self.fc1(w))
-        w = torch.sigmoid(self.fc2(w))
-        return x * w.view(b, c, 1, 1)
-
-
-class SEResBlock(nn.Module):
-    """Residual block with Squeeze-and-Excitation."""
-    def __init__(self, channels: int):
-        super().__init__()
-        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(channels)
-        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(channels)
-        self.se = SEBlock(channels)
-
-    def forward(self, x):
-        residual = x
-        out = torch.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out = self.se(out)
-        out = torch.relu(out + residual)
-        return out
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Main model – ResNet-style value network
-#   input_conv  →  N×SE-ResBlock  →  value head (conv → fc → scalar)
-# ──────────────────────────────────────────────────────────────────────
-class NNUEEvaluator(nn.Module):
-    def __init__(self, channels: int = 128, num_blocks: int = 8):
-        super().__init__()
-        # --- trunk ---
-        self.input_conv = nn.Sequential(
-            nn.Conv2d(NUM_PLANES, channels, 3, padding=1, bias=False),
-            nn.BatchNorm2d(channels),
-            nn.ReLU(inplace=True),
-        )
-        self.res_tower = nn.Sequential(
-            *[SEResBlock(channels) for _ in range(num_blocks)]
-        )
-        # --- value head ---
-        head_channels = 32
-        self.value_conv = nn.Sequential(
-            nn.Conv2d(channels, head_channels, 1, bias=False),
-            nn.BatchNorm2d(head_channels),
-            nn.ReLU(inplace=True),
-        )
-        self.value_fc = nn.Sequential(
-            nn.Linear(head_channels * 64, 256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.25),
-            nn.Linear(256, 1),
-        )
-
-    def forward(self, x):
-        # x: (B, 18, 8, 8)
-        x = self.input_conv(x)
-        x = self.res_tower(x)
-        x = self.value_conv(x)
-        x = x.view(x.size(0), -1)
-        x = self.value_fc(x)
+        x = torch.clamp(torch.relu(self.fc1(x)), 0, 1)
+        x = self.drop1(x)
+        x = torch.clamp(torch.relu(self.fc2(x)), 0, 1)
+        x = self.drop2(x)
+        x = self.fc3(x)
         return x
 
-    def win_probability(self, x: torch.Tensor) -> torch.Tensor:
-        """Return P(white wins) ∈ [0, 1]."""
-        return torch.sigmoid(self.forward(x))
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Replay buffer for self-play training
-# ──────────────────────────────────────────────────────────────────────
-class ReplayBuffer:
-    """Fixed-capacity FIFO buffer of (position_tensor, game_outcome) pairs."""
-
-    def __init__(self, capacity: int = 200_000):
-        self.capacity = capacity
-        self.data: list[tuple[torch.Tensor, float]] = []
-
-    def add_game(self, positions: list[torch.Tensor], outcome: float,
-                 augment: bool = True):
-        """Add all positions from one game.
-
-        outcome: 1.0 = white won, 0.0 = black won, 0.5 = draw.
-        augment: also store the colour-flipped mirror of each position.
-        """
-        for t in positions:
-            self.data.append((t, outcome))
-            if augment:
-                self.data.append((_mirror_tensor(t), 1.0 - outcome))
-        if len(self.data) > self.capacity:
-            self.data = self.data[-self.capacity:]
-
-    def __len__(self) -> int:
-        return len(self.data)
-
-    def sample_batch(self, batch_size: int) -> tuple[torch.Tensor, torch.Tensor]:
-        batch = random.sample(self.data, min(batch_size, len(self.data)))
-        tensors = torch.stack([t for t, _ in batch])
-        targets = torch.tensor([o for _, o in batch], dtype=torch.float32)
-        return tensors, targets
-    
-    
-# Helper to load Lichess database of real games for initial learning
-def load_buffer_from_lichess_db(capacity: int = 200_000) -> ReplayBuffer:
-    """Load Lichess game database from data/lichess_db.pkl.
-
-    Returns a list of (FEN, outcome) tuples where outcome ∈ {1.0, 0.5, 0.0}.
-    """
-    if os.path.exists("data/lichess_db.pkl"):
-        print("Loading Lichess database from data/lichess_db.pkl...")
-        with open("data/lichess_db.pkl", "rb") as f:
-            return pkl.load(f)
-    
-    url = "https://database.lichess.org/standard/lichess_db_standard_rated_2014-01.pgn.zst"
-    print("Downloading Lichess database (111MB compressed)...")
-    r = requests.get(url, stream=True)
-    dctx = zstandard.ZstdDecompressor()
-    with open("data/lichess_db.txt", "wb") as f:
-        with dctx.stream_reader(r.raw) as reader:
-            while True:
-                chunk = reader.read(65536)
-                if not chunk:
-                    break
-                f.write(chunk)
-    
-    # Parse PGNs lines into (FEN, outcome) tuples
-    buffer = ReplayBuffer(capacity=capacity)
-    with open("data/lichess_db.txt") as f:
-        game_count = 0
-        position_count = 0
-        skipped_elo = 0
-        
-        while position_count < buffer.capacity:
-            game = chess.pgn.read_game(f)
-            if game is None:
-                break
-            
-            game_count += 1
-            
-            # Check elo filters
-            white_elo = game.headers.get("WhiteElo")
-            black_elo = game.headers.get("BlackElo")
-            
-            # Filter by elo (both players > 2000)
-            if not white_elo or not black_elo:
-                continue
-            try:
-                white_elo = int(white_elo)
-                black_elo = int(black_elo)
-            except ValueError:
-                continue
-            
-            if white_elo < 2000 or black_elo < 2000:
-                skipped_elo += 1
-                continue
-            
-            # Get game outcome
-            result = game.headers.get("Result", "*")
-            if result == "1-0":
-                outcome = 1.0
-            elif result == "0-1":
-                outcome = 0.0
-            elif result == "1/2-1/2":
-                outcome = 0.5
-            else:
-                continue
-            
-            # Extract positions from game
-            board = chess.Board()
-            positions = []
-            for move in game.mainline_moves():
-                positions.append(fen_to_tensor(board.fen()))
-                board.push(move)
-            
-            if positions:
-                buffer.add_game(positions, outcome, augment=False)
-                position_count += len(positions)
-            
-            if game_count % 100 == 0:
-                print(f"Loaded {game_count} games ({position_count} positions) from Lichess database...")
-        
-        print(f"Lichess database loaded: {game_count} games ({position_count} positions, "
-              f"{skipped_elo} skipped for elo)")
-    
-    if os.path.exists("data/lichess_db.txt"):
-        os.remove("data/lichess_db.txt")
-    pkl.dump(buffer, open("data/lichess_db.pkl", "wb"))
-    return buffer
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Self-play game generation
-# ──────────────────────────────────────────────────────────────────────
-@torch.no_grad()
-def self_play_game(
-    evaluator: NNUEEvaluator,
-    initial_fen: str,
-    max_moves: int = 150,
-    temperature: float = 1.5,
-    temp_drop_ply: int = 20,
-    resign_threshold: float = 0.03,
-    resign_count: int = 10,
-    return_draws: bool = True,
-) -> tuple[list[torch.Tensor], float]:
-    """Play one game of self-play using 1-ply batch evaluation.
-
-    Returns (positions, outcome) where outcome ∈ {1.0, 0.5, 0.0}.
-    """
-    board = chess.Board(initial_fen)
-    positions: list[torch.Tensor] = []
-    consec_low = 0
-
-    for ply in range(max_moves):
-        if board.is_game_over(claim_draw=True):
-            break
-        legal_moves = list(board.legal_moves)
-        if not legal_moves:
-            break
-
-        # Record current position
-        positions.append(fen_to_tensor(board.fen()))
-
-        # Evaluate every child position in one forward pass
-        child_tensors: list[torch.Tensor] = []
-        for m in legal_moves:
-            board.push(m)
-            child_tensors.append(fen_to_tensor(board.fen()))
-            board.pop()
-
-        batch = torch.stack(child_tensors)
-        logits = evaluator(batch).squeeze(-1)      # white-POV logits
-
-        # Flip so higher = better for side to move
-        if board.turn == chess.BLACK:
-            logits = -logits
-
-        # Temperature-based move selection
-        t = temperature if ply < temp_drop_ply else 0.1
-        probs = torch.softmax(logits / max(t, 0.01), dim=0)
-        idx = torch.multinomial(probs, 1).item()
-
-        # Early resignation: if best move still looks hopeless
-        best_logit = logits.max().item()
-        win_prob = 1.0 / (1.0 + math.exp(-max(-20, min(20, best_logit))))
-        if win_prob < resign_threshold:
-            consec_low += 1
-        else:
-            consec_low = 0
-        if consec_low >= resign_count:
-            return positions, (0.0 if board.turn == chess.WHITE else 1.0)
-
-        board.push(legal_moves[idx])
-
-    # Final result
-    result_str = board.result()
-    if result_str == "1-0":
-        return positions, 1.0
-    elif result_str == "0-1":
-        return positions, 0.0
-    return (positions, 0.5) if return_draws else None
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Self-play training loop
-# ──────────────────────────────────────────────────────────────────────
-def self_play_train(
-    num_iterations: int = 30,
-    games_per_iter: int = 30,
-    epochs_per_iter: int = 5,
-    batch_size: int = 256,
-    buffer_capacity: int = 200_000,
-    lr: float = 1e-4,
-    temperature: float = 1.5,
-    temp_drop_ply: int = 20,
-):
-    """Train the evaluator entirely through self-play.
-
-    The model output (raw logit) is trained with BCEWithLogitsLoss
-    against game outcomes (1.0 = white win, 0.5 = draw, 0.0 = black win).
-    sigmoid(output) gives P(white wins).
-
-    Each iteration:
-      1. Play `games_per_iter` games (CPU, 1-ply batch eval).
-      2. Store (position, outcome) in a replay buffer.
-      3. Train for `epochs_per_iter` on sampled mini-batches.
-      4. Save checkpoint.
-    """
-    device = (
-        torch.device("mps")  if torch.backends.mps.is_available() else
-        torch.device("cuda") if torch.cuda.is_available() else
-        torch.device("cpu")
-    )
-    print(f"Using device: {device}")
-    
-    # Get starting FENs for self-play
-    with open("data/puzzles.txt", "r") as f:
-        puzzle_fens = [line.split(",")[0].strip() for line in f if line.strip()]
-    if not puzzle_fens:
-        print("No starting positions found in data/puzzles.txt")
-        return
-    with open("data/FENs.txt", "r") as f:
-        opening_fens = [line.strip() for line in f if line.strip()]
-    if not opening_fens:
-        print("No starting positions found in data/FENs.txt")
-        return
-
-    evaluator = NNUEEvaluator(channels=128, num_blocks=8)
-    new_evaluator = True
-    if os.path.exists("nnue_evaluator.pth"):
-        try:
-            evaluator.load_state_dict(
-                torch.load("nnue_evaluator.pth", map_location="cpu",
-                           weights_only=True))
-            new_evaluator = False
-            print("Resumed from existing checkpoint")
-        except Exception:
-            print("Could not load checkpoint — starting from scratch")
-
-    evaluator = evaluator.to(device)
-    total_params = sum(p.numel() for p in evaluator.parameters())
-    print(f"Model parameters: {total_params:,}")
-
-    optimizer = torch.optim.AdamW(evaluator.parameters(), lr=lr,
-                                  weight_decay=1e-4)
-    criterion = nn.BCEWithLogitsLoss()
-    buffer = ReplayBuffer(buffer_capacity)
-
-    # Learn from actual games to get off the ground, then switch to pure self-play
-    if new_evaluator:
-        buffer = load_buffer_from_lichess_db(1_000_000)
-        
-        print(f"\n{'═' * 60}")
-        print(f"  Initial training on Lichess database")
-        print(f"{'═' * 60}")
-        train_on_replay_buffer(
-            100,
-            batch_size,
-            device,
-            evaluator,
-            optimizer,
-            criterion,
-            buffer,
-            1000
-        )
-        
-        # Save checkpoint before starting self-play
-        torch.save(evaluator.state_dict(), "nnue_evaluator.pth")
-        print(f"  Initial checkpoint saved")
-
-    # Learn via self-play iterations
-    for iteration in range(1, num_iterations + 1):
-        iter_start = time.perf_counter()
-        print(f"\n{'═' * 60}")
-        print(f"  Iteration {iteration}/{num_iterations}")
-        print(f"{'═' * 60}")
-
-        # ── 1. Self-play on CPU ──────────────────────────────────────
-        evaluator.eval()
-        cpu_model = NNUEEvaluator(channels=128, num_blocks=8)
-        cpu_model.load_state_dict(
-            {k: v.cpu() for k, v in evaluator.state_dict().items()})
-        cpu_model.eval()
-
-        results = {"W": 0, "B": 0, "D": 0}
-        total_positions = 0
-
-        for i in tqdm.tqdm(range(games_per_iter), desc="Self-play"):
-            # 50% of games with puzzle positions, 50% from opening position FENs
-            if i % 2 == 0:
-                # Play until we get a non-draw result (engine is too weak to learn much from draws)
-                self_play_result = None
-                while self_play_result is None:
-                    self_play_result = self_play_game(
-                        cpu_model, random.choice(puzzle_fens), max_moves=150,
-                        temperature=temperature, temp_drop_ply=temp_drop_ply, return_draws=False)
-            else:
-                # We allow draws from the opening positions
-                self_play_result = self_play_game(
-                    cpu_model, random.choice(opening_fens), max_moves=150,
-                    temperature=temperature, temp_drop_ply=temp_drop_ply)
-
-            positions, outcome = self_play_result
-            buffer.add_game(positions, outcome, augment=False)
-            total_positions += len(positions)
-            if outcome == 1.0:
-                results["W"] += 1
-            elif outcome == 0.0:
-                results["B"] += 1
-            else:
-                results["D"] += 1
-
-        print(f"  Results  W {results['W']}  B {results['B']}  "
-              f"D {results['D']}  |  +{total_positions} positions  "
-              f"|  buffer {len(buffer)}")
-
-        # ── 2. Train on replay buffer ────────────────────────────────
-        if len(buffer) < batch_size:
-            print("  Buffer too small, skipping training")
-            continue
-
-        evaluator.train()
-        steps_per_epoch = max(1, len(buffer) // batch_size)
-
-        train_on_replay_buffer(
-            epochs_per_iter,
-            batch_size,
-            device,
-            evaluator,
-            optimizer,
-            criterion,
-            buffer,
-            steps_per_epoch
-        )
-
-        # ── 3. Save checkpoint ───────────────────────────────────────
-        torch.save(evaluator.state_dict(), "nnue_evaluator.pth")
-        elapsed = time.perf_counter() - iter_start
-        print(f"  Checkpoint saved  ({elapsed:.1f}s)")
-
-def train_on_replay_buffer(epochs_per_iter, batch_size, device, evaluator, optimizer, criterion, buffer, steps_per_epoch):
-    for epoch in range(1, epochs_per_iter + 1):
-        epoch_loss = 0.0
-        for _ in range(steps_per_epoch):
-            tensors, targets = buffer.sample_batch(batch_size)
-            tensors = tensors.to(device)
-            targets = targets.to(device)
-
-            optimizer.zero_grad(set_to_none=True)
-            logits = evaluator(tensors).squeeze(-1)
-            loss = criterion(logits, targets)
-            loss.backward()
-            nn.utils.clip_grad_norm_(evaluator.parameters(), max_norm=1.0)
-            optimizer.step()
-            epoch_loss += loss.item()
-
-        avg = epoch_loss / steps_per_epoch
-        print(f"    Epoch {epoch}/{epochs_per_iter}  loss {avg:.4f}")
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Inference helpers
-# ──────────────────────────────────────────────────────────────────────
-def load_model(model_path: str) -> NNUEEvaluator:
-    evaluator = NNUEEvaluator()
-    evaluator.load_state_dict(
-        torch.load(model_path, map_location="cpu", weights_only=True)
-    )
-    evaluator.eval()
-    return evaluator
-
-
-def play(board: chess.Board, millis: int, evaluator: NNUEEvaluator) -> dict:
-    """Iterative-deepening alpha-beta search with the NNUE evaluator.
-
-    Features:
-      - Iterative deepening with time control (`millis` budget).
-      - Alpha-beta pruning with principal-variation move ordering.
-      - Transposition table (hash-map on Zobrist hash from python-chess).
-      - MVV-LVA move ordering for captures, killer/history heuristic.
-      - Quiescence search for captures to avoid horizon effects.
-      - Multithreaded root-move evaluation (Lazy SMP style).
-    """
-    engine = _SearchEngine(board, evaluator, millis)
-    return engine.search()
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Transposition-table entry
-# ──────────────────────────────────────────────────────────────────────
-FLAG_EXACT = 0
-FLAG_LOWER = 1   # beta cut-off  (score >= beta)
-FLAG_UPPER = 2   # failed low    (score <= alpha)
-
-
-@dataclass(slots=True)
-class TTEntry:
-    key: int
-    depth: int
-    score: float
-    flag: int
-    best_move: chess.Move | None
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Piece values for MVV-LVA ordering
-# ──────────────────────────────────────────────────────────────────────
-_PIECE_VAL = {
-    chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
-    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
-}
-
-_MATE_SCORE = 100_000.0
-_MAX_DEPTH  = 64
-
-
-class _SearchEngine:
-    """Self-contained search context for one `play()` call.
-
-    All scores are P(side-to-move wins) ∈ [0, 1].
-    Negamax negation uses  1 - score  instead of  -score.
-    Mate: 1.0 (side-to-move wins); 0.0 minus a small ply bonus (loss).
-    Draw: 0.5.
-    """
-
-    def __init__(self, board: chess.Board, evaluator: NNUEEvaluator,
-                 millis: int):
-        self.root_board = board.copy()
-        self.evaluator = evaluator
-        self.millis = millis
-        self.deadline: float = 0.0
-        self.nodes: int = 0
-        # Transposition table  (shared across threads via GIL)
-        self.tt: dict[int, TTEntry] = {}
-        # Killer moves  [depth] → list of up to 2 moves
-        self.killers: list[list[chess.Move]] = [[] for _ in range(_MAX_DEPTH)]
-        # History heuristic  (from_sq, to_sq) → score
-        self.history: dict[tuple[int, int], int] = {}
-
-    # ── fast NNUE eval ───────────────────────────────────────────────
-    def _evaluate(self, board: chess.Board) -> float:
-        """Return P(side-to-move wins) ∈ [0, 1].
-
-        sigmoid(raw_logit) gives P(white wins); we flip for black.
-        """
-        t = fen_to_tensor(board.fen()).unsqueeze(0)
+    def evaluate(self, board: chess.Board):
+        input_vector = board_to_input(board)
         with torch.no_grad():
-            wp = self.evaluator.win_probability(t).item()
-        return wp if board.turn == chess.WHITE else 1.0 - wp
+            return self.forward(input_vector).item()
 
-    def _is_time_up(self) -> bool:
-        return time.perf_counter() >= self.deadline
 
-    # ── move ordering ────────────────────────────────────────────────
-    def _order_moves(self, board: chess.Board, tt_move: chess.Move | None,
-                     depth: int) -> list[chess.Move]:
-        """Sort moves: TT move → captures (MVV-LVA) → killers → history."""
-        moves = list(board.legal_moves)
-        scores: list[tuple[int, chess.Move]] = []
+def board_to_input(board: chess.Board):
+    input_vector = torch.zeros(769, dtype=torch.float32)  # 768 for pieces + 1 for side to move
+    input_vector[768] = float(board.turn)  # 1.0 for white to move, 0.0 for black to move
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece is not None:
+            piece_type = piece.piece_type
+            color = int(piece.color)
+            index = (piece_type - 1) * 2 + color
+            input_vector[index * 64 + square] = 1
+    return input_vector
 
-        for m in moves:
-            s = 0
-            if m == tt_move:
-                s = 1_000_000
-            elif board.is_capture(m):
-                victim = board.piece_type_at(m.to_square) or chess.PAWN
-                attacker = board.piece_type_at(m.from_square) or chess.PAWN
-                s = 100_000 + _PIECE_VAL[victim] * 10 - _PIECE_VAL[attacker]
-            elif depth < _MAX_DEPTH and m in self.killers[depth]:
-                s = 50_000
-            else:
-                s = self.history.get((m.from_square, m.to_square), 0)
-            scores.append((s, m))
 
-        scores.sort(key=lambda x: x[0], reverse=True)
-        return [m for _, m in scores]
+def print_board(board: chess.Board):
+    print(board.fen(), "as input vector:")
+    input_vector = board_to_input(board)
+    for i in range(12):
+        piece_name = chess.PIECE_NAMES[i // 2 + 1]
+        color = "white" if i % 2 == 0 else "black"
+        print(f"{color} {piece_name}: {"".join(str(int(x)) for x in input_vector[i*64:(i+1)*64].tolist())}")
+    print(f"Side to move: {'white' if input_vector[768] == 1.0 else 'black'}")
 
-    # ── quiescence search ────────────────────────────────────────────
-    def _quiesce(self, board: chess.Board, alpha: float, beta: float) -> float:
-        """Quiescence: extend captures at leaf nodes. Scores in [0, 1]."""
-        self.nodes += 1
 
-        stand_pat = self._evaluate(board)
-        if stand_pat >= beta:
-            return beta
-        if stand_pat > alpha:
-            alpha = stand_pat
+class Dataset(torch.utils.data.Dataset):
+    def __init__(self, chess_data_path: str, max_samples: int = None):
+        self.positions = []
+        self.evaluations = []
+        with open(chess_data_path, "r") as f:
+            for line in tqdm(f, desc="Loading dataset"):
+                fen, eval_str = line.strip().split(",")
 
-        # Only search captures
-        captures = [m for m in board.legal_moves if board.is_capture(m)]
-        # MVV-LVA sort
-        captures.sort(
-            key=lambda m: _PIECE_VAL.get(
-                board.piece_type_at(m.to_square) or chess.PAWN, 0
-            ) * 10 - _PIECE_VAL.get(
-                board.piece_type_at(m.from_square) or chess.PAWN, 0
-            ),
-            reverse=True,
-        )
+                try:
+                    evaluation = float(eval_str) / 100.0  # Convert centipawns to pawns
+                except ValueError:
+                    continue  # Skip lines with invalid evaluation values
 
-        for m in captures:
-            if self._is_time_up():
-                return alpha
-            board.push(m)
-            score = 1.0 - self._quiesce(board, 1.0 - beta, 1.0 - alpha)
-            board.pop()
-            if score >= beta:
-                return beta
-            if score > alpha:
-                alpha = score
+                self.positions.append(fen)
+                self.evaluations.append(evaluation)
+                if max_samples and len(self.positions) >= max_samples:
+                    break
 
-        return alpha
+        print(f"Loaded {len(self.positions)} positions from {chess_data_path}")
 
-    # ── alpha-beta with TT ───────────────────────────────────────────
-    def _alpha_beta(self, board: chess.Board, depth: int,
-                    alpha: float, beta: float, ply: int) -> float:
-        """Negamax alpha-beta. All scores are P(side-to-move wins) ∈ [0,1]."""
-        self.nodes += 1
-        alpha_orig = alpha
+    def convert_fens_to_inputs(self):
+        self.positions = [
+            board_to_input(chess.Board(fen)) for fen in tqdm(self.positions, desc="Converting FENs to input vectors")
+        ]
+        self.evaluations = torch.tensor(self.evaluations, dtype=torch.float32)
 
-        # ── terminal checks ──────────────────────────────────────────
-        if board.is_checkmate():
-            # Side to move is checkmated → they lose.
-            # Small ply bonus so shorter mates are preferred.
-            return max(0.0, 0.0 + ply * 1e-6)
-        if board.is_stalemate() or board.is_insufficient_material() \
-                or board.is_fifty_moves() or board.is_repetition(2):
-            return 0.5
+    def __len__(self):
+        return len(self.positions)
 
-        # ── transposition-table probe ────────────────────────────────
-        key = chess.polyglot.zobrist_hash(board)
-        tt_move: chess.Move | None = None
-        entry = self.tt.get(key)
-        if entry is not None and entry.key == key and entry.depth >= depth:
-            tt_move = entry.best_move
-            if entry.flag == FLAG_EXACT:
-                return entry.score
-            elif entry.flag == FLAG_LOWER:
-                alpha = max(alpha, entry.score)
-            elif entry.flag == FLAG_UPPER:
-                beta = min(beta, entry.score)
-            if alpha >= beta:
-                return entry.score
-        elif entry is not None:
-            tt_move = entry.best_move
+    def __getitem__(self, idx):
+        input_vector = self.positions[idx]
+        evaluation = self.evaluations[idx]
+        return input_vector, evaluation
 
-        # ── leaf / quiescence ────────────────────────────────────────
-        if depth <= 0:
-            return self._quiesce(board, alpha, beta)
+    def split(self, train_ratio: float = 0.8):
+        total_size = len(self)
+        train_size = int(total_size * train_ratio)
+        val_size = total_size - train_size
+        return torch.utils.data.random_split(self, [train_size, val_size])
 
-        # ── null-move pruning (reduction = 3) ────────────────────────
-        if depth >= 3 and not board.is_check():
-            board.push(chess.Move.null())
-            null_score = 1.0 - self._alpha_beta(
-                board, depth - 3, 1.0 - beta, 1.0 - beta + 0.01, ply + 1)
-            board.pop()
-            if null_score >= beta:
-                return beta
 
-        # ── recurse over children ────────────────────────────────────
-        best_score = 0.0     # worst possible for side to move
-        best_move: chess.Move | None = None
-        moves = self._order_moves(board, tt_move, ply)
+def get_baseline_loss(val_set: torch.utils.data.Subset):
+    with open("data/val_set.csv", "w") as f:
+        for fen, e in val_set:
+            f.write(f"{fen},{e}\n")
+    sigma_zero_loss = sigma_zero.command("baseline_loss", JSON=False)
+    os.remove("data/val_set.csv")
+    return float(sigma_zero_loss.strip())
 
-        for i, m in enumerate(moves):
-            if self._is_time_up():
-                break
 
-            is_capture = board.is_capture(m)
-            board.push(m)
-            gives_check = board.is_check()
+def training_loop(model: NNUE, dataset: Dataset, epochs: int = 10, batch_size: int = 100000):
+    train_set, val_set = dataset.split()
+    criterion = SigmoidScaledMSELoss(k=3.0)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=10)
+    train_losses = []
+    val_losses = []
 
-            # ── late-move reduction ──────────────────────────────────
-            if i >= 4 and depth >= 3 and not is_capture \
-                    and not gives_check:
-                score = 1.0 - self._alpha_beta(
-                    board, depth - 2,
-                    1.0 - alpha - 0.01, 1.0 - alpha, ply + 1)
-                if score <= alpha:
-                    board.pop()
-                    continue
-                # Re-search at full depth if it looked promising
-            score = 1.0 - self._alpha_beta(
-                board, depth - 1, 1.0 - beta, 1.0 - alpha, ply + 1)
+    # Get a baseline for loss using the current static evaluation of SigmaZero engine
+    baseline_loss = get_baseline_loss(val_set)
+    print(f"Baseline validation loss using SigmaZero static evaluation: {baseline_loss:.4f}")
 
-            board.pop()
+    dataset.convert_fens_to_inputs()
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size)
 
-            if score > best_score:
-                best_score = score
-                best_move = m
-            if score > alpha:
-                alpha = score
-            if alpha >= beta:
-                # Update killer moves
-                if not is_capture and ply < _MAX_DEPTH:
-                    killers = self.killers[ply]
-                    if m not in killers:
-                        if len(killers) >= 2:
-                            killers.pop(0)
-                        killers.append(m)
-                # Update history heuristic
-                self.history[(m.from_square, m.to_square)] = \
-                    self.history.get((m.from_square, m.to_square), 0) + depth * depth
-                break
+    for epoch in range(epochs):
+        # Training
+        model.train()
+        total_loss = 0
+        for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} - Training"):
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs.squeeze(), targets.float())
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * inputs.size(0)
+        avg_loss = total_loss / len(train_loader.dataset)
+        train_losses.append(avg_loss)
+        print(f"Epoch {epoch+1}/{epochs} - Training Loss: {avg_loss:.4f}")
 
-        # ── store in TT ──────────────────────────────────────────────
-        if best_move is not None:
-            if best_score <= alpha_orig:
-                flag = FLAG_UPPER
-            elif best_score >= beta:
-                flag = FLAG_LOWER
-            else:
-                flag = FLAG_EXACT
-            self.tt[key] = TTEntry(key, depth, best_score, flag, best_move)
+        # Validation
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for inputs, targets in tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} - Validation"):
+                outputs = model(inputs)
+                loss = criterion(outputs.squeeze(), targets.float())
+                val_loss += loss.item() * inputs.size(0)
+        avg_val_loss = val_loss / len(val_loader.dataset)
+        val_losses.append(avg_val_loss)
+        scheduler.step(avg_val_loss)
+        print(f"Epoch {epoch+1}/{epochs} - Validation Loss: {avg_val_loss:.4f}")
 
-        return best_score
+        # Save model checkpoint
+        torch.save(model.state_dict(), f"nnue.pth")
 
-    # ── root search for a single move (used by threads) ──────────────
-    def _search_root_move(self, move: chess.Move, depth: int,
-                          alpha: float, beta: float) -> tuple[chess.Move, float]:
-        """Search a single root move on a private board copy."""
-        board = self.root_board.copy()
+    plt.plot(range(1, epochs + 1), train_losses, label="Training Loss")
+    plt.plot(range(1, epochs + 1), val_losses, label="Validation Loss")
+    plt.axhline(y=baseline_loss, color="r", linestyle="--", label="SigmaZero Baseline Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training and Validation Loss")
+    plt.legend()
+    plt.show()
+
+
+def load_model(model_path: str) -> NNUE:
+    model = NNUE()
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+    return model
+
+
+def play(board: chess.Board, milliseconds: int, model: NNUE):
+    best_move = None
+    best_eval = float("-inf") if board.turn == chess.WHITE else float("inf")
+    for move in board.legal_moves:
         board.push(move)
-        score = 1.0 - self._alpha_beta(
-            board, depth - 1, 1.0 - beta, 1.0 - alpha, 1)
+        move_eval = model.evaluate(board)
         board.pop()
-        return move, score
-
-    # ── iterative deepening with multithreaded root ──────────────────
-    def search(self) -> dict:
-        start = time.perf_counter()
-        self.deadline = start + self.millis / 1000.0
-
-        best_move: chess.Move | None = None
-        best_score = 0.5
-        completed_depth = 0
-
-        # Quick check: if only one legal move, return immediately
-        legal = list(self.root_board.legal_moves)
-        if len(legal) == 0:
-            return {"move": None, "eval": 0, "time": 0, "depth": 0, "nodes": 0}
-        if len(legal) == 1:
-            with torch.no_grad():
-                self.root_board.push(legal[0])
-                stm_wp = self._evaluate(self.root_board)
-                self.root_board.pop()
-            # Convert to P(white wins)
-            wp = stm_wp if self.root_board.turn == chess.WHITE else 1.0 - stm_wp
-            return {
-                "move": legal[0].uci(), "eval": round(wp, 4),
-                "time": time.perf_counter() - start, "depth": 1, "nodes": 1,
-            }
-
-        # PV move from previous iteration for ordering
-        pv_move: chess.Move | None = None
-        n_threads = min(len(legal), max(1, os.cpu_count() or 1))
-
-        for depth in range(1, _MAX_DEPTH + 1):
-            if self._is_time_up():
-                break
-
-            alpha = 0.0
-            beta  = 1.0
-            iter_best_move: chess.Move | None = None
-            iter_best_score = 0.0
-
-            # Order root moves: PV first, then captures, then rest
-            root_moves = self._order_moves(self.root_board, pv_move, 0)
-
-            # ── multithreaded root search ────────────────────────────
-            if depth >= 3 and n_threads > 1:
-                # Search PV move first with full window (sequential)
-                if root_moves:
-                    pv_candidate = root_moves[0]
-                    _, pv_score = self._search_root_move(
-                        pv_candidate, depth, alpha, beta)
-                    if pv_score > iter_best_score:
-                        iter_best_score = pv_score
-                        iter_best_move = pv_candidate
-                    alpha = max(alpha, pv_score)
-
-                # Remaining moves in parallel with null-window + re-search
-                remaining = root_moves[1:]
-                with ThreadPoolExecutor(max_workers=n_threads) as pool:
-                    futures = {
-                        pool.submit(
-                            self._search_root_move, m, depth,
-                            alpha, alpha + 0.01,
-                        ): m for m in remaining
-                    }
-                    for fut in as_completed(futures):
-                        if self._is_time_up():
-                            break
-                        m, score = fut.result()
-                        if score > alpha:
-                            # Re-search with full window
-                            _, score = self._search_root_move(
-                                m, depth, alpha, beta)
-                        if score > iter_best_score:
-                            iter_best_score = score
-                            iter_best_move = m
-                            alpha = max(alpha, score)
-            else:
-                # Sequential search at low depths
-                for m in root_moves:
-                    if self._is_time_up():
-                        break
-                    _, score = self._search_root_move(m, depth, alpha, beta)
-                    if score > iter_best_score:
-                        iter_best_score = score
-                        iter_best_move = m
-                    alpha = max(alpha, score)
-
-            # If we completed this depth, record the result
-            if not self._is_time_up() and iter_best_move is not None:
-                best_move = iter_best_move
-                best_score = iter_best_score
-                completed_depth = depth
-                pv_move = best_move
-
-        # Convert from side-to-move win prob → P(white wins) for display
-        if self.root_board.turn == chess.WHITE:
-            display_eval = best_score
-        else:
-            display_eval = 1.0 - best_score
-
-        elapsed = time.perf_counter() - start
-        return {
-            "move": best_move.uci() if best_move else None,
-            "eval": round(display_eval, 4),
-            "time": round(elapsed, 3),
-            "depth": completed_depth,
-            "nodes": self.nodes,
-        }
+        if (board.turn == chess.WHITE and move_eval > best_eval) or (
+            board.turn == chess.BLACK and move_eval < best_eval
+        ):
+            best_eval = move_eval
+            best_move = move
+    return {"move": best_move.uci() if best_move else None, "eval": round(best_eval, 2)}
 
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 2 and sys.argv[1] == "train":
-        n_iter = int(sys.argv[2]) if len(sys.argv) >= 3 else 100
-        self_play_train(num_iterations=n_iter)
-    elif os.path.exists("nnue_evaluator.pth") and len(sys.argv) == 2:
-        model = load_model("nnue_evaluator.pth")
-        t = fen_to_tensor(sys.argv[1]).unsqueeze(0)
-        with torch.no_grad():
-            logit = model(t).item()
-            wp = 1.0 / (1.0 + math.exp(-max(-20, min(20, logit))))
-        print(f"NNUE logit: {logit:.4f}  P(white wins): {wp:.1%}")
-        
-        # Evaluate every legal moves resulting position and print the 3 best ones
-        board = chess.Board(sys.argv[1])
-        move_scores = {}
+    commands = ["train", "eval"]
+    if len(sys.argv) < 2 or sys.argv[1] not in commands:
+        print(f"Usage: {sys.argv[0]} <command> [options]")
+        print(f"Commands: {', '.join(commands)}")
+        sys.exit(1)
+
+    command = sys.argv[1]
+
+    if command == "train":
+        parser = argparse.ArgumentParser(description="Train the NNUE model")
+        parser.add_argument("--data", type=str, default="data/chessData.csv", help="Path to the chess data CSV file")
+        parser.add_argument("--max-samples", type=int, default=None, help="Max number of samples")
+        parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+        parser.add_argument("--batch-size", type=int, default=4096, help="Training batch size")
+        args = parser.parse_args(sys.argv[2:])
+
+        nnue = NNUE()
+        if os.path.exists("nnue.pth"):
+            nnue.load_state_dict(torch.load("nnue.pth"))
+            print("Loaded existing model from nnue.pth")
+        print("NNUE parameters:", sum(p.numel() for p in nnue.parameters()))
+
+        dataset = Dataset(args.data, max_samples=args.max_samples)
+        training_loop(nnue, dataset, epochs=args.epochs, batch_size=args.batch_size)
+
+    elif command == "eval":
+        parser = argparse.ArgumentParser(description="Evaluate the NNUE model on a chess position")
+        parser.add_argument("fen", type=str, help="FEN string of the chess position")
+        args = parser.parse_args(sys.argv[2:])
+
+        nnue = NNUE()
+        if os.path.exists("nnue.pth"):
+            nnue.load_state_dict(torch.load("nnue.pth"))
+            print("Loaded existing model from nnue.pth")
+        else:
+            print("No trained model found. Please train the model first.")
+            sys.exit(1)
+
+        board = chess.Board(args.fen)
+        evaluation = nnue.evaluate(board)
+        print(f"NNUE Evaluation for FEN '{args.fen}': {evaluation:.4f} pawns")
+
+        # Evaluate moves at depth 1 and print the 3 best moves according to the NNUE evaluation
+        best_moves = []
         for move in board.legal_moves:
             board.push(move)
-            t = fen_to_tensor(board.fen()).unsqueeze(0)
-            with torch.no_grad():
-                logit = model(t).item()
-                wp = 1.0 / (1.0 + math.exp(-max(-20, min(20, logit))))
-            move_scores[move.uci()] = wp
+            move_eval = nnue.evaluate(board)
+            best_moves.append((move, move_eval))
             board.pop()
-        
-        best_moves = sorted(move_scores.items(), key=lambda x: x[1] if board.turn == chess.WHITE else 1 - x[1], reverse=True)[:3]
-        print("\nTop moves:")
-        for move, score in best_moves:
-            print(f"  {move}: P(white wins) = {score:.1%}")
-        
+        best_moves.sort(key=lambda x: x[1], reverse=board.turn == chess.WHITE)
+        print("Top 3 moves according to NNUE evaluation:")
+        for move, eval in best_moves[:3]:
+            print(f"  Move: {move}, Evaluation: {eval:.4f} pawns")
+
     else:
-        self_play_train()
+        print(f"Unknown command: {command}")
+        sys.exit(1)

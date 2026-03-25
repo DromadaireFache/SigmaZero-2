@@ -127,6 +127,11 @@ def time_move_gen() -> tuple[float, float]:
     return total, nps
 
 
+def static_eval(fen: str) -> float:
+    result = command(f'eval "{fen}" 0', JSON=False)
+    return float(result)
+
+
 if __name__ == "__main__":
     time_move_gen()
     

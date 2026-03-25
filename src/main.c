@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 #include "consts.c"
 
@@ -3406,6 +3407,43 @@ int compute_eval_loss() {
     return 0;
 }
 
+int compute_baseline_loss() {
+    FILE* f = fopen("data/val_set.csv", "r");
+    if (f == NULL) {
+        fprintf(stderr, "Could not open file: data/val_set.csv");
+        return 1;
+    }
+
+    uint64_t fens_count = 0;
+    double total_loss = 0.0;
+    char line[1024];
+
+    while (fgets(line, sizeof(line), f)) {
+        char* fen = strtok(line, ",");
+        char* stockfish_eval_str = strtok(NULL, ",");
+        if (stockfish_eval_str[0] == '#') continue;  // skip checkmates
+
+        int stockfish_eval = atoi(stockfish_eval_str);
+
+        Chess* chess = Chess_from_fen(fen);
+        if (chess == NULL) continue;  // failed to parse FEN
+        int sigmazero_eval = eval(chess);
+
+        // clamp error
+        double sigmazero_eval_sigmoid = 1 / (1 + exp(-sigmazero_eval / 300.0));
+        double stockfish_eval_sigmoid = 1 / (1 + exp(-stockfish_eval / 300.0));
+        double diff = sigmazero_eval_sigmoid - stockfish_eval_sigmoid;
+        double loss = diff * diff;
+        total_loss += loss;
+        fens_count++;
+        free(chess);
+    }
+
+    printf("%lg\n", fens_count ? (double)total_loss / fens_count : 0.0);
+    fclose(f);
+    return 0;
+}
+
 int test() {
     Chess* chess = Chess_from_fen("8/1k6/8/4R3/8/8/4K3/8 w - - 0 1");
     if (!chess) return 1;
@@ -3466,6 +3504,8 @@ int main(int argc, char** argv) {
         return minmax_command(depth);
     } else if (strcmp(argv[1], "eval_loss") == 0) {
         return compute_eval_loss();
+    } else if (strcmp(argv[1], "baseline_loss") == 0) {
+        return compute_baseline_loss();
     } else {
         help();
         return 1;
