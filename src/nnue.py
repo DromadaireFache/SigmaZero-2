@@ -1,5 +1,6 @@
 import os
-
+import struct
+import numpy as np
 import torch
 import torch.nn as nn
 import chess
@@ -8,6 +9,33 @@ import matplotlib.pyplot as plt
 import argparse
 import sys
 import sigma_zero
+import nn_engine
+from datasets import load_dataset
+import time
+from numba import njit
+
+
+# ASCII lookup table for piece-plane mapping: black first, then white.
+PIECE_TO_PLANE = np.full(128, -1, dtype=np.int16)
+PIECE_TO_PLANE[ord("p")] = 0
+PIECE_TO_PLANE[ord("P")] = 1
+PIECE_TO_PLANE[ord("n")] = 2
+PIECE_TO_PLANE[ord("N")] = 3
+PIECE_TO_PLANE[ord("b")] = 4
+PIECE_TO_PLANE[ord("B")] = 5
+PIECE_TO_PLANE[ord("r")] = 6
+PIECE_TO_PLANE[ord("R")] = 7
+PIECE_TO_PLANE[ord("q")] = 8
+PIECE_TO_PLANE[ord("Q")] = 9
+PIECE_TO_PLANE[ord("k")] = 10
+PIECE_TO_PLANE[ord("K")] = 11
+
+
+device = (
+    torch.device("cuda")
+    if torch.cuda.is_available()
+    else torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+)
 
 
 class SigmoidScaledMSELoss(nn.Module):
@@ -24,9 +52,9 @@ class SigmoidScaledMSELoss(nn.Module):
 class NNUE(nn.Module):
     def __init__(self, dropout_p: float = 0.10):
         super(NNUE, self).__init__()
-        self.fc1 = nn.Linear(769, 128)
-        self.fc2 = nn.Linear(128, 32)
-        self.fc3 = nn.Linear(32, 1)
+        self.fc1 = nn.Linear(769, 256)
+        self.fc2 = nn.Linear(256, 64)
+        self.fc3 = nn.Linear(64, 1)
         self.drop1 = nn.Dropout(dropout_p)
         self.drop2 = nn.Dropout(dropout_p)
 
@@ -39,40 +67,96 @@ class NNUE(nn.Module):
         return x
 
     def evaluate(self, board: chess.Board):
-        input_vector = board_to_input(board)
+        input_vector = fen_to_input(board.fen())
         with torch.no_grad():
-            return self.forward(input_vector).item()
+            return self.forward(input_vector.to(device)).item()
 
 
-def board_to_input(board: chess.Board):
-    input_vector = torch.zeros(769, dtype=torch.float32)  # 768 for pieces + 1 for side to move
-    input_vector[768] = float(board.turn)  # 1.0 for white to move, 0.0 for black to move
-    for square in chess.SQUARES:
-        piece = board.piece_at(square)
-        if piece is not None:
-            piece_type = piece.piece_type
-            color = int(piece.color)
-            index = (piece_type - 1) * 2 + color
-            input_vector[index * 64 + square] = 1
+@njit(cache=True)
+def _fen_bytes_to_array(fen_bytes: np.ndarray) -> np.ndarray:
+    # Parse ASCII FEN bytes directly in nopython mode.
+    input_vector = np.zeros(769, dtype=np.float32)
+    row, col = 7, 0
+    phase = 0  # 0: board, 1: side-to-move, 2: remaining fields
+
+    for i in range(fen_bytes.shape[0]):
+        c = fen_bytes[i]
+
+        if phase == 0:
+            if c == 32:  # ' '
+                phase = 1
+            elif c == 47:  # '/'
+                row -= 1
+                col = 0
+            elif 49 <= c <= 56:  # '1'..'8'
+                col += c - 48
+            else:
+                index = PIECE_TO_PLANE[c]
+                if index >= 0:
+                    input_vector[(index << 6) + (row << 3) + col] = 1.0
+                    col += 1
+
+        elif phase == 1:
+            input_vector[768] = 1.0 if c == 119 else 0.0  # 'w'
+            phase = 2
+
+        elif c == 32:
+            break
+
     return input_vector
 
 
-def print_board(board: chess.Board):
-    print(board.fen(), "as input vector:")
-    input_vector = board_to_input(board)
-    for i in range(12):
-        piece_name = chess.PIECE_NAMES[i // 2 + 1]
-        color = "white" if i % 2 == 0 else "black"
-        print(f"{color} {piece_name}: {"".join(str(int(x)) for x in input_vector[i*64:(i+1)*64].tolist())}")
-    print(f"Side to move: {'white' if input_vector[768] == 1.0 else 'black'}")
+def fen_to_input(fen: str) -> torch.Tensor:
+    fen_bytes = np.frombuffer(fen.encode("ascii"), dtype=np.uint8)
+    return torch.from_numpy(_fen_bytes_to_array(fen_bytes))
 
 
-class Dataset(torch.utils.data.Dataset):
-    def __init__(self, chess_data_path: str, max_samples: int = None):
+class TrainDataset(torch.utils.data.IterableDataset):
+    def __init__(self, max_samples=None, seed=0):
+        self.max_samples = max_samples
+        self.seed = seed
+        self.dataset = load_dataset(
+            "Lichess/chess-position-evaluations", split="train", streaming=True, token=os.getenv("HF_TOKEN", None)
+        )
+
+    def __len__(self):
+        return self.max_samples if self.max_samples is not None else 342059879
+
+    def __iter__(self):
+        info = torch.utils.data.get_worker_info()
+        worker_id = info.id if info is not None else 0
+        num_workers = info.num_workers if info is not None else 1
+
+        ds = self.dataset
+        ds = ds.shard(num_shards=num_workers, index=worker_id)
+        ds = ds.shuffle(seed=self.seed + worker_id)
+
+        limit = None
+        if self.max_samples is not None:
+            base = self.max_samples // num_workers
+            rem = self.max_samples % num_workers
+            limit = base + (1 if worker_id < rem else 0)
+
+        produced = 0
+        for item in ds:
+            cp = item["cp"]
+            if cp is None:
+                continue
+            fen = item["fen"]
+            y = float(cp) / 100.0
+            yield fen_to_input(fen), torch.tensor(y, dtype=torch.float32)
+
+            produced += 1
+            if limit is not None and produced >= limit:
+                break
+
+
+class ValDataset(torch.utils.data.Dataset):
+    def __init__(self, max_samples: int = None):
         self.positions = []
         self.evaluations = []
-        with open(chess_data_path, "r") as f:
-            for line in tqdm(f, desc="Loading dataset"):
+        with open("data/chessData.csv", "r") as f:
+            for line in tqdm(f, desc="Loading validation dataset"):
                 fen, eval_str = line.strip().split(",")
 
                 try:
@@ -80,18 +164,12 @@ class Dataset(torch.utils.data.Dataset):
                 except ValueError:
                     continue  # Skip lines with invalid evaluation values
 
-                self.positions.append(fen)
+                self.positions.append(fen_to_input(fen))
                 self.evaluations.append(evaluation)
                 if max_samples and len(self.positions) >= max_samples:
                     break
 
-        print(f"Loaded {len(self.positions)} positions from {chess_data_path}")
-
-    def convert_fens_to_inputs(self):
-        self.positions = [
-            board_to_input(chess.Board(fen)) for fen in tqdm(self.positions, desc="Converting FENs to input vectors")
-        ]
-        self.evaluations = torch.tensor(self.evaluations, dtype=torch.float32)
+        print(f"Loaded {len(self.positions)} positions from data/chessData.csv")
 
     def __len__(self):
         return len(self.positions)
@@ -101,24 +179,15 @@ class Dataset(torch.utils.data.Dataset):
         evaluation = self.evaluations[idx]
         return input_vector, evaluation
 
-    def split(self, train_ratio: float = 0.8):
-        total_size = len(self)
-        train_size = int(total_size * train_ratio)
-        val_size = total_size - train_size
-        return torch.utils.data.random_split(self, [train_size, val_size])
 
-
-def get_baseline_loss(val_set: torch.utils.data.Subset):
-    with open("data/val_set.csv", "w") as f:
-        for fen, e in val_set:
-            f.write(f"{fen},{e}\n")
+def get_baseline_loss() -> float:
     sigma_zero_loss = sigma_zero.command("baseline_loss", JSON=False)
-    os.remove("data/val_set.csv")
     return float(sigma_zero_loss.strip())
 
 
-def training_loop(model: NNUE, dataset: Dataset, epochs: int = 10, batch_size: int = 100000):
-    train_set, val_set = dataset.split()
+def training_loop(
+    model: NNUE, train_set: TrainDataset, val_set: ValDataset, epochs: int = 10, batch_size: int = 100000
+):
     criterion = SigmoidScaledMSELoss(k=3.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=10)
@@ -126,25 +195,27 @@ def training_loop(model: NNUE, dataset: Dataset, epochs: int = 10, batch_size: i
     val_losses = []
 
     # Get a baseline for loss using the current static evaluation of SigmaZero engine
-    baseline_loss = get_baseline_loss(val_set)
+    baseline_loss = get_baseline_loss()
     print(f"Baseline validation loss using SigmaZero static evaluation: {baseline_loss:.4f}")
 
-    dataset.convert_fens_to_inputs()
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    workers = 2  # Maximum that streaming dataset can handle
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, num_workers=workers)
     val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size)
 
     for epoch in range(epochs):
         # Training
         model.train()
         total_loss = 0
+        seen = 0
         for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} - Training"):
             optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs.squeeze(), targets.float())
+            outputs = model(inputs.to(device))
+            loss = criterion(outputs.squeeze(), targets.float().to(device))
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * inputs.size(0)
-        avg_loss = total_loss / len(train_loader.dataset)
+            seen += inputs.size(0)
+        avg_loss = total_loss / seen
         train_losses.append(avg_loss)
         print(f"Epoch {epoch+1}/{epochs} - Training Loss: {avg_loss:.4f}")
 
@@ -153,8 +224,8 @@ def training_loop(model: NNUE, dataset: Dataset, epochs: int = 10, batch_size: i
         val_loss = 0
         with torch.no_grad():
             for inputs, targets in tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} - Validation"):
-                outputs = model(inputs)
-                loss = criterion(outputs.squeeze(), targets.float())
+                outputs = model(inputs.to(device))
+                loss = criterion(outputs.squeeze(), targets.float().to(device))
                 val_loss += loss.item() * inputs.size(0)
         avg_val_loss = val_loss / len(val_loader.dataset)
         val_losses.append(avg_val_loss)
@@ -175,28 +246,29 @@ def training_loop(model: NNUE, dataset: Dataset, epochs: int = 10, batch_size: i
 
 
 def load_model(model_path: str) -> NNUE:
-    model = NNUE()
+    model = NNUE().to(device)
     model.load_state_dict(torch.load(model_path))
     model.eval()
     return model
 
 
-def play(board: chess.Board, milliseconds: int, model: NNUE):
-    best_move = None
-    best_eval = float("-inf") if board.turn == chess.WHITE else float("inf")
-    for move in board.legal_moves:
-        board.push(move)
-        move_eval = model.evaluate(board)
-        board.pop()
-        if (board.turn == chess.WHITE and move_eval > best_eval) or (
-            board.turn == chess.BLACK and move_eval < best_eval
-        ):
-            best_eval = move_eval
-            best_move = move
-    return {"move": best_move.uci() if best_move else None, "eval": round(best_eval, 2)}
+def play(board: chess.Board, millis: int, model: NNUE) -> dict:
+    """Run a simple minimax search with alpha-beta pruning."""
+    engine = _NNUEEngine(board, model, millis)
+    return engine.search()
+
+
+class _NNUEEngine(nn_engine._SearchEngine):
+    def __init__(self, board: chess.Board, model: NNUE, millis: int):
+        super().__init__(board, model, millis, neg_inf=-10000.0, pos_inf=10000.0, draw_score=0.0)
+
+    def _evaluate(self, board: chess.Board) -> float:
+        return self.evaluator.evaluate(board)
 
 
 if __name__ == "__main__":
+    print(f"Using device: {device}")
+
     commands = ["train", "eval"]
     if len(sys.argv) < 2 or sys.argv[1] not in commands:
         print(f"Usage: {sys.argv[0]} <command> [options]")
@@ -207,27 +279,27 @@ if __name__ == "__main__":
 
     if command == "train":
         parser = argparse.ArgumentParser(description="Train the NNUE model")
-        parser.add_argument("--data", type=str, default="data/chessData.csv", help="Path to the chess data CSV file")
         parser.add_argument("--max-samples", type=int, default=None, help="Max number of samples")
         parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
         parser.add_argument("--batch-size", type=int, default=4096, help="Training batch size")
         args = parser.parse_args(sys.argv[2:])
 
-        nnue = NNUE()
+        nnue = NNUE().to(device)
         if os.path.exists("nnue.pth"):
             nnue.load_state_dict(torch.load("nnue.pth"))
             print("Loaded existing model from nnue.pth")
         print("NNUE parameters:", sum(p.numel() for p in nnue.parameters()))
 
-        dataset = Dataset(args.data, max_samples=args.max_samples)
-        training_loop(nnue, dataset, epochs=args.epochs, batch_size=args.batch_size)
+        train_set = TrainDataset(max_samples=args.max_samples)
+        val_set = ValDataset(max_samples=args.max_samples // 4 if args.max_samples else None)
+        training_loop(nnue, train_set, val_set, epochs=args.epochs, batch_size=args.batch_size)
 
     elif command == "eval":
         parser = argparse.ArgumentParser(description="Evaluate the NNUE model on a chess position")
         parser.add_argument("fen", type=str, help="FEN string of the chess position")
         args = parser.parse_args(sys.argv[2:])
 
-        nnue = NNUE()
+        nnue = NNUE().to(device)
         if os.path.exists("nnue.pth"):
             nnue.load_state_dict(torch.load("nnue.pth"))
             print("Loaded existing model from nnue.pth")

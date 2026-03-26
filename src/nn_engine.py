@@ -4,7 +4,7 @@ import random
 import sys
 import time
 import requests
-import zstandard  # type: ignore
+import zstandard
 import pickle as pkl
 import numpy as np
 
@@ -635,7 +635,8 @@ def play(board: chess.Board, millis: int, evaluator: NNEvaluator) -> dict:
 # ──────────────────────────────────────────────────────────────────────
 # Simple alpha-beta configuration
 # ──────────────────────────────────────────────────────────────────────
-_DEFAULT_SEARCH_DEPTH = 3
+_DEFAULT_SEARCH_DEPTH = 60
+_DEFAULT_QUIESCENCE_DEPTH = 6
 
 
 class _SearchEngine:
@@ -645,12 +646,25 @@ class _SearchEngine:
     White maximizes score, Black minimizes score.
     """
 
-    def __init__(self, board: chess.Board, evaluator: NNEvaluator, millis: int):
+    def __init__(
+        self,
+        board: chess.Board,
+        evaluator: torch.Module,
+        millis: int,
+        neg_inf: float = 0.0,
+        pos_inf: float = 1.0,
+        draw_score: float = 0.5,
+    ):
         self.root_board = board.copy()
         self.evaluator = evaluator
         self.millis = millis
+        self.use_time_limit = millis > 0
         self.deadline: float = 0.0
         self.nodes: int = 0
+        self.qnodes: int = 0
+        self.neg_inf = neg_inf
+        self.pos_inf = pos_inf
+        self.draw_score = draw_score
 
     # ── fast NN eval ───────────────────────────────────────────────
     def _evaluate(self, board: chess.Board) -> float:
@@ -660,6 +674,8 @@ class _SearchEngine:
             return self.evaluator.win_probability(t).item()
 
     def _is_time_up(self) -> bool:
+        if not self.use_time_limit:
+            return False
         return time.perf_counter() >= self.deadline
 
     def _terminal_score(self, board: chess.Board) -> float | None:
@@ -668,8 +684,64 @@ class _SearchEngine:
         if outcome is None:
             return None
         if outcome.winner is None:
-            return 0.5
-        return 1.0 if outcome.winner == chess.WHITE else 0.0
+            return self.draw_score
+        return self.pos_inf if outcome.winner == chess.WHITE else self.neg_inf
+
+    def _noisy_moves(self, board: chess.Board) -> list[chess.Move]:
+        """Generate tactical moves for quiescence search."""
+        moves: list[chess.Move] = []
+        for move in board.legal_moves:
+            if board.is_capture(move) or move.promotion is not None or board.gives_check(move):
+                moves.append(move)
+        return moves
+
+    def _quiescence(self, board: chess.Board, alpha: float, beta: float, qdepth: int) -> float:
+        """Search only tactical continuations to stabilize leaf evaluations."""
+        self.qnodes += 1
+
+        terminal = self._terminal_score(board)
+        if terminal is not None:
+            return terminal
+        if qdepth <= 0 or self._is_time_up():
+            return self._evaluate(board)
+
+        stand_pat = self._evaluate(board)
+        moves = self._noisy_moves(board)
+        if not moves:
+            return stand_pat
+
+        if board.turn == chess.WHITE:
+            if stand_pat >= beta:
+                return stand_pat
+            if stand_pat > alpha:
+                alpha = stand_pat
+
+            for move in moves:
+                board.push(move)
+                score = self._quiescence(board, alpha, beta, qdepth - 1)
+                board.pop()
+
+                if score > alpha:
+                    alpha = score
+                if alpha >= beta:
+                    break
+            return alpha
+
+        if stand_pat <= alpha:
+            return stand_pat
+        if stand_pat < beta:
+            beta = stand_pat
+
+        for move in moves:
+            board.push(move)
+            score = self._quiescence(board, alpha, beta, qdepth - 1)
+            board.pop()
+
+            if score < beta:
+                beta = score
+            if alpha >= beta:
+                break
+        return beta
 
     # ── plain alpha-beta minimax ─────────────────────────────────────
     def _alpha_beta(self, board: chess.Board, depth: int, alpha: float, beta: float) -> float:
@@ -678,11 +750,13 @@ class _SearchEngine:
         terminal = self._terminal_score(board)
         if terminal is not None:
             return terminal
-        if depth <= 0 or self._is_time_up():
+        if self._is_time_up():
             return self._evaluate(board)
+        if depth <= 0:
+            return self._quiescence(board, alpha, beta, _DEFAULT_QUIESCENCE_DEPTH)
 
         if board.turn == chess.WHITE:
-            best_score = 0.0
+            best_score = self.neg_inf
             for move in board.legal_moves:
                 board.push(move)
                 score = self._alpha_beta(board, depth - 1, alpha, beta)
@@ -696,7 +770,7 @@ class _SearchEngine:
                     break
             return best_score
 
-        best_score = 1.0
+        best_score = self.pos_inf
         for move in board.legal_moves:
             board.push(move)
             score = self._alpha_beta(board, depth - 1, alpha, beta)
@@ -710,21 +784,17 @@ class _SearchEngine:
                 break
         return best_score
 
-    def _depth_from_time(self) -> int:
-        """Pick a small fixed depth from time budget to keep behavior simple."""
-        if self.millis < 200:
-            return 1
-        if self.millis < 800:
-            return 2
-        if self.millis < 2000:
-            return 3
-        return 4
-
     # ── iterative deepening root search ──────────────────────────────
     def search(self) -> dict:
+        if self.evaluator is not None:
+            prev_training_mode = self.evaluator.training
+            self.evaluator.eval()
+
         start = time.perf_counter()
-        self.deadline = start + self.millis / 1000.0
-        max_depth = _DEFAULT_SEARCH_DEPTH if self.millis <= 0 else self._depth_from_time()
+        self.deadline = start + self.millis / 1000.0 if self.use_time_limit else float("inf")
+        # For timed search, rely on deadline checks instead of a tiny fixed depth cap.
+        # This keeps iterative deepening truly iterative under common controls like 1s.
+        max_depth = _DEFAULT_SEARCH_DEPTH
 
         legal = list(self.root_board.legal_moves)
         if len(legal) == 0:
@@ -733,51 +803,78 @@ class _SearchEngine:
         best_score = self._evaluate(self.root_board)
         completed_depth = 0
 
-        for depth in range(1, max_depth + 1):
-            if self._is_time_up():
-                break
-
-            alpha = 0.0
-            beta = 1.0
-            iter_best_move = legal[0]
-            iter_best_score = 0.0 if self.root_board.turn == chess.WHITE else 1.0
-
-            for move in legal:
+        try:
+            for depth in range(1, max_depth + 1):
                 if self._is_time_up():
                     break
-                self.root_board.push(move)
-                score = self._alpha_beta(self.root_board, depth - 1, alpha, beta)
-                self.root_board.pop()
 
-                if self.root_board.turn == chess.WHITE:
-                    if score > iter_best_score:
-                        iter_best_score = score
-                        iter_best_move = move
-                    if score > alpha:
-                        alpha = score
-                else:
-                    if score < iter_best_score:
-                        iter_best_score = score
-                        iter_best_move = move
-                    if score < beta:
-                        beta = score
+                alpha = self.neg_inf
+                beta = self.pos_inf
+                iter_moves = legal.copy()
+                # Principal-variation style ordering: try last best root move first.
+                if best_move in iter_moves:
+                    iter_moves.remove(best_move)
+                    iter_moves.insert(0, best_move)
 
-                if alpha >= beta:
-                    break
+                iter_best_move = iter_moves[0]
+                iter_best_score = self.neg_inf if self.root_board.turn == chess.WHITE else self.pos_inf
+                searched_any_root_move = False
+                fully_completed_iteration = True
 
-            if not self._is_time_up():
-                best_move = iter_best_move
-                best_score = iter_best_score
-                completed_depth = depth
+                for move in iter_moves:
+                    if self._is_time_up():
+                        fully_completed_iteration = False
+                        break
+                    self.root_board.push(move)
+                    score = self._alpha_beta(self.root_board, depth - 1, alpha, beta)
+                    self.root_board.pop()
+                    searched_any_root_move = True
 
-        elapsed = time.perf_counter() - start
-        return {
-            "move": best_move.uci(),
-            "eval": round(best_score, 4),
-            "time": round(elapsed, 3),
-            "depth": completed_depth,
-            "nodes": self.nodes,
-        }
+                    if self.root_board.turn == chess.WHITE:
+                        if score > iter_best_score:
+                            iter_best_score = score
+                            iter_best_move = move
+                        if score > alpha:
+                            alpha = score
+                    else:
+                        if score < iter_best_score:
+                            iter_best_score = score
+                            iter_best_move = move
+                        if score < beta:
+                            beta = score
+
+                    if alpha >= beta:
+                        break
+
+                # Only trust a deeper iteration if it fully completed.
+                # A partial iteration can search just a subset of root moves,
+                # which may overwrite a stable shallower best move with noise.
+                if searched_any_root_move:
+                    if fully_completed_iteration:
+                        best_move = iter_best_move
+                        best_score = iter_best_score
+                        completed_depth = depth
+                    elif completed_depth == 0:
+                        # No completed iteration yet: keep best seen so far
+                        # from this partial pass to avoid defaulting blindly.
+                        best_move = iter_best_move
+                        best_score = iter_best_score
+
+            elapsed = time.perf_counter() - start
+            print(
+                f"Time elapsed: {elapsed:.3f}s  Depth reached: {completed_depth}  "
+                f"Nodes searched: {self.nodes:,} (+q {self.qnodes:,})  Eval: {best_score:.4f}"
+            )
+            return {
+                "move": best_move.uci(),
+                "eval": round(best_score, 4),
+                "time": round(elapsed, 3),
+                "depth": completed_depth,
+                "nodes": self.nodes,
+            }
+        finally:
+            if self.evaluator is not None:
+                self.evaluator.train(prev_training_mode)
 
 
 if __name__ == "__main__":

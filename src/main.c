@@ -1373,7 +1373,7 @@ Chess* Chess_from_fen(char* fen) {
         FEN_PARSING_ERROR("Half move clock NaN");
     }
     int halfmoves = strtoul(fields[4], NULL, 10);
-    if (halfmoves > 100) {
+    if (halfmoves > 255) {
         FEN_PARSING_ERROR("Half move clock overflow");
     }
     board->halfmoves = (uint8_t)halfmoves;
@@ -3408,9 +3408,9 @@ int compute_eval_loss() {
 }
 
 int compute_baseline_loss() {
-    FILE* f = fopen("data/val_set.csv", "r");
+    FILE* f = fopen("data/chessData.csv", "r");
     if (f == NULL) {
-        fprintf(stderr, "Could not open file: data/val_set.csv");
+        fprintf(stderr, "Could not open file: data/chessData.csv");
         return 1;
     }
 
