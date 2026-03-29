@@ -628,7 +628,7 @@ def load_model(model_path: str) -> NNEvaluator:
 
 def play(board: chess.Board, millis: int, evaluator: NNEvaluator) -> dict:
     """Run a simple minimax search with alpha-beta pruning."""
-    engine = _SearchEngine(board, evaluator, millis)
+    engine = SearchEngine(board, evaluator, millis)
     return engine.search()
 
 
@@ -639,7 +639,7 @@ _DEFAULT_SEARCH_DEPTH = 60
 _DEFAULT_QUIESCENCE_DEPTH = 6
 
 
-class _SearchEngine:
+class SearchEngine:
     """Minimal search context for one `play()` call.
 
     Uses alpha-beta with scores as P(white wins) in [0, 1].
@@ -667,18 +667,18 @@ class _SearchEngine:
         self.draw_score = draw_score
 
     # ── fast NN eval ───────────────────────────────────────────────
-    def _evaluate(self, board: chess.Board) -> float:
+    def evaluate(self, board: chess.Board) -> float:
         """Return P(white wins) ∈ [0, 1]."""
         t = fen_to_tensor(board.fen()).unsqueeze(0)
         with torch.no_grad():
             return self.evaluator.win_probability(t).item()
 
-    def _is_time_up(self) -> bool:
+    def is_time_up(self) -> bool:
         if not self.use_time_limit:
             return False
         return time.perf_counter() >= self.deadline
 
-    def _terminal_score(self, board: chess.Board) -> float | None:
+    def terminal_score(self, board: chess.Board) -> float | None:
         """Return terminal score in white-win probability, or None."""
         outcome = board.outcome(claim_draw=True)
         if outcome is None:
@@ -687,7 +687,7 @@ class _SearchEngine:
             return self.draw_score
         return self.pos_inf if outcome.winner == chess.WHITE else self.neg_inf
 
-    def _noisy_moves(self, board: chess.Board) -> list[chess.Move]:
+    def noisy_moves(self, board: chess.Board) -> list[chess.Move]:
         """Generate tactical moves for quiescence search."""
         moves: list[chess.Move] = []
         for move in board.legal_moves:
@@ -695,18 +695,18 @@ class _SearchEngine:
                 moves.append(move)
         return moves
 
-    def _quiescence(self, board: chess.Board, alpha: float, beta: float, qdepth: int) -> float:
+    def quiescence(self, board: chess.Board, alpha: float, beta: float, qdepth: int) -> float:
         """Search only tactical continuations to stabilize leaf evaluations."""
         self.qnodes += 1
 
-        terminal = self._terminal_score(board)
+        terminal = self.terminal_score(board)
         if terminal is not None:
             return terminal
-        if qdepth <= 0 or self._is_time_up():
-            return self._evaluate(board)
+        if qdepth <= 0 or self.is_time_up():
+            return self.evaluate(board)
 
-        stand_pat = self._evaluate(board)
-        moves = self._noisy_moves(board)
+        stand_pat = self.evaluate(board)
+        moves = self.noisy_moves(board)
         if not moves:
             return stand_pat
 
@@ -718,7 +718,7 @@ class _SearchEngine:
 
             for move in moves:
                 board.push(move)
-                score = self._quiescence(board, alpha, beta, qdepth - 1)
+                score = self.quiescence(board, alpha, beta, qdepth - 1)
                 board.pop()
 
                 if score > alpha:
@@ -734,7 +734,7 @@ class _SearchEngine:
 
         for move in moves:
             board.push(move)
-            score = self._quiescence(board, alpha, beta, qdepth - 1)
+            score = self.quiescence(board, alpha, beta, qdepth - 1)
             board.pop()
 
             if score < beta:
@@ -744,22 +744,22 @@ class _SearchEngine:
         return beta
 
     # ── plain alpha-beta minimax ─────────────────────────────────────
-    def _alpha_beta(self, board: chess.Board, depth: int, alpha: float, beta: float) -> float:
+    def alpha_beta(self, board: chess.Board, depth: int, alpha: float, beta: float) -> float:
         """Alpha-beta with white maximizing and black minimizing."""
         self.nodes += 1
-        terminal = self._terminal_score(board)
+        terminal = self.terminal_score(board)
         if terminal is not None:
             return terminal
-        if self._is_time_up():
-            return self._evaluate(board)
+        if self.is_time_up():
+            return self.evaluate(board)
         if depth <= 0:
-            return self._quiescence(board, alpha, beta, _DEFAULT_QUIESCENCE_DEPTH)
+            return self.quiescence(board, alpha, beta, _DEFAULT_QUIESCENCE_DEPTH)
 
         if board.turn == chess.WHITE:
             best_score = self.neg_inf
             for move in board.legal_moves:
                 board.push(move)
-                score = self._alpha_beta(board, depth - 1, alpha, beta)
+                score = self.alpha_beta(board, depth - 1, alpha, beta)
                 board.pop()
 
                 if score > best_score:
@@ -773,7 +773,7 @@ class _SearchEngine:
         best_score = self.pos_inf
         for move in board.legal_moves:
             board.push(move)
-            score = self._alpha_beta(board, depth - 1, alpha, beta)
+            score = self.alpha_beta(board, depth - 1, alpha, beta)
             board.pop()
 
             if score < best_score:
@@ -800,12 +800,12 @@ class _SearchEngine:
         if len(legal) == 0:
             return {"move": None, "eval": 0, "time": 0, "depth": 0, "nodes": 0}
         best_move = legal[0]
-        best_score = self._evaluate(self.root_board)
+        best_score = self.evaluate(self.root_board)
         completed_depth = 0
 
         try:
             for depth in range(1, max_depth + 1):
-                if self._is_time_up():
+                if self.is_time_up():
                     break
 
                 alpha = self.neg_inf
@@ -822,11 +822,11 @@ class _SearchEngine:
                 fully_completed_iteration = True
 
                 for move in iter_moves:
-                    if self._is_time_up():
+                    if self.is_time_up():
                         fully_completed_iteration = False
                         break
                     self.root_board.push(move)
-                    score = self._alpha_beta(self.root_board, depth - 1, alpha, beta)
+                    score = self.alpha_beta(self.root_board, depth - 1, alpha, beta)
                     self.root_board.pop()
                     searched_any_root_move = True
 

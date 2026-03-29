@@ -190,6 +190,8 @@ class Api:
             result = nn_engine.play(board, millis, evaluator)
         elif version.lower() == "nnue":
             result = nnue.play(board, millis, nnue_model)
+        elif version.lower() == "python":
+            result = nnue.python_play(board, millis)
         else:
             sigma_zero.make(version)
             result = sigma_zero.old_play(board, millis)

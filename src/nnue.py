@@ -11,9 +11,8 @@ import sys
 import sigma_zero
 import nn_engine
 from datasets import load_dataset
-import time
 from numba import njit
-
+from optimize_constants import best_consts
 
 # ASCII lookup table for piece-plane mapping: black first, then white.
 PIECE_TO_PLANE = np.full(128, -1, dtype=np.int16)
@@ -67,9 +66,10 @@ class NNUE(nn.Module):
         return x
 
     def evaluate(self, board: chess.Board):
+        self.eval()
         input_vector = fen_to_input(board.fen())
         with torch.no_grad():
-            return self.forward(input_vector.to(device)).item()
+            return self.forward(input_vector).item()
 
 
 @njit(cache=True)
@@ -129,7 +129,7 @@ class TrainDataset(torch.utils.data.IterableDataset):
 
         ds = self.dataset
         ds = ds.shard(num_shards=num_workers, index=worker_id)
-        ds = ds.shuffle(seed=self.seed + worker_id)
+        ds = ds.shuffle(seed=self.seed + worker_id, buffer_size=100_000)
 
         limit = None
         if self.max_samples is not None:
@@ -246,24 +246,58 @@ def training_loop(
 
 
 def load_model(model_path: str) -> NNUE:
-    model = NNUE().to(device)
+    model = NNUE()
     model.load_state_dict(torch.load(model_path))
     model.eval()
     return model
 
 
-def play(board: chess.Board, millis: int, model: NNUE) -> dict:
-    """Run a simple minimax search with alpha-beta pruning."""
-    engine = _NNUEEngine(board, model, millis)
-    return engine.search()
-
-
-class _NNUEEngine(nn_engine._SearchEngine):
+class NNUEEngine(nn_engine.SearchEngine):
     def __init__(self, board: chess.Board, model: NNUE, millis: int):
         super().__init__(board, model, millis, neg_inf=-10000.0, pos_inf=10000.0, draw_score=0.0)
 
-    def _evaluate(self, board: chess.Board) -> float:
+    def evaluate(self, board: chess.Board) -> float:
         return self.evaluator.evaluate(board)
+
+
+def play(board: chess.Board, millis: int, model: NNUE) -> dict:
+    """Run a simple minimax search with alpha-beta pruning."""
+    engine = NNUEEngine(board, model, millis)
+    return engine.search()
+
+
+class ClassicEngine(nn_engine.SearchEngine):
+    PIECE_VALUES = {
+        chess.Piece.from_symbol("P"): [x + best_consts["PAWN_VALUE"] for x in best_consts["PS_WHITE_PAWN"]],
+        chess.Piece.from_symbol("p"): [x - best_consts["PAWN_VALUE"] for x in best_consts["PS_BLACK_PAWN"]],
+        chess.Piece.from_symbol("N"): [x + best_consts["KNIGHT_VALUE"] for x in best_consts["PS_WHITE_KNIGHT"]],
+        chess.Piece.from_symbol("n"): [x - best_consts["KNIGHT_VALUE"] for x in best_consts["PS_BLACK_KNIGHT"]],
+        chess.Piece.from_symbol("B"): [x + best_consts["BISHOP_VALUE"] for x in best_consts["PS_WHITE_BISHOP"]],
+        chess.Piece.from_symbol("b"): [x - best_consts["BISHOP_VALUE"] for x in best_consts["PS_BLACK_BISHOP"]],
+        chess.Piece.from_symbol("R"): [x + best_consts["ROOK_VALUE"] for x in best_consts["PS_WHITE_ROOK"]],
+        chess.Piece.from_symbol("r"): [x - best_consts["ROOK_VALUE"] for x in best_consts["PS_BLACK_ROOK"]],
+        chess.Piece.from_symbol("Q"): [x + best_consts["QUEEN_VALUE"] for x in best_consts["PS_WHITE_QUEEN"]],
+        chess.Piece.from_symbol("q"): [x - best_consts["QUEEN_VALUE"] for x in best_consts["PS_BLACK_QUEEN"]],
+        chess.Piece.from_symbol("K"): [x + best_consts["KING_VALUE"] for x in best_consts["PS_WHITE_KING"]],
+        chess.Piece.from_symbol("k"): [x - best_consts["KING_VALUE"] for x in best_consts["PS_BLACK_KING"]],
+    }
+
+    def __init__(self, board: chess.Board, millis: int):
+        super().__init__(board, None, millis, neg_inf=-10000.0, pos_inf=10000.0, draw_score=0.0)
+
+    def evaluate(self, board: chess.Board) -> float:
+        score = 0
+        for square in chess.SQUARES:
+            piece = board.piece_at(square)
+            if piece:
+                score += ClassicEngine.PIECE_VALUES[piece][square]
+        return score / 100.0  # Convert to pawns
+
+
+def python_play(board: chess.Board, millis: int) -> dict:
+    """Run a simple minimax search with alpha-beta pruning."""
+    engine = ClassicEngine(board, millis)
+    return engine.search()
 
 
 if __name__ == "__main__":
@@ -299,7 +333,7 @@ if __name__ == "__main__":
         parser.add_argument("fen", type=str, help="FEN string of the chess position")
         args = parser.parse_args(sys.argv[2:])
 
-        nnue = NNUE().to(device)
+        nnue = NNUE()
         if os.path.exists("nnue.pth"):
             nnue.load_state_dict(torch.load("nnue.pth"))
             print("Loaded existing model from nnue.pth")
