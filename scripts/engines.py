@@ -26,6 +26,7 @@ def get_position_history(board: chess.Board) -> list[str]:
         history.append(temp_board.fen())
         temp_board.pop()
 
+    history.append(temp_board.fen())  # Add the initial position
     return history[::-1]
 
 
@@ -159,7 +160,6 @@ class UCIEngine(Engine):
 
         try:
             if history:
-                print(f"position fen {starting_fen} moves {' '.join(history)}")
                 self.process.stdin.write(f"position fen {starting_fen} moves {' '.join(history)}\n")
             else:
                 self.process.stdin.write(f"position fen {board.fen()}\n")

@@ -1,11 +1,14 @@
+#!/usr/bin/env python3
 import os
 import sys
 import chess
 import pandas as pd
 from tqdm import tqdm
+import argparse
+
 from scripts.engines import UCIEngine, OldEngine, SigmaZeroEngine
 from scripts.tournament import Tournament
-import argparse
+import app.main as app
 
 
 latest = SigmaZeroEngine()
@@ -27,12 +30,6 @@ def get_engines(arg1, arg2):
     return engine1, engine2
 
 
-def get_millis(time1, time2) -> tuple[int, int]:
-    if time2 is None:
-        return (time1, time1)
-    return (time1, time1)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")
@@ -41,16 +38,26 @@ if __name__ == "__main__":
     p = subparsers.add_parser("tournament", help="Run a tournament between engines")
     p.add_argument("engine1", type=str, default="latest", help="First engine to compete (default: latest)")
     p.add_argument("engine2", type=str, default="stockfish", help="Second engine to compete (default: stockfish)")
-    p.add_argument("--time", type=int, default=100, help="Time per move in milliseconds (default: 100)")
-    p.add_argument("--time2", type=int, required=False, help="Time per move for second engine in milliseconds")
+    p.add_argument("--millis", type=int, nargs="+", default=[100], help="Time per move in ms (default: 100)")
     p.add_argument("--games", type=int, default=100, help="Number of games to play (default: 100)")
+    
+    # Subcommand for running the app
+    p = subparsers.add_parser("app", help="Run the pywebview app")
 
     args = parser.parse_args()
 
     if args.command == "tournament":
         engine1, engine2 = get_engines(args.engine1, args.engine2)
-        millis = get_millis(args.time, args.time2)
+        if len(args.millis) > 2:
+            parser.error("Too many time controls specified. Provide at most two values for --millis.")
+        elif len(args.millis) == 1:
+            millis = (args.millis[0], args.millis[0])
+        else:
+            millis = (args.millis[0], args.millis[1])
         Tournament(engine1=engine1, engine2=engine2, millis=millis, n_games=args.games, exit_on_interrupt=True)
+        
+    elif args.command == "app":
+        app.start("app/index.html")
 
     else:
         print("No command specified. Use --help for available commands.")

@@ -37,7 +37,7 @@ def get_tournament_fens(n: int = None):
         i = 0
         for line_index, line in enumerate(f):
             if line_index % 10 != 0:
-                continue # Only take every 10th line to get more variety and avoid similar positions
+                continue  # Only take every 10th line to get more variety and avoid similar positions
             if n is not None and i >= n:
                 break
             if not line.strip():
@@ -87,7 +87,7 @@ class Tournament:
         self.results = self.run()
 
     def play_game(self, fen: str, is_white: bool) -> dict:
-        results = {"score": 0, "time_old": 0, "time_new": 0, "avg_depth_new": 0, "avg_depth_old": 0}
+        results = {"score": 0, "time_2": 0, "time_1": 0, "avg_depth_1": 0, "avg_depth_2": 0}
         board = chess.Board(fen)
         number_of_moves = 0
 
@@ -99,12 +99,12 @@ class Tournament:
         while not board.is_game_over(claim_draw=True) and number_of_moves < 150:
             if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
                 result = self.engine1.play(board, self.millis[0])
-                results["time_new"] += result.get("time", 0)
-                results["avg_depth_new"] += result.get("depth", 0)
+                results["time_1"] += result.get("time", 0)
+                results["avg_depth_1"] += result.get("depth", 0)
             else:
                 result = self.engine2.play(board, self.millis[1])
-                results["time_old"] += result.get("time", 0)
-                results["avg_depth_old"] += result.get("depth", 0)
+                results["time_2"] += result.get("time", 0)
+                results["avg_depth_2"] += result.get("depth", 0)
 
             move_uci = result.get("move", "<unknown>")
             try:
@@ -128,26 +128,26 @@ class Tournament:
 
         results["end_fen"] = board.fen()
         if number_of_moves > 0:
-            results["avg_depth_new"] /= number_of_moves / 2
-            results["avg_depth_old"] /= number_of_moves / 2
+            results["avg_depth_1"] /= number_of_moves / 2
+            results["avg_depth_2"] /= number_of_moves / 2
 
         return results
 
     def run(self) -> dict:
         start = time.perf_counter()
-        results = {"wins": 0, "losses": 0, "draws": 0, "avg_depth_new": 0, "avg_depth_old": 0}
+        results = {"wins": 0, "losses": 0, "draws": 0, "avg_depth_1": 0, "avg_depth_2": 0}
         for i, fen in enumerate(get_tournament_fens(self.n_games)):
             try:
                 print(f"Game {i+1}/{self.n_games}")
                 result = self.play_game(fen, is_white=(i % 2 == 0))
                 print("End FEN:", result.get("end_fen", "N/A"))
-                print(f"Time SigmaZero: {result['time_new']:.2f}s, Old: {result['time_old']:.2f}s")
-                print(f"Avg Depth SigmaZero: {result['avg_depth_new']:.2f}, Old: {result['avg_depth_old']:.2f}")
+                print(f"Time {result['time_1']:.2f}s / {result['time_2']:.2f}s")
+                print(f"Avg Depth {result['avg_depth_1']:.2f} / {result['avg_depth_2']:.2f}")
 
-                results["avg_depth_new"] *= i / (i + 1)
-                results["avg_depth_old"] *= i / (i + 1)
-                results["avg_depth_new"] += result["avg_depth_new"] / (i + 1)
-                results["avg_depth_old"] += result["avg_depth_old"] / (i + 1)
+                results["avg_depth_1"] *= i / (i + 1)
+                results["avg_depth_2"] *= i / (i + 1)
+                results["avg_depth_1"] += result["avg_depth_1"] / (i + 1)
+                results["avg_depth_2"] += result["avg_depth_2"] / (i + 1)
 
                 if result["score"] == 1:
                     results["wins"] += 1
@@ -186,10 +186,11 @@ class Tournament:
         print("Tournament Results:")
         print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}, {elo:+.2f} Elo")
 
-        depth_diff = results["avg_depth_new"] - results["avg_depth_old"]
+        depth_diff = results["avg_depth_1"] - results["avg_depth_2"]
         depth_diff = ("+" if depth_diff >= 0 else "") + f"{depth_diff:.2f}"
         print(
-            f"Average Depth SigmaZero: {results['avg_depth_new']:.2f}, Old: {results['avg_depth_old']:.2f} ({depth_diff})"
+            f"Average Depth {self.engine1.version()}: {results['avg_depth_1']:.2f}, "
+            f"{self.engine2.version()}: {results['avg_depth_2']:.2f} ({depth_diff})"
         )
 
         return results

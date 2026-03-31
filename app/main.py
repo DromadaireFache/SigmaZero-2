@@ -6,7 +6,7 @@ import chess
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sigma_zero
-# import nn_engine
+import scripts.nn_engine as nn_engine
 import nnue.main as nnue
 
 board = chess.Board()
@@ -30,7 +30,7 @@ class PreviousState:
 move_index = 0
 previous_states = [PreviousState.current()]
 
-# evaluator = nn_engine.load_model("NN_evaluator.pth") if os.path.exists("NN_evaluator.pth") else None
+evaluator = nn_engine.load_model("NN_evaluator.pth") if os.path.exists("NN_evaluator.pth") else None
 nnue_model = nnue.load_model("nnue.pth") if os.path.exists("nnue.pth") else None
 
 
@@ -180,12 +180,14 @@ class Api:
     def bot_move(self, millis: int, version: str, tries: int = 0) -> bool:
         if version.lower() == "latest":
             result = sigma_zero.latest.play(board, millis)
-        # elif version.lower() == "nn":
-        #     result = nn_engine.play(board, millis, evaluator)
+        elif version.lower() == "nn":
+            result = nn_engine.play(board, millis, evaluator)
         elif version.lower() == "nnue":
             result = nnue.play(board, millis, nnue_model)
         elif version.lower() == "python":
             result = nnue.python_play(board, millis)
+        elif version.lower() == "stockfish":
+            result = sigma_zero.stockfish.play(board, millis)
         elif version in sigma_zero.old:
             result = sigma_zero.old[version].play(board, millis)
         else:
@@ -214,18 +216,19 @@ class Api:
         
         # TODO fix this bullshit
         eval = result.get("eval", 0)
-        if eval > 9000:
-            mate = result.get("depth", 0) - int((eval - 10000) * 101)
-            if mate > 0:
-                eval = f"Mate for white in {mate - 1 if board.turn == chess.WHITE else mate}"
-            else:
-                eval = "Checkmate for white"
-        elif eval < -9000:
-            mate = result.get("depth", 0) - int((-eval - 10000) * 101)
-            if mate > 0:
-                eval = f"Mate for black in {mate - 1 if board.turn == chess.BLACK else mate}"
-            else:
-                eval = "Checkmate for black"
+        if isinstance(eval, (int, float)):
+            if eval > 9000:
+                mate = result.get("depth", 0) - int((eval - 10000) * 101)
+                if mate > 0:
+                    eval = f"Mate for white in {mate - 1 if board.turn == chess.WHITE else mate}"
+                else:
+                    eval = "Checkmate for white"
+            elif eval < -9000:
+                mate = result.get("depth", 0) - int((-eval - 10000) * 101)
+                if mate > 0:
+                    eval = f"Mate for black in {mate - 1 if board.turn == chess.BLACK else mate}"
+                else:
+                    eval = "Checkmate for black"
         
         return {
             "depth": result.get("depth", 0),
@@ -239,8 +242,12 @@ class Api:
 
 api = Api()
 
-if __name__ == "__main__":
+def start(url: str = "index.html"):
     window = webview.create_window(
-        "SigmaZero V2 Chess Engine", "index.html", js_api=api, width=900, height=690, resizable=False
+        "SigmaZero V2 Chess Engine", url, js_api=api, width=900, height=690, resizable=False
     )
     webview.start()
+    
+
+if __name__ == "__main__":
+    start()
