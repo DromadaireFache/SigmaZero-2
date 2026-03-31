@@ -1,9 +1,9 @@
 import sys
 import time
-from src import sigma_zero
+from . import sigma_zero
 import chess
 import chess.pgn
-import src.optimize_constants as optimize_constants
+import scripts.optimize_constants as optimize_constants
 
 TIME = 100  # milliseconds per move
 OLD_BOT = "V2.8"

@@ -18,5 +18,5 @@ cachegrind.*
 gmon.out
 profile*
 *.er
-magicbb/moves.o
+*.o
 lichess_db.pkl
