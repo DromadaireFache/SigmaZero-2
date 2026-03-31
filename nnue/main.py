@@ -9,11 +9,14 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import argparse
 import sys
-from .. import sigma_zero
-from ..scripts import nn_engine
 from datasets import load_dataset
 from numba import njit
-from ..scripts.optimize_constants import best_consts
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import sigma_zero
+from scripts import nn_engine
+from scripts.optimize_constants import best_consts
 
 # ASCII lookup table for piece-plane mapping: black first, then white.
 PIECE_TO_PLANE = np.full(128, -1, dtype=np.int16)

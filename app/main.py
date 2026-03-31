@@ -3,15 +3,11 @@ import os
 import sys
 import webview
 import chess
-import sigma_zero as sigma_zero
-import nn_engine
-import nnue.main as main
 
-
-# Collect old bot versions from versions
-VERSIONS_DIR = os.path.join(os.path.dirname(__file__), "versions")
-bot_versions = [f[:-2] for f in os.listdir(VERSIONS_DIR)[::-1] if f.endswith(".c") and "const" not in f]
-
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sigma_zero
+# import nn_engine
+import nnue.main as nnue
 
 board = chess.Board()
 white_captures = []
@@ -34,8 +30,8 @@ class PreviousState:
 move_index = 0
 previous_states = [PreviousState.current()]
 
-evaluator = nn_engine.load_model("NN_evaluator.pth") if os.path.exists("NN_evaluator.pth") else None
-nnue_model = main.load_model("nnue.pth") if os.path.exists("nnue.pth") else None
+# evaluator = nn_engine.load_model("NN_evaluator.pth") if os.path.exists("NN_evaluator.pth") else None
+nnue_model = nnue.load_model("nnue.pth") if os.path.exists("nnue.pth") else None
 
 
 def capture_diff() -> int:
@@ -183,18 +179,18 @@ class Api:
 
     def bot_move(self, millis: int, version: str, tries: int = 0) -> bool:
         if version.lower() == "latest":
-            result = sigma_zero.play(board, millis)
-        elif version.lower() == "aggressive":
-            result = sigma_zero.fancy(board, millis)
-        elif version.lower() == "nn":
-            result = nn_engine.play(board, millis, evaluator)
+            result = sigma_zero.latest.play(board, millis)
+        # elif version.lower() == "nn":
+        #     result = nn_engine.play(board, millis, evaluator)
         elif version.lower() == "nnue":
-            result = main.play(board, millis, nnue_model)
+            result = nnue.play(board, millis, nnue_model)
         elif version.lower() == "python":
-            result = main.python_play(board, millis)
+            result = nnue.python_play(board, millis)
+        elif version in sigma_zero.old:
+            result = sigma_zero.old[version].play(board, millis)
         else:
-            sigma_zero.make(version)
-            result = sigma_zero.old_play(board, millis)
+            print(f"Unknown bot version: {version}")
+            sys.exit(1)
             
         move_uci = result.get("move", "<unknown>")
         try:
@@ -238,7 +234,7 @@ class Api:
         }
     
     def get_bot_versions(self) -> list[str]:
-        return bot_versions
+        return list(sigma_zero.old.keys())
 
 
 api = Api()
