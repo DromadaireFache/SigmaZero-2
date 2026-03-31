@@ -52,13 +52,15 @@ class Engine(ABC):
 
 
 class SigmaZeroEngine(Engine):
-    def __init__(self, exe: str = executable("sigma-zero")):
+    def __init__(self, exe: str = executable("engine")):
         self.make()
         self.exe = exe
 
     def make(self):
-        if not subprocess.run("make -s", shell=True, check=True):
+        result = subprocess.run("make -s", shell=True, capture_output=True)
+        if result.returncode != 0:
             print("Compilation failed")
+            print(result.stderr.decode())
             sys.exit(1)
 
     def command(self, cmd: list[str], JSON: bool = False) -> str | dict:
@@ -110,20 +112,34 @@ class SigmaZeroEngine(Engine):
 
 class OldEngine(SigmaZeroEngine):
     def __init__(self, version: str):
-        if not os.path.exists(f"src/versions/{version}"):
-            print(f"Version {version} not found in src/versions/")
+        if not os.path.exists(f"versions/{version}"):
+            print(f"Version {version} not found in versions/")
             sys.exit(1)
 
         self.make(version)
-        self.exe = f"src/versions/{version}/{executable('sigma-zero')}"
+        self.exe = f"versions/{version}/{executable('engine')}"
 
     def make(self, version: str):
-        src_path = os.path.abspath("magicbb/moves.c")
-        link_path = os.path.abspath(f"src/versions/{version}/magicbb/moves.c")
-        if not os.path.exists(link_path):
-            os.makedirs(os.path.dirname(link_path), exist_ok=True)
-            os.symlink(src_path, link_path)
-        if not subprocess.run(f"make -s -C src/versions/{version}", shell=True, check=True):
+        if subprocess.run("make magicbb/moves.o", shell=True, capture_output=True).returncode != 0:
+            print("Compilation failed for magicbb/moves.o")
+            sys.exit(1)
+            
+        def link_moves(filename: str):
+            src_path = os.path.abspath(f"magicbb/{filename}")
+            link_path = os.path.abspath(f"versions/{version}/magicbb/{filename}")
+            if not os.path.exists(link_path):
+                os.makedirs(os.path.dirname(link_path), exist_ok=True)
+                os.symlink(src_path, link_path)
+        
+        link_moves("moves.o")
+        link_moves("moves.c")
+        
+        gitignore = os.path.abspath(f"versions/{version}/magicbb/.gitignore")
+        if not os.path.exists(gitignore):
+            with open(gitignore, "w") as f:
+                f.write("*\n")
+        
+        if subprocess.run(f"make -s -C versions/{version}", shell=True, capture_output=True).returncode != 0:
             print(f"Compilation failed for version {version}")
             sys.exit(1)
             
@@ -378,8 +394,8 @@ class Tournament:
 latest = SigmaZeroEngine()
 old = {
     v: OldEngine(v)
-    for v in os.listdir("src/versions")
-    if os.path.isdir(os.path.join("src/versions", v)) and v.startswith("V2.")
+    for v in os.listdir("versions")
+    if os.path.isdir(os.path.join("versions", v)) and v.startswith("V2.")
 }
 stockfish = UCIEngine("stockfish")
 

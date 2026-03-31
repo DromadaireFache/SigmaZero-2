@@ -3,12 +3,12 @@ import os
 import sys
 import webview
 import chess
-import sigma_zero
+import sigma_zero as sigma_zero
 import nn_engine
 import nnue.main as main
 
 
-# Collect old bot versions from src/versions
+# Collect old bot versions from versions
 VERSIONS_DIR = os.path.join(os.path.dirname(__file__), "versions")
 bot_versions = [f[:-2] for f in os.listdir(VERSIONS_DIR)[::-1] if f.endswith(".c") and "const" not in f]
 

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 import chess
-from . import sigma_zero
+from .. import sigma_zero
 
 TIME = 1000  # milliseconds per move
 

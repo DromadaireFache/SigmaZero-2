@@ -3074,7 +3074,7 @@ int version() {
 
 void help(void) {
     printf("SigmaZero Chess Engine - Command Line Interface\n\n");
-    printf("Usage: sigma-zero <command> [arguments]\n\n");
+    printf("Usage: engine <command> [arguments]\n\n");
     printf("Commands:\n");
 #define HELP_WIDTH "  %-30s"
     printf(HELP_WIDTH " %s\n", "help, -h, --help", "Show this help message");
@@ -3094,9 +3094,9 @@ void help(void) {
     printf(HELP_WIDTH " %s\n", "kingsafety <FEN>", "Show king danger scores");
     printf("\n");
     printf("Examples:\n");
-    printf("  sigma-zero play \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 1000\n");
-    printf("  sigma-zero moves \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 5\n");
-    printf("  sigma-zero eval \"8/8/8/4k3/8/8/4K3/8 w - - 0 1\"\n");
+    printf("  engine play \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 1000\n");
+    printf("  engine moves \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 5\n");
+    printf("  engine eval \"8/8/8/4k3/8/8/4K3/8 w - - 0 1\"\n");
 }
 
 int king_safety_command(Chess* chess) {

@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import chess
 
 try:
-    import sigma_zero
+    import sigma_zero as sigma_zero
 except ModuleNotFoundError:
     from .. import sigma_zero
 
@@ -380,12 +380,12 @@ def log_diff(old_consts: dict, new_consts: dict):
 # Training loop:
 # 1. Take the dict of constants 'best_consts' and select 1 in 5 for mutation
 # 2. For each selected constant, randomly increase or decrease it by up to 10% (rounded to nearest non-zero integer)
-# 3. Make sigma-zero with best_consts (rename executable to sigma-zero-best)
-# 4. Make sigma-zero with mutated constants (rename executable to sigma-zero-mutated)
+# 3. Make engine with best_consts (rename executable to engine-best)
+# 4. Make engine with mutated constants (rename executable to engine-mutated)
 # 5. Run 100 games between the two versions, alternating colors
 # 6. Give score to mutated version: # wins - # losses
 # 7. If score <= 0, discard mutated constants and go back to step 1
-# 8. Run 100 games between sigma-zero-mutated and old
+# 8. Run 100 games between engine-mutated and old
 # 9. If score <= best_score_against_old, discard mutated constants and go back to step 1
 # 10. If score > best_score_against_old, keep mutated constants as best_consts and go back to step 1
 best_score_against_old = 0
@@ -399,17 +399,17 @@ def training_step():
     with open("src/consts.c", "w") as f:
         f.write(make_const_file(best_consts))
     os.system("make")
-    shutil.move(executable("sigma-zero"), executable("sigma-zero-best"))
+    shutil.move(executable("engine"), executable("engine-best"))
     
     # Step 4
     with open("src/consts.c", "w") as f:
         f.write(make_const_file(mut_consts))
     os.system("make")
-    shutil.move(executable("sigma-zero"), executable("sigma-zero-mutated"))
+    shutil.move(executable("engine"), executable("engine-mutated"))
     
     # Step 5 and 6
     print("Playing tournament between best and mutated constants...")
-    won, score = tournament(executable("sigma-zero-mutated"), executable("sigma-zero-best"), 0)
+    won, score = tournament(executable("engine-mutated"), executable("engine-best"), 0)
 
     # Step 7
     if not won:
@@ -419,7 +419,7 @@ def training_step():
     # Step 8
     log("Mutated constants outperformed best constants. Now testing against old...")
     sigma_zero.make(OLD)
-    won, score = tournament(executable("sigma-zero-mutated"), executable("old"), best_score_against_old)
+    won, score = tournament(executable("engine-mutated"), executable("old"), best_score_against_old)
     
     # Step 9
     if not won:
@@ -454,7 +454,7 @@ def get_average_cutoff(value_name: str) -> float:
 # 2. Make an average of beta cutoff index over set of fens in data/puzzles.txt
 # 3. Take the dict of constants 'best_consts' and select 1 in 5 for mutation (only those related to beta cutoffs)
 # 4. For each selected constant, randomly increase or decrease it by up to 10% (rounded to nearest non-zero integer)
-# 5. Make sigma-zero with mutated constants
+# 5. Make engine with mutated constants
 # 6. Run over the set of fens and calculate average beta cutoff index
 # 7. If average beta cutoff index is not improved, discard mutated constants and go back to step 3
 # 8. If average beta cutoff index is improved, keep mutated constants as best_consts and go back to step 3
@@ -527,7 +527,7 @@ def optimize():
     sigma_zero.make(OLD)
     os.system("make")
     print(f"Calculating baseline score against {OLD}...")
-    won, best_score_against_old = tournament(executable("sigma-zero"), executable("old"), 0)
+    won, best_score_against_old = tournament(executable("engine"), executable("old"), 0)
     
     # Clear log file
     with open("optimize_constants.log", "w") as log_file:
@@ -553,8 +553,8 @@ def optimize():
     print("Final best constants written to src/consts.c")
     
     # Cleanup
-    os.remove(executable("sigma-zero-best"))
-    os.remove(executable("sigma-zero-mutated"))
+    os.remove(executable("engine-best"))
+    os.remove(executable("engine-mutated"))
     if os.path.exists("src/consts_best.c"):
         os.remove("src/consts_best.c")
 
@@ -581,7 +581,7 @@ def train_eval():
         return float(result.stdout.strip())
     
     subprocess.run("make quickly", shell=True, check=True)
-    initial_loss = run_eval_loss(executable("sigma-zero"))
+    initial_loss = run_eval_loss(executable("engine"))
     loss = initial_loss
     print(f"Initial eval loss: {initial_loss:.0f}")
 
@@ -590,8 +590,8 @@ def train_eval():
             f.write(make_const_file(consts))
         if os.system("make quickly") != 0:
             raise RuntimeError("build failed")
-        exe_name = f"sigma-zero-eval-{tag}"
-        shutil.move(executable("sigma-zero"), executable(exe_name))
+        exe_name = f"engine-eval-{tag}"
+        shutil.move(executable("engine"), executable(exe_name))
         return executable(exe_name)
 
     try:

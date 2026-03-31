@@ -2,7 +2,6 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <pthread.h>
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -11,33 +10,10 @@
 #include <string.h>
 #include <time.h>
 
-#include "consts.c"
+#include "./consts.c"
 
 #define class typedef struct
 #define INF 1000000000
-
-// Uncomment to enable beta cutoff tracking (has performance cost)
-// #define TRACK_BETA_CUTOFFS
-
-#ifdef TRACK_BETA_CUTOFFS
-static atomic_size_t total_nodes = 0;
-static atomic_size_t beta_cutoffs = 0;
-static atomic_size_t first_move_cutoffs = 0;
-static atomic_size_t total_cutoff_index = 0;
-#endif
-
-// Uncomment to enable TT tracking (has performance cost)
-// #define TRACK_TT
-
-#ifdef TRACK_TT
-static atomic_size_t tt_lookups = 0;
-static atomic_size_t tt_hits = 0;
-static atomic_size_t tt_collisions = 0;
-static atomic_size_t tt_stores = 0;
-#endif
-
-#define ISLOWER(c) ((c) >= 'a' && (c) <= 'z')
-#define ISUPPER(c) ((c) >= 'A' && (c) <= 'Z')
 
 #ifdef _WIN32
 #define TIME_TYPE clock_t
@@ -45,13 +21,9 @@ static atomic_size_t tt_stores = 0;
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
 #define TIME_PLUS_OFFSET_MS(start, millis) ((start) + CLOCKS_PER_SEC * (millis) / 1000)
 #else
-__attribute__((always_inline)) static inline uint64_t now_nanos() {
+uint64_t now_nanos() {
     struct timespec ts;
-#ifdef __linux__
-    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
-#else
     clock_gettime(CLOCK_MONOTONIC, &ts);
-#endif
     return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 }
 #define TIME_TYPE uint64_t
@@ -65,41 +37,20 @@ __attribute__((always_inline)) static inline uint64_t now_nanos() {
 // and the most significant bit (MSB) represents h8.
 typedef uint64_t bitboard_t;
 
-extern const bitboard_t ROOK_MAGIC_NUMS[64];
-extern const int ROOK_MAGIC_SHIFTS[64];
-extern const bitboard_t BISHOP_MAGIC_NUMS[64];
-extern const int BISHOP_MAGIC_SHIFTS[64];
-extern const bitboard_t* ROOK_MOVES[64];
-extern const bitboard_t* BISHOP_MOVES[64];
-
 // Print a bitboard as a 64-character string of 0s and 1s
 void bitboard_print(bitboard_t bb) {
-    for (int rank = 7; rank >= 0; rank--) {
-        for (int file = 0; file < 8; file++) {
-            int index = rank * 8 + file;
-            putchar((bb >> index) & 1 ? '1' : '0');
-            putchar(' ');
-        }
-        putchar('\n');
+    for (int i = 63; i >= 0; i--) {
+        putchar((bb >> i) & 1 ? '1' : '0');
     }
+    putchar('\n');
 }
 
 // Convert an index (0-63) to a bitboard with only that bit set
-static inline bitboard_t bitboard_from_index(int i) { return (bitboard_t)1ULL << i; }
+static inline bitboard_t bitboard_from_index(int i) { return (bitboard_t)(1ULL << i); }
 
 static inline int index_col(int index) { return index % 8; }
 
 static inline int index_row(int index) { return index / 8; }
-
-static inline bitboard_t bitboard_row_no_edge(int i) { return 0x7EULL << (i - index_col(i)); }
-
-static inline bitboard_t bitboard_col_no_edge(int i) {
-    return 0x0001010101010100ULL << index_col(i);
-}
-
-static inline bitboard_t bitboard_rook_mask(int i) {
-    return (bitboard_row_no_edge(i) ^ bitboard_col_no_edge(i)) & ~bitboard_from_index(i);
-}
 
 // All pieces
 typedef enum {
@@ -118,57 +69,7 @@ typedef enum {
     BLACK_KING = 'k',
 } Piece;
 
-static inline int Piece_victim_score(Piece piece) {
-    switch (piece) {
-        case WHITE_PAWN:
-        case BLACK_PAWN:
-            return PAWN_VICTIM_SCORE;
-        case WHITE_KNIGHT:
-        case BLACK_KNIGHT:
-            return KNIGHT_VICTIM_SCORE;
-        case WHITE_BISHOP:
-        case BLACK_BISHOP:
-            return BISHOP_VICTIM_SCORE;
-        case WHITE_ROOK:
-        case BLACK_ROOK:
-            return ROOK_VICTIM_SCORE;
-        case WHITE_QUEEN:
-        case BLACK_QUEEN:
-            return QUEEN_VICTIM_SCORE;
-        case WHITE_KING:
-        case BLACK_KING:
-            return KING_VICTIM_SCORE;
-        default:
-            return 0;
-    }
-}
-
-static inline int Piece_aggro_score(Piece piece) {
-    switch (piece) {
-        case WHITE_PAWN:
-        case BLACK_PAWN:
-            return PAWN_AGGRO_SCORE;
-        case WHITE_KNIGHT:
-        case BLACK_KNIGHT:
-            return KNIGHT_AGGRO_SCORE;
-        case WHITE_BISHOP:
-        case BLACK_BISHOP:
-            return BISHOP_AGGRO_SCORE;
-        case WHITE_ROOK:
-        case BLACK_ROOK:
-            return ROOK_AGGRO_SCORE;
-        case WHITE_QUEEN:
-        case BLACK_QUEEN:
-            return QUEEN_AGGRO_SCORE;
-        case WHITE_KING:
-        case BLACK_KING:
-            return KING_AGGRO_SCORE;
-        default:
-            return 0;
-    }
-}
-
-static inline int Piece_value(Piece piece) {
+int Piece_value(Piece piece) {
     switch (piece) {
         case WHITE_PAWN:
             return PAWN_VALUE;
@@ -199,12 +100,18 @@ static inline int Piece_value(Piece piece) {
     }
 }
 
-int Piece_value_at(Piece piece, int i) {
+int Piece_value_at(Piece piece, int i, uint8_t fullmoves) {
+    int a, b, c;
     switch (piece) {
         case WHITE_PAWN:
-            return PAWN_VALUE + PS_WHITE_PAWN[i];
+            // give a bonus for higher rank in the endgame
+            a = index_row(i);
+            b = ((a - 1) * (int)fullmoves) / PAWN_RANK_BONUS;
+            return PAWN_VALUE + PS_WHITE_PAWN[i] + b;
         case BLACK_PAWN:
-            return -PAWN_VALUE + PS_BLACK_PAWN[i];
+            a = index_row(i);
+            b = ((a - 6) * (int)fullmoves) / PAWN_RANK_BONUS;
+            return -PAWN_VALUE + PS_BLACK_PAWN[i] + b;
         case WHITE_KNIGHT:
             return KNIGHT_VALUE + PS_WHITE_KNIGHT[i];
         case BLACK_KNIGHT:
@@ -221,6 +128,16 @@ int Piece_value_at(Piece piece, int i) {
             return QUEEN_VALUE + PS_WHITE_QUEEN[i];
         case BLACK_QUEEN:
             return -QUEEN_VALUE + PS_BLACK_QUEEN[i];
+        case WHITE_KING:
+            a = PS_WHITE_KING[i] * (FULLMOVES_ENDGAME - fullmoves);
+            b = PS_WHITE_KING_ENDGAME[i] * fullmoves;
+            c = (a + b) / FULLMOVES_ENDGAME;
+            return KING_VALUE + c;
+        case BLACK_KING:
+            a = PS_BLACK_KING[i] * (FULLMOVES_ENDGAME - fullmoves);
+            b = PS_BLACK_KING_ENDGAME[i] * fullmoves;
+            c = (a + b) / FULLMOVES_ENDGAME;
+            return -KING_VALUE + c;
         default:
             return 0;
     }
@@ -295,9 +212,9 @@ uint64_t Piece_zhash_at(Piece piece, int i) {
     }
 }
 
-static inline bool Piece_is_white(Piece piece) { return ISUPPER(piece); }
+static inline bool Piece_is_white(Piece piece) { return isupper(piece) && piece != EMPTY; }
 
-static inline bool Piece_is_black(Piece piece) { return ISLOWER(piece); }
+static inline bool Piece_is_black(Piece piece) { return islower(piece) && piece != EMPTY; }
 
 static inline bool Piece_is_pawn(Piece piece) { return piece == WHITE_PAWN || piece == BLACK_PAWN; }
 
@@ -412,16 +329,7 @@ char* Position_to_string(Position* pos) {
 // Convert a position to an index (0-63)
 static inline int Position_to_index(Position* pos) { return pos->row * 8 + pos->col; }
 
-// All positions on the board
-const Position positions[] = {
-    {0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4}, {0, 5}, {0, 6}, {0, 7}, {1, 0}, {1, 1}, {1, 2},
-    {1, 3}, {1, 4}, {1, 5}, {1, 6}, {1, 7}, {2, 0}, {2, 1}, {2, 2}, {2, 3}, {2, 4}, {2, 5},
-    {2, 6}, {2, 7}, {3, 0}, {3, 1}, {3, 2}, {3, 3}, {3, 4}, {3, 5}, {3, 6}, {3, 7}, {4, 0},
-    {4, 1}, {4, 2}, {4, 3}, {4, 4}, {4, 5}, {4, 6}, {4, 7}, {5, 0}, {5, 1}, {5, 2}, {5, 3},
-    {5, 4}, {5, 5}, {5, 6}, {5, 7}, {6, 0}, {6, 1}, {6, 2}, {6, 3}, {6, 4}, {6, 5}, {6, 6},
-    {6, 7}, {7, 0}, {7, 1}, {7, 2}, {7, 3}, {7, 4}, {7, 5}, {7, 6}, {7, 7}};
-
-Position Position_from_index(int index) { return positions[index]; }
+Position Position_from_index(int index) { return (Position){index / 8, index % 8}; }
 
 // Print a position
 void Position_print(Position pos) {
@@ -517,8 +425,11 @@ class {
     bitboard_t block_attack_map;
     // xor this with the location of a piece to check if it's pinned
     bitboard_t pinned_piece_map;
-    // once you know a piece is pinned, check this to find legal moves map
-    bitboard_t valid_map[64];
+    // once you know a piece is pinned, loop through to find its legal moves map
+    struct ValidMap {
+        bitboard_t valid_map;
+        uint8_t pinned_piece;
+    } pins[8];
 }
 EnemyAttackMap;
 
@@ -534,11 +445,6 @@ class {
     ZHashStack zhstack;     // Stack to store zobrist hash of previous positions
     uint64_t zhash;         // Current zobrist hash of the position
     EnemyAttackMap enemy_attack_map;
-    int eval;                  // Cache a partial value of the eval that doesn't depend on fullmoves
-    int pawn_row_sum;          // Sum pawn rows to use in final eval calculation
-    bitboard_t bb_white;       // Bitboard of all white pieces
-    bitboard_t bb_black;       // Bitboard of all black pieces
-    Move killer_moves[2][64];  // Used for move ordering [id][depth]
 }
 Chess;
 
@@ -606,7 +512,7 @@ static inline void Chess_en_passant_set(Chess* board, uint8_t col) {
 }
 
 #define NO_ENPASSANT 255
-// Get en passant column (or NO_ENPASSANT if not available)
+// Get en passant column (or -1 if not available)
 static inline uint8_t Chess_en_passant(Chess* chess) {
     if (chess->gamestate & BITMASK(4)) {
         return chess->gamestate >> 5;
@@ -726,13 +632,25 @@ void Chess_print(Chess* board) {
     }
 }
 
-#define Chess_friendly_piece_at(chess, index)                            \
-    ((chess)->turn == TURN_WHITE ? Piece_is_white((chess)->board[index]) \
-                                 : Piece_is_black((chess)->board[index]))
+bool Chess_friendly_piece_at(Chess* chess, int index) {
+    Piece piece = chess->board[index];
+    if (piece == EMPTY) return false;
+    if (chess->turn == TURN_WHITE) {
+        return isupper(piece);
+    } else {
+        return islower(piece);
+    }
+}
 
-#define Chess_enemy_piece_at(chess, index)                               \
-    ((chess)->turn == TURN_WHITE ? Piece_is_black((chess)->board[index]) \
-                                 : Piece_is_white((chess)->board[index]))
+bool Chess_enemy_piece_at(Chess* chess, int index) {
+    Piece piece = chess->board[index];
+    if (piece == EMPTY) return false;
+    if (chess->turn == TURN_WHITE) {
+        return islower(piece);
+    } else {
+        return isupper(piece);
+    }
+}
 
 bool Chess_friendly_king_at(Chess* chess, int index) {
     Piece piece = chess->board[index];
@@ -857,27 +775,11 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     Piece moving_piece = chess->board[move->from];
     Piece target_piece = chess->board[move->to];
 
-    bitboard_t from_bb = bitboard_from_index(move->from);
-    bitboard_t to_bb = bitboard_from_index(move->to);
-
-    // Update bitboards
-    if (chess->turn == TURN_WHITE) {
-        chess->bb_white &= ~from_bb;  // Remove from source
-        chess->bb_white |= to_bb;     // Add to destination
-        chess->bb_black &= ~to_bb;    // Remove captured piece
-    } else {
-        chess->bb_black &= ~from_bb;
-        chess->bb_black |= to_bb;
-        chess->bb_white &= ~to_bb;
-    }
-
     // Remove piece from source square
     chess->zhash ^= Piece_zhash_at(moving_piece, move->from);
-    chess->eval -= Piece_value_at(moving_piece, move->from);
 
     // Remove captured piece (if any)
     chess->zhash ^= Piece_zhash_at(target_piece, move->to);
-    chess->eval -= Piece_value_at(target_piece, move->to);
 
     // Update gamestate hash
     chess->zhash ^= ZHASH_STATE[chess->gamestate];
@@ -948,40 +850,24 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         chess->board[7] = EMPTY;
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 7);
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 5);
-        chess->eval -= Piece_value_at(WHITE_ROOK, 7);
-        chess->eval += Piece_value_at(WHITE_ROOK, 5);
-        chess->bb_white &= ~bitboard_from_index(7);  // Remove rook from h1
-        chess->bb_white |= bitboard_from_index(5);   // Add rook to f1
     } else if (moving_piece == WHITE_KING && move->from == 4 && move->to == 2) {
         // White queenside
         chess->board[3] = WHITE_ROOK;
         chess->board[0] = EMPTY;
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 0);
         chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 3);
-        chess->eval -= Piece_value_at(WHITE_ROOK, 0);
-        chess->eval += Piece_value_at(WHITE_ROOK, 3);
-        chess->bb_white &= ~bitboard_from_index(0);  // Remove rook from a1
-        chess->bb_white |= bitboard_from_index(3);   // Add rook to d1
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 62) {
         // Black kingside
         chess->board[61] = BLACK_ROOK;
         chess->board[63] = EMPTY;
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 63);
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 61);
-        chess->eval -= Piece_value_at(BLACK_ROOK, 63);
-        chess->eval += Piece_value_at(BLACK_ROOK, 61);
-        chess->bb_black &= ~bitboard_from_index(63);  // Remove rook from h8
-        chess->bb_black |= bitboard_from_index(61);   // Add rook to f8
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 58) {
         // Black queenside
         chess->board[59] = BLACK_ROOK;
         chess->board[56] = EMPTY;
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 56);
         chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 59);
-        chess->eval -= Piece_value_at(BLACK_ROOK, 56);
-        chess->eval += Piece_value_at(BLACK_ROOK, 59);
-        chess->bb_black &= ~bitboard_from_index(56);  // Remove rook from a8
-        chess->bb_black |= bitboard_from_index(59);   // Add rook to d8
     }
 
     // Handle en passant capture
@@ -989,68 +875,50 @@ Piece Chess_make_move(Chess* chess, Move* move) {
         target_piece == EMPTY) {
         // White pawn capturing en passant
         chess->zhash ^= Piece_zhash_at(BLACK_PAWN, move->to - 8);
-        chess->eval -= Piece_value_at(BLACK_PAWN, move->to - 8);
         chess->board[move->to - 8] = EMPTY;
-        chess->pawn_row_sum += 2;
-        chess->bb_black &= ~bitboard_from_index(move->to - 8);
     } else if (moving_piece == BLACK_PAWN && index_col(move->from) != index_col(move->to) &&
                target_piece == EMPTY) {
         // Black pawn capturing en passant
         chess->zhash ^= Piece_zhash_at(WHITE_PAWN, move->to + 8);
-        chess->eval -= Piece_value_at(WHITE_PAWN, move->to + 8);
         chess->board[move->to + 8] = EMPTY;
-        chess->pawn_row_sum -= 2;
-        chess->bb_white &= ~bitboard_from_index(move->to + 8);
     }
 
-    // Handle promotion and update pawn row sum number
-    if (moving_piece == WHITE_PAWN) {
-        chess->pawn_row_sum += index_row(move->to - move->from + 1);
-        if (target_piece == BLACK_PAWN) chess->pawn_row_sum -= index_row(move->to) - 6;
-
-        switch (move->promotion) {
-            case PROMOTE_QUEEN:
-                moving_piece = WHITE_QUEEN;
-                chess->pawn_row_sum -= index_row(move->to) - 1;
-                break;
-            case PROMOTE_ROOK:
-                moving_piece = WHITE_ROOK;
-                chess->pawn_row_sum -= index_row(move->to) - 1;
-                break;
-            case PROMOTE_BISHOP:
-                moving_piece = WHITE_BISHOP;
-                chess->pawn_row_sum -= index_row(move->to) - 1;
-                break;
-            case PROMOTE_KNIGHT:
-                moving_piece = WHITE_KNIGHT;
-                chess->pawn_row_sum -= index_row(move->to) - 1;
-                break;
-            default:
-                break;
-        }
-    } else if (moving_piece == BLACK_PAWN) {
-        chess->pawn_row_sum += index_row(move->to - move->from - 1);
-        if (target_piece == WHITE_PAWN) chess->pawn_row_sum -= index_row(move->to) - 1;
-
-        switch (move->promotion) {
-            case PROMOTE_QUEEN:
-                moving_piece = BLACK_QUEEN;
-                chess->pawn_row_sum -= index_row(move->to) - 6;
-                break;
-            case PROMOTE_ROOK:
-                moving_piece = BLACK_ROOK;
-                chess->pawn_row_sum -= index_row(move->to) - 6;
-                break;
-            case PROMOTE_BISHOP:
-                moving_piece = BLACK_BISHOP;
-                chess->pawn_row_sum -= index_row(move->to) - 6;
-                break;
-            case PROMOTE_KNIGHT:
-                moving_piece = BLACK_KNIGHT;
-                chess->pawn_row_sum -= index_row(move->to) - 6;
-                break;
-            default:
-                break;
+    // Handle promotion
+    if (move->promotion) {
+        if (chess->turn == TURN_WHITE) {
+            switch (move->promotion) {
+                case PROMOTE_QUEEN:
+                    moving_piece = WHITE_QUEEN;
+                    break;
+                case PROMOTE_ROOK:
+                    moving_piece = WHITE_ROOK;
+                    break;
+                case PROMOTE_BISHOP:
+                    moving_piece = WHITE_BISHOP;
+                    break;
+                case PROMOTE_KNIGHT:
+                    moving_piece = WHITE_KNIGHT;
+                    break;
+                default:
+                    break;
+            }
+        } else {
+            switch (move->promotion) {
+                case PROMOTE_QUEEN:
+                    moving_piece = BLACK_QUEEN;
+                    break;
+                case PROMOTE_ROOK:
+                    moving_piece = BLACK_ROOK;
+                    break;
+                case PROMOTE_BISHOP:
+                    moving_piece = BLACK_BISHOP;
+                    break;
+                case PROMOTE_KNIGHT:
+                    moving_piece = BLACK_KNIGHT;
+                    break;
+                default:
+                    break;
+            }
         }
     }
 
@@ -1066,7 +934,6 @@ Piece Chess_make_move(Chess* chess, Move* move) {
 
     // Add piece to destination square
     chess->zhash ^= Piece_zhash_at(moving_piece, move->to);
-    chess->eval += Piece_value_at(moving_piece, move->to);
 
     // uint64_t hash = Chess_zhash(chess);
     ZHashStack_push(&chess->zhstack, chess->zhash);
@@ -1211,41 +1078,6 @@ typedef enum {
     FEN_END
 } FENField;
 
-void Chess_init_eval(Chess* chess) {
-    chess->eval = 0;
-    chess->pawn_row_sum = 0;
-
-    for (int i = 0; i < 64; i++) {
-        Piece piece = chess->board[i];
-        if (piece == EMPTY) continue;
-
-        chess->eval += Piece_value_at(piece, i);
-
-        if (piece == WHITE_PAWN) {
-            chess->pawn_row_sum += index_row(i) - 1;
-        } else if (piece == BLACK_PAWN) {
-            chess->pawn_row_sum += index_row(i) - 6;
-        }
-    }
-}
-
-void Chess_init_bb(Chess* chess) {
-    chess->bb_white = 0;
-    chess->bb_black = 0;
-
-    for (int i = 0; i < 64; i++) {
-        Piece piece = chess->board[i];
-        if (piece == EMPTY) continue;
-
-        bitboard_t bit = 1ULL << i;
-        if (Piece_is_white(piece)) {
-            chess->bb_white |= bit;
-        } else {
-            chess->bb_black |= bit;
-        }
-    }
-}
-
 Chess* Chess_from_fen(char* fen_arg) {
 #define FEN_PARSING_ERROR(details)                                \
     fprintf(stderr, "FEN Parsing error: " details ": %s\n", fen); \
@@ -1345,8 +1177,6 @@ Chess* Chess_from_fen(char* fen_arg) {
     }
     board->fullmoves = (uint8_t)fullmoves;
     Chess_find_kings(board);
-    Chess_init_eval(board);
-    Chess_init_bb(board);
     board->zhash = Chess_zhash(board);
     return board;
 }
@@ -1443,7 +1273,6 @@ void Chess_fill_attack_map(Chess* chess) {
 
     uint8_t king_i = Chess_friendly_king_i(chess);
     Position king_pos = Position_from_index(king_i);
-    bitboard_t occupied = chess->bb_white | chess->bb_black;
 
 #define ENEMY_ATTACK(condition1, condition2, attack_map)              \
     if ((condition1) && (condition2)) {                               \
@@ -1493,7 +1322,7 @@ void Chess_fill_attack_map(Chess* chess) {
     uint8_t enemy_king_i = Chess_enemy_king_i(chess);
     Position enemy_king_pos = Position_from_index(enemy_king_i);
     ENEMY_ATTACK(abs(enemy_king_pos.row - king_pos.row) <= 1,
-                 abs(enemy_king_pos.col - king_pos.col) <= 1, 0)
+                 abs(enemy_king_pos.col - king_pos.col) <= 1, bitboard_from_index(enemy_king_i))
 
     int i;
     bitboard_t attack_map;
@@ -1502,66 +1331,68 @@ void Chess_fill_attack_map(Chess* chess) {
 
     // Reset the pinned piece map
     eam->pinned_piece_map = 0;
+    for (int i = 0; i < 8; i++) eam->pins[i].pinned_piece = -1;
 
-#define SLIDING_PIECE_ATTACK(fn, condition, offset)                            \
-    attack_map = 0;                                                            \
-    found_pinned_piece = false;                                                \
-    for (i = 0; (condition); i++) {                                            \
-        int square = king_i + (offset);                                        \
-        bitboard_t square_bit = bitboard_from_index(square);                   \
-        attack_map |= square_bit;                                              \
-        if (Chess_friendly_piece_at(chess, square)) {                          \
-            if (found_pinned_piece) {                                          \
-                break; /* two pieces stack so pin possible*/                   \
-            } else {                                                           \
-                /* found a friendly piece, will keep looking for a pin */      \
-                found_pinned_piece = true;                                     \
-                pinned_piece = square;                                         \
-            }                                                                  \
-        } else if (fn(chess, square) || Chess_enemy_queen_at(chess, square)) { \
-            if (found_pinned_piece) {                                          \
-                /* found an enemy behind friendly, so piece pinned */          \
-                eam->valid_map[pinned_piece] = attack_map;                     \
-                eam->pinned_piece_map |= bitboard_from_index(pinned_piece);    \
-            } else {                                                           \
-                /* found an enemy without a pin, so it's a check */            \
-                eam->n_checks++;                                               \
-                if (eam->n_checks == 1) eam->block_attack_map = attack_map;    \
-                if (eam->n_checks >= 2) return;                                \
-                break;                                                         \
-            }                                                                  \
-        } else if (occupied & square_bit)                                      \
-            break;                                                             \
+#define SLIDING_PIECE_ATTACK(fn, condition, offset, pin_i)                  \
+    attack_map = 0;                                                         \
+    found_pinned_piece = false;                                             \
+    for (i = 0; (condition); i++) {                                         \
+        attack_map |= bitboard_from_index(king_i + (offset));               \
+        if (Chess_friendly_piece_at(chess, king_i + (offset))) {            \
+            if (found_pinned_piece) {                                       \
+                break; /* two pieces stack so pin possible*/                \
+            } else {                                                        \
+                /* found a friendly piece, will keep looking for a pin */   \
+                found_pinned_piece = true;                                  \
+                pinned_piece = king_i + (offset);                           \
+            }                                                               \
+        } else if (fn(chess, king_i + (offset)) ||                          \
+                   Chess_enemy_queen_at(chess, king_i + (offset))) {        \
+            if (found_pinned_piece) {                                       \
+                /* found an enemy behind friendly, so piece pinned */       \
+                eam->pins[pin_i].valid_map = attack_map;                    \
+                eam->pins[pin_i].pinned_piece = pinned_piece;               \
+                eam->pinned_piece_map |= bitboard_from_index(pinned_piece); \
+            } else {                                                        \
+                /* found an enemy without a pin, so it's a check */         \
+                eam->n_checks++;                                            \
+                if (eam->n_checks == 1) eam->block_attack_map = attack_map; \
+                if (eam->n_checks >= 2) return;                             \
+                break;                                                      \
+            }                                                               \
+        } else if (chess->board[king_i + (offset)] != EMPTY)                \
+            break;                                                          \
     }
 #define kp king_pos
 
 // Look for bishop/queen attacks
-#define BISHOP_ATTACK(condition, offset) \
-    SLIDING_PIECE_ATTACK(Chess_enemy_bishop_at, condition, offset)
+#define BISHOP_ATTACK(condition, offset, pin_i) \
+    SLIDING_PIECE_ATTACK(Chess_enemy_bishop_at, condition, offset, pin_i)
     if (chess->turn == TURN_WHITE) {
-        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7)
-        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9)
-        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9)
-        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7, 0)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9, 1)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9, 2)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7, 3)
     } else {
-        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9)
-        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7)
-        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7)
-        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9, 0)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7, 1)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7, 2)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9, 3)
     }
 
 // Look for rook/queen attacks
-#define ROOK_ATTACK(condition, offset) SLIDING_PIECE_ATTACK(Chess_enemy_rook_at, condition, offset)
+#define ROOK_ATTACK(condition, offset, pin_i) \
+    SLIDING_PIECE_ATTACK(Chess_enemy_rook_at, condition, offset, pin_i + 4)
     if (chess->turn == TURN_WHITE) {
-        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8)
-        ROOK_ATTACK(king_pos.col + i < 7, (i + 1))
-        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1)
-        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8)
+        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8, 0)
+        ROOK_ATTACK(king_pos.col + i < 7, (i + 1), 1)
+        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1, 2)
+        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8, 3)
     } else {
-        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8)
-        ROOK_ATTACK(king_pos.col + i < 7, (i + 1))
-        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1)
-        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8)
+        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8, 0)
+        ROOK_ATTACK(king_pos.col + i < 7, (i + 1), 1)
+        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1, 2)
+        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8, 3)
     }
 }
 
@@ -1696,7 +1527,9 @@ bool Chess_is_move_legal(Chess* chess, Move* move) {
             if (eam->n_checks == 1) return false;
 
             // if pinned, limit movement to stay pinned
-            bool still_pinned = to_bb & eam->valid_map[move->from];
+            int i = 0;
+            while (eam->pins[i++].pinned_piece != move->from);
+            bool still_pinned = to_bb & eam->pins[i - 1].valid_map;
             if (!still_pinned) return false;
         } else {
             // if it's not pinned and there's no check, can move freely
@@ -1745,72 +1578,43 @@ size_t Chess_knight_moves(Chess* chess, Move* move, int from, bool captures_only
     return n_moves;
 }
 
-const bitboard_t BISHOP_MASKS[64] = {
-    0x0040201008040200ULL, 0x0000402010080400ULL, 0x0000004020100a00ULL, 0x0000000040221400ULL,
-    0x0000000002442800ULL, 0x0000000204085000ULL, 0x0000020408102000ULL, 0x0002040810204000ULL,
-    0x0020100804020000ULL, 0x0040201008040000ULL, 0x00004020100a0000ULL, 0x0000004022140000ULL,
-    0x0000000244280000ULL, 0x0000020408500000ULL, 0x0002040810200000ULL, 0x0004081020400000ULL,
-    0x0010080402000200ULL, 0x0020100804000400ULL, 0x004020100a000a00ULL, 0x0000402214001400ULL,
-    0x0000024428002800ULL, 0x0002040850005000ULL, 0x0004081020002000ULL, 0x0008102040004000ULL,
-    0x0008040200020400ULL, 0x0010080400040800ULL, 0x0020100a000a1000ULL, 0x0040221400142200ULL,
-    0x0002442800284400ULL, 0x0004085000500800ULL, 0x0008102000201000ULL, 0x0010204000402000ULL,
-    0x0004020002040800ULL, 0x0008040004081000ULL, 0x00100a000a102000ULL, 0x0022140014224000ULL,
-    0x0044280028440200ULL, 0x0008500050080400ULL, 0x0010200020100800ULL, 0x0020400040201000ULL,
-    0x0002000204081000ULL, 0x0004000408102000ULL, 0x000a000a10204000ULL, 0x0014001422400000ULL,
-    0x0028002844020000ULL, 0x0050005008040200ULL, 0x0020002010080400ULL, 0x0040004020100800ULL,
-    0x0000020408102000ULL, 0x0000040810204000ULL, 0x00000a1020400000ULL, 0x0000142240000000ULL,
-    0x0000284402000000ULL, 0x0000500804020000ULL, 0x0000201008040200ULL, 0x0000402010080400ULL,
-    0x0002040810204000ULL, 0x0004081020400000ULL, 0x000a102040000000ULL, 0x0014224000000000ULL,
-    0x0028440200000000ULL, 0x0050080402000000ULL, 0x0020100804020000ULL, 0x0040201008040200ULL};
-
-bitboard_t bitboard_bishop_mask(int i) { return BISHOP_MASKS[i]; }
-
-__attribute__((always_inline)) static inline size_t  //
-Chess_sliding_piece_moves(Chess* chess, Move* move, int from, bool captures_only,
-                          bitboard_t (*bitboard_piece_mask)(int), const bitboard_t MAGIC_NUMS[64],
-                          const int MAGIC_SHIFTS[64], const bitboard_t* MOVES[64]) {
-    EnemyAttackMap* eam = &chess->enemy_attack_map;
-
-    bitboard_t piece_mask = bitboard_piece_mask(from);
-    bitboard_t friendly_bb = chess->turn == TURN_WHITE ? chess->bb_white : chess->bb_black;
-    bitboard_t all_bb = chess->bb_white | chess->bb_black;
-    bitboard_t target_mask = piece_mask & all_bb;
-    int index = (target_mask * MAGIC_NUMS[from]) >> MAGIC_SHIFTS[from];
-    bitboard_t moves = MOVES[from][index] & ~friendly_bb;
-    if (captures_only) moves &= chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white;
-
-    bitboard_t from_bb = bitboard_from_index(from);
-    bool is_pinned = from_bb & eam->pinned_piece_map;
-
-    if (is_pinned) {
-        // if pinned and king is in check, can't move to block the attack
-        if (eam->n_checks == 1) moves = 0;
-        // if pinned, limit movement to stay pinned
-        moves &= eam->valid_map[from];
-    } else if (eam->n_checks == 1) {
-        // single check: has to block the attack with the piece
-        moves &= eam->block_attack_map;
+#define SLIDING_PIECE_ADD_MOVE(condition, offset)                     \
+    for (i = 0; (condition); i++) {                                   \
+        move->from = from;                                            \
+        move->to = from + (offset);                                   \
+        move->promotion = NO_PROMOTION;                               \
+        if (Chess_square_available(chess, move->to, captures_only) && \
+            Chess_is_move_legal(chess, move)) {                       \
+            move++;                                                   \
+            n_moves++;                                                \
+        }                                                             \
+        if (chess->board[from + (offset)] != EMPTY) break;            \
     }
 
-    size_t n_moves = __builtin_popcountll(moves);
-    while (moves) {
-        move->from = from;
-        move->to = __builtin_ctzll(moves);  // Get the index
-        moves &= moves - 1;                 // Clear the least significant bit
-        move->promotion = NO_PROMOTION;
-        move++;
-    }
+size_t Chess_bishop_moves(Chess* chess, Move* move, int from, bool captures_only) {
+    size_t n_moves = 0;
+    Position pos = Position_from_index(from);
+    int i;
+
+    SLIDING_PIECE_ADD_MOVE(pos.col + i < 7 && pos.row + i < 7, (i + 1) * 9)
+    SLIDING_PIECE_ADD_MOVE(pos.col - i > 0 && pos.row - i > 0, (i + 1) * -9)
+    SLIDING_PIECE_ADD_MOVE(pos.col + i < 7 && pos.row - i > 0, (i + 1) * -7)
+    SLIDING_PIECE_ADD_MOVE(pos.col - i > 0 && pos.row + i < 7, (i + 1) * 7)
+
     return n_moves;
 }
 
-size_t Chess_bishop_moves(Chess* chess, Move* move, int from, bool captures_only) {
-    return Chess_sliding_piece_moves(chess, move, from, captures_only, bitboard_bishop_mask,
-                                     BISHOP_MAGIC_NUMS, BISHOP_MAGIC_SHIFTS, BISHOP_MOVES);
-}
-
 size_t Chess_rook_moves(Chess* chess, Move* move, int from, bool captures_only) {
-    return Chess_sliding_piece_moves(chess, move, from, captures_only, bitboard_rook_mask,
-                                     ROOK_MAGIC_NUMS, ROOK_MAGIC_SHIFTS, ROOK_MOVES);
+    size_t n_moves = 0;
+    Position pos = Position_from_index(from);
+    int i;
+
+    SLIDING_PIECE_ADD_MOVE(pos.row + i < 7, (i + 1) * 8)
+    SLIDING_PIECE_ADD_MOVE(pos.col + i < 7, (i + 1))
+    SLIDING_PIECE_ADD_MOVE(pos.row - i > 0, (i + 1) * -8)
+    SLIDING_PIECE_ADD_MOVE(pos.col - i > 0, (i + 1) * -1)
+
+    return n_moves;
 }
 
 size_t Chess_queen_moves(Chess* chess, Move* move, int from, bool captures_only) {
@@ -1821,91 +1625,66 @@ size_t Chess_queen_moves(Chess* chess, Move* move, int from, bool captures_only)
 size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) {
     Position pos = Position_from_index(from);
     size_t n_moves = 0;
-    int one_forward, left_capture, right_capture;
-    bool at_home_rank, at_last_rank, at_en_passant_rank;
+    int direction = chess->turn == TURN_WHITE ? 1 : -1;
+    bool at_home_rank = chess->turn == TURN_WHITE ? pos.row == 1 : pos.row == 6;
+    bool at_last_rank = chess->turn == TURN_WHITE ? pos.row == 6 : pos.row == 1;
+    bool at_en_passant_rank = chess->turn == TURN_WHITE ? pos.row == 4 : pos.row == 3;
 
-    if (chess->turn == TURN_WHITE) {
-        one_forward = from + 8, left_capture = from + 7, right_capture = from + 9;
-        at_home_rank = pos.row == 1, at_last_rank = pos.row == 6, at_en_passant_rank = pos.row == 4;
-    } else {
-        one_forward = from - 8, left_capture = from - 9, right_capture = from - 7;
-        at_home_rank = pos.row == 6, at_last_rank = pos.row == 1, at_en_passant_rank = pos.row == 3;
+#define PAWN_ADD_MOVE_PROMOTE(offset, promote_to) \
+    move->from = from;                            \
+    move->to = from + (offset);                   \
+    if (Chess_is_move_legal(chess, move)) {       \
+        move->promotion = (promote_to);           \
+        move++;                                   \
+        n_moves++;                                \
     }
 
-#define PAWN_ADD_MOVE_PROMOTE(to_square)    \
-    move->from = from;                      \
-    move->to = (to_square);                 \
-    if (Chess_is_move_legal(chess, move)) { \
-        move->promotion = PROMOTE_QUEEN;    \
-        move++;                             \
-        n_moves++;                          \
-        move->from = from;                  \
-        move->to = (to_square);             \
-        move->promotion = PROMOTE_ROOK;     \
-        move++;                             \
-        n_moves++;                          \
-        move->from = from;                  \
-        move->to = (to_square);             \
-        move->promotion = PROMOTE_KNIGHT;   \
-        move++;                             \
-        n_moves++;                          \
-        move->from = from;                  \
-        move->to = (to_square);             \
-        move->promotion = PROMOTE_BISHOP;   \
-        move++;                             \
-        n_moves++;                          \
-    }
-
-#define PAWN_ADD_MOVE(to_square)            \
-    move->from = from;                      \
-    move->to = (to_square);                 \
-    if (Chess_is_move_legal(chess, move)) { \
-        move->promotion = NO_PROMOTION;     \
-        move++;                             \
-        n_moves++;                          \
-    }
-
+#define PAWN_ADD_MOVE(offset) PAWN_ADD_MOVE_PROMOTE(offset, NO_PROMOTION)
     // 1 row up
-    if (chess->board[one_forward] == EMPTY && !captures_only) {
+    if (chess->board[from + 8 * direction] == EMPTY && !captures_only) {
         if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(one_forward)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_BISHOP)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_KNIGHT)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_QUEEN)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction, PROMOTE_ROOK)
         } else {
-            PAWN_ADD_MOVE(one_forward)
+            PAWN_ADD_MOVE(8 * direction)
 
             // 2 rows up
-            int two_forward = chess->turn == TURN_WHITE ? from + 16 : from - 16;
-            if (at_home_rank && chess->board[two_forward] == EMPTY) {
-                PAWN_ADD_MOVE(two_forward)
+            if (at_home_rank && chess->board[from + 16 * direction] == EMPTY) {
+                PAWN_ADD_MOVE(16 * direction)
             }
         }
     }
 
     // normal captures
-    if (pos.col > 0 && Chess_enemy_piece_at(chess, left_capture)) {
+    if (pos.col > 0 && Chess_enemy_piece_at(chess, from + 8 * direction - 1)) {
         if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(left_capture)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction - 1, PROMOTE_BISHOP)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction - 1, PROMOTE_KNIGHT)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction - 1, PROMOTE_QUEEN)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction - 1, PROMOTE_ROOK)
         } else {
-            PAWN_ADD_MOVE(left_capture)
+            PAWN_ADD_MOVE(8 * direction - 1)
         }
     }
-    if (pos.col < 7 && Chess_enemy_piece_at(chess, right_capture)) {
+    if (pos.col < 7 && Chess_enemy_piece_at(chess, from + 8 * direction + 1)) {
         if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(right_capture)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction + 1, PROMOTE_BISHOP)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction + 1, PROMOTE_KNIGHT)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction + 1, PROMOTE_QUEEN)
+            PAWN_ADD_MOVE_PROMOTE(8 * direction + 1, PROMOTE_ROOK)
         } else {
-            PAWN_ADD_MOVE(right_capture)
+            PAWN_ADD_MOVE(8 * direction + 1)
         }
     }
 
-#define PAWN_EN_PASSANT(to_square)                \
+#define PAWN_EN_PASSANT(offset)                   \
     move->from = from;                            \
-    move->to = (to_square);                       \
+    move->to = from + (offset);                   \
     move->promotion = NO_PROMOTION;               \
     gamestate_t gamestate = chess->gamestate;     \
     uint64_t hash = chess->zhash;                 \
-    int e = chess->eval;                          \
-    int pawn_row_sum = chess->pawn_row_sum;       \
-    bitboard_t bb_white = chess->bb_white;        \
-    bitboard_t bb_black = chess->bb_black;        \
     Piece capture = Chess_make_move(chess, move); \
     chess->turn = !chess->turn;                   \
     bool in_check = Chess_friendly_check(chess);  \
@@ -1913,10 +1692,6 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     Chess_unmake_move(chess, move, capture);      \
     chess->gamestate = gamestate;                 \
     chess->zhash = hash;                          \
-    chess->eval = e;                              \
-    chess->pawn_row_sum = pawn_row_sum;           \
-    chess->bb_white = bb_white;                   \
-    chess->bb_black = bb_black;                   \
     if (!in_check) {                              \
         move++;                                   \
         n_moves++;                                \
@@ -1926,9 +1701,9 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     uint8_t en_passant_col = Chess_en_passant(chess);
     if (at_en_passant_rank && en_passant_col != NO_ENPASSANT) {
         if (en_passant_col == pos.col - 1) {
-            PAWN_EN_PASSANT(left_capture)
+            PAWN_EN_PASSANT(8 * direction - 1)
         } else if (en_passant_col == pos.col + 1) {
-            PAWN_EN_PASSANT(right_capture)
+            PAWN_EN_PASSANT(8 * direction + 1)
         }
     }
 
@@ -2008,48 +1783,35 @@ size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) 
     return n_moves;
 }
 
-typedef size_t (*MoveFn)(Chess*, Move*, int, bool);
-
-// Lookup table for move generation functions
-static const MoveFn move_fns[256] = {
-    [WHITE_PAWN] = Chess_pawn_moves,     [WHITE_KNIGHT] = Chess_knight_moves,
-    [WHITE_BISHOP] = Chess_bishop_moves, [WHITE_ROOK] = Chess_rook_moves,
-    [WHITE_QUEEN] = Chess_queen_moves,   [WHITE_KING] = Chess_king_moves,
-    [BLACK_PAWN] = Chess_pawn_moves,     [BLACK_KNIGHT] = Chess_knight_moves,
-    [BLACK_BISHOP] = Chess_bishop_moves, [BLACK_ROOK] = Chess_rook_moves,
-    [BLACK_QUEEN] = Chess_queen_moves,   [BLACK_KING] = Chess_king_moves,
-};
-
 size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     // make the enemy attack map to check legality
     Chess_fill_attack_map(chess);
     size_t n_moves = 0;
 
     // If double check, only consider king moves
-    if (__builtin_expect(chess->enemy_attack_map.n_checks >= 2, 0)) {
+    if (chess->enemy_attack_map.n_checks >= 2) {
         int i = Chess_friendly_king_i(chess);
         return Chess_king_moves(chess, moves, i, captures_only);
     }
 
-    // Process king first since there is always a king
-    int king_i = Chess_friendly_king_i(chess);
-    n_moves += Chess_king_moves(chess, &moves[n_moves], king_i, captures_only);
-
-    // Remove king from bitboard before iterating
-    bitboard_t friendly_bb = chess->turn == TURN_WHITE ? chess->bb_white : chess->bb_black;
-    friendly_bb &= ~bitboard_from_index(king_i);
-
-    // Iterate over friendly pieces using bitboard
-    while (friendly_bb) {
-        int i = __builtin_ctzll(friendly_bb);  // Get the index
-        friendly_bb &= friendly_bb - 1;        // Clear the least significant bit
-
+    for (int i = 0; i < 64; i++) {
+        if (!Chess_friendly_piece_at(chess, i)) continue;
         Piece piece = chess->board[i];
+        Move* move_p = &moves[n_moves];
 
-        // A piece is represented by its character in the board array
-        // Grab the move generation function from the lookup table
-        // and generate moves for that piece
-        n_moves += move_fns[piece](chess, &moves[n_moves], i, captures_only);
+        if (Piece_is_pawn(piece)) {
+            n_moves += Chess_pawn_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_knight(piece)) {
+            n_moves += Chess_knight_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_bishop(piece)) {
+            n_moves += Chess_bishop_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_rook(piece)) {
+            n_moves += Chess_rook_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_king(piece)) {
+            n_moves += Chess_king_moves(chess, move_p, i, captures_only);
+        } else if (Piece_is_queen(piece)) {
+            n_moves += Chess_queen_moves(chess, move_p, i, captures_only);
+        }
     }
     return n_moves;
 }
@@ -2061,20 +1823,20 @@ void Chess_score_move(Chess* chess, Move* move) {
         return;
     }
 
+    move->score = 0;
+    Position pos = Position_from_index(move->to);
     Piece aggressor = chess->board[move->from];
     Piece victim = chess->board[move->to];
 
     // MVV - LVA
     if (victim != EMPTY) {
-        move->score = Piece_victim_score(victim) - Piece_aggro_score(aggressor);
+        move->score +=
+            abs(SCORE_VICTIM_MULTIPLIER * Piece_value(victim) / 64 - Piece_value(aggressor));
     } else {
         // Deduct points if attacked by enemy pawns
-#define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)               \
-    if ((condition) && chess->board[move->to + (offset)] == (pawn)) { \
-        move->score = -abs(Piece_value(aggressor));                   \
-        return;                                                       \
-    }
-        Position pos = Position_from_index(move->to);
+#define ATTACKED_BY_ENEMY_PAWN(condition, offset, pawn)             \
+    if ((condition) && chess->board[move->to + (offset)] == (pawn)) \
+        move->score -= abs(Piece_value(aggressor));
 
         if (chess->turn == TURN_WHITE && aggressor != WHITE_PAWN) {
             ATTACKED_BY_ENEMY_PAWN(pos.row < 6 && pos.col < 7, 9, BLACK_PAWN)
@@ -2083,9 +1845,6 @@ void Chess_score_move(Chess* chess, Move* move) {
             ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col < 7, -7, WHITE_PAWN)
             ATTACKED_BY_ENEMY_PAWN(pos.row > 1 && pos.col > 0, -9, WHITE_PAWN)
         }
-
-        // Not attacked by enemy pawns
-        move->score = 0;
     }
 }
 
@@ -2114,30 +1873,20 @@ void partial_sort_moves(Move* moves, size_t n_moves, size_t n_best) {
     }
 }
 
-size_t Chess_legal_moves_scored(Chess* chess, Move* moves, bool captures_only) {
+size_t Chess_legal_moves_sorted(Chess* chess, Move* moves, bool captures_only) {
     size_t n_moves = Chess_legal_moves(chess, moves, captures_only);
 
     // Give a score to each move
     for (int i = 0; i < n_moves; i++) {
-        Chess_score_move(chess, &moves[i]);
+        Move* move = &moves[i];
+        Chess_score_move(chess, move);
     }
+
+    // C lib sort
+    // qsort(moves, n_moves, sizeof(Move), compare_moves);
+    partial_sort_moves(moves, n_moves, 5);
 
     return n_moves;
-}
-
-static inline void select_best_move(Move* moves, int start, int n_moves) {
-    int best = start;
-    for (int i = start + 1; i < n_moves; i++) {
-        if (moves[i].score > moves[best].score) {
-            best = i;
-        }
-    }
-
-    if (best != start) {
-        Move temp = moves[start];
-        moves[start] = moves[best];
-        moves[best] = temp;
-    }
 }
 
 bool Chess_equal(Chess* chess, char* board_fen) {
@@ -2164,15 +1913,11 @@ size_t Chess_count_moves(Chess* chess, int depth) {
     for (int i = 0; i < n_moves; i++) {
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
-        bitboard_t bb_white = chess->bb_white;
-        bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, &moves[i]);
         nodes += Chess_count_moves(chess, depth - 1);
         Chess_unmake_move(chess, &moves[i], capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
-        chess->bb_white = bb_white;
-        chess->bb_black = bb_black;
     }
 
     return nodes;
@@ -2201,7 +1946,6 @@ class {
     Move move;
     TIME_TYPE endtime;
     int* score;
-    bool* search_cancelled;
 }
 ChessThread;
 
@@ -2268,67 +2012,70 @@ class {
     uint64_t key;
     int eval;
     uint8_t depth;
-    uint8_t type;  // TTNodeType
+    TTNodeType type;
 }
 TTItem;
 
-// Will give ~64MB array
+// Will give ~100MB array
 #define TT_LENGTH (1 << 22)
 
 // Transposition table array
 TTItem tt[TT_LENGTH] = {0};
+size_t n_transposition = 0;
+
+// Define a smaller number of locks (power of 2 works well)
+#define TT_LOCKS_COUNT 1024
+pthread_mutex_t tt_locks[TT_LOCKS_COUNT];
+
+// Initialize all locks
+void TT_init() {
+    for (int i = 0; i < TT_LOCKS_COUNT; i++) {
+        pthread_mutex_init(&tt_locks[i], NULL);
+    }
+
+    // Initialize your TT array if needed
+    // memset(tt, 0, sizeof(tt));
+}
+
+// Get the appropriate lock for a hash
+static inline pthread_mutex_t* get_lock(uint64_t key) {
+    // Use lower bits of the hash to select a lock
+    return &tt_locks[key & (TT_LOCKS_COUNT - 1)];
+}
 
 // Store an entry with fine-grained locking
 void TT_store(uint64_t key, int eval, int depth, TTNodeType node_type) {
     size_t i = key & (TT_LENGTH - 1);
-    TTItem* item = &tt[i];
+    pthread_mutex_t* lock = get_lock(key);
 
-#ifdef TRACK_TT
-    atomic_fetch_add(&tt_stores, 1);
-    if (item->depth > 0 && item->key != key) {
-        atomic_fetch_add(&tt_collisions, 1);
+    pthread_mutex_lock(lock);
+    if (depth > tt[i].depth) {
+        tt[i].key = key;
+        tt[i].eval = eval;
+        tt[i].depth = depth;
+        tt[i].type = node_type;
     }
-#endif
-
-    if (depth > item->depth) {
-        item->key = key;
-        item->eval = eval;
-        item->depth = depth;
-        item->type = node_type;
-    }
+    pthread_mutex_unlock(lock);
 }
 
 // Retrieve an entry with fine-grained locking
 bool TT_get(uint64_t key, int* eval_p, int depth, int a, int b) {
     size_t i = key & (TT_LENGTH - 1);
-    TTItem* item = &tt[i];
+    pthread_mutex_t* lock = get_lock(key);
 
-#ifdef TRACK_TT
-    atomic_fetch_add(&tt_lookups, 1);
-#endif
-
-    if (item->key == key && depth <= item->depth &&
-        ((item->type == TT_EXACT) || (item->type == TT_LOWER && item->eval >= b) ||
-         (item->type == TT_UPPER && item->eval <= a))) {
-#ifdef TRACK_TT
-        atomic_fetch_add(&tt_hits, 1);
-#endif
-        *eval_p = item->eval;
-        return true;
+    pthread_mutex_lock(lock);
+    bool hit = tt[i].key == key && depth <= tt[i].depth;
+    if (hit) {
+        if ((tt[i].type == TT_EXACT) || (tt[i].type == TT_LOWER && tt[i].eval >= b) ||
+            (tt[i].type == TT_UPPER && tt[i].eval <= a)) {
+            *eval_p = tt[i].eval;
+        } else {
+            hit = false;
+        }
     }
+    pthread_mutex_unlock(lock);
 
-    return false;
-}
-
-double TT_occupancy(void) {
-    size_t tt_use = 0;
-
-    for (int i = 0; i < TT_LENGTH; i++) {
-        TTItem item = tt[i];
-        if (i == (item.key & (TT_LENGTH - 1))) tt_use++;
-    }
-
-    return (double)tt_use / TT_LENGTH;
+    return hit;
 }
 
 int moves(char* fen, int depth) {
@@ -2366,20 +2113,16 @@ int moves(char* fen, int depth) {
 }
 
 int eval(Chess* chess) {
+    int e = 0;
     uint8_t fullmoves = chess->fullmoves > FULLMOVES_ENDGAME ? FULLMOVES_ENDGAME : chess->fullmoves;
-    int e = chess->eval;
 
-    // Pawn rank bonus
-    e += chess->pawn_row_sum * fullmoves / PAWN_RANK_BONUS;
+    for (int i = 0; i < 64; i++) {
+        Piece piece = chess->board[i];
+        if (piece == EMPTY) continue;
 
-    // King square value
-    int white_king_value = PS_WHITE_KING[chess->king_white] * (FULLMOVES_ENDGAME - fullmoves);
-    white_king_value += PS_WHITE_KING_ENDGAME[chess->king_white] * fullmoves;
-    e += white_king_value / FULLMOVES_ENDGAME;
-
-    int black_king_value = PS_BLACK_KING[chess->king_black] * (FULLMOVES_ENDGAME - fullmoves);
-    black_king_value += PS_BLACK_KING_ENDGAME[chess->king_black] * fullmoves;
-    e += black_king_value / FULLMOVES_ENDGAME;
+        e += Piece_value_at(piece, i, fullmoves);
+        // e += Piece_king_proximity(piece, i, chess->king_white, chess->king_black);
+    }
 
     return e;
 }
@@ -2388,25 +2131,19 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
     int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
-    if (depth == 0 || best_score >= b) {
+    if (depth == 0 || best_score >= b || TIME_NOW() > endtime) {
         // nodes_total++;
         return best_score;
     }
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_scored(chess, moves, true);
+    size_t n_moves = Chess_legal_moves_sorted(chess, moves, true);
 
     for (int i = 0; i < n_moves; i++) {
-        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
-
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
-        int e = chess->eval;
-        int pawn_row_sum = chess->pawn_row_sum;
-        bitboard_t bb_white = chess->bb_white;
-        bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax_captures_only(chess, endtime, depth - 1, -b, -a);
@@ -2414,16 +2151,10 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
-        chess->eval = e;
-        chess->pawn_row_sum = pawn_row_sum;
-        chess->bb_white = bb_white;
-        chess->bb_black = bb_black;
 
-        if (score > best_score) {
-            best_score = score;
-            if (score > a) a = score;
-        }
-        if (score >= b) return best_score;
+        if (score >= b) return score;
+        if (score > best_score) best_score = score;
+        if (score > a) a = score;
     }
     return best_score;
 }
@@ -2446,6 +2177,11 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     TT_store(hash, evaluation, depth, node_type); \
     return evaluation;
 
+    // Time cutoff
+    if (TIME_NOW() > endtime) {
+        RETURN_AND_STORE_TT(chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), TT_EXACT)
+    }
+
     // Extend search if in check, otherwise don't
     if (depth == 0) {
         if (extensions < MAX_EXTENSION && Chess_friendly_check(chess)) {
@@ -2456,9 +2192,6 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
     }
 
-    // Time cutoff
-    if (TIME_NOW() > endtime) return 0;
-
     // Check for 3 fold repetition
     if (Chess_3fold_repetition(chess) >= 3) {
         // nodes_total++;
@@ -2466,7 +2199,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     }
 
     Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
+    size_t n_moves = Chess_legal_moves_sorted(chess, moves, false);
 
     if (n_moves == 0) {
         bool in_check = chess->enemy_attack_map.n_checks > 0;
@@ -2479,37 +2212,13 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         }
     }
 
-    // Add score for killer move heuristic
-    for (int i = 0; i < n_moves; i++) {
-        Move* move = &moves[i];
-
-        if (chess->board[move->to] == EMPTY) {
-            // Check both killer slots
-            if ((chess->killer_moves[0][depth].from == move->from &&
-                 chess->killer_moves[0][depth].to == move->to) ||
-                (chess->killer_moves[1][depth].from == move->from &&
-                 chess->killer_moves[1][depth].to == move->to)) {
-                move->score += KILLER_MOVE_BONUS;
-            }
-        }
-    }
-
-#ifdef TRACK_BETA_CUTOFFS
-    atomic_fetch_add(&total_nodes, 1);
-#endif
-
     int original_a = a;
+    int original_b = b;
     int best_score = -INF;
     for (int i = 0; i < n_moves; i++) {
-        if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, i, n_moves);
         Move* move = &moves[i];
-
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
-        int e = chess->eval;
-        int pawn_row_sum = chess->pawn_row_sum;
-        bitboard_t bb_white = chess->bb_white;
-        bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax(chess, endtime, depth - 1, -b, -a, capture, extensions);
@@ -2517,38 +2226,35 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
-        chess->eval = e;
-        chess->pawn_row_sum = pawn_row_sum;
-        chess->bb_white = bb_white;
-        chess->bb_black = bb_black;
 
         if (score > best_score) {
             best_score = score;
             if (score > a) a = score;
         }
-        if (score >= b) {
-#ifdef TRACK_BETA_CUTOFFS
-            atomic_fetch_add(&beta_cutoffs, 1);
-            atomic_fetch_add(&total_cutoff_index, i);
-            if (i == 0) atomic_fetch_add(&first_move_cutoffs, 1);
-#endif
-            if (capture == EMPTY) {
-                // Shift killers: move primary to secondary, new move to primary
-                if (!(chess->killer_moves[0][depth].from == move->from &&
-                      chess->killer_moves[0][depth].to == move->to)) {
-                    chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
-                    chess->killer_moves[0][depth].from = move->from;
-                    chess->killer_moves[0][depth].to = move->to;
-                }
-            }
-            RETURN_AND_STORE_TT(best_score, TT_LOWER)  // Failed high
-        }
+        if (score >= b) break;
     }
 
-    if (best_score <= original_a) {
-        RETURN_AND_STORE_TT(best_score, TT_UPPER)  // Failed low
+    TTNodeType node_type;
+    if (best_score <= original_a)
+        node_type = TT_UPPER;  // Failed low
+    else if (best_score >= original_b)
+        node_type = TT_LOWER;  // Failed high
+    else
+        node_type = TT_EXACT;
+    RETURN_AND_STORE_TT(best_score, node_type)
+}
+
+// If piece count < 38 it is an endgame
+bool Chess_is_endgame(Chess* chess) {
+    int count = 0;
+    for (int i = 0; i < 64; i++) {
+        Piece piece = chess->board[i];
+        if (!Piece_is_king(piece)) {
+            count += Piece_value(piece) / 100;
+            if (count < 38) return true;
+        }
     }
-    RETURN_AND_STORE_TT(best_score, TT_EXACT)
+    return false;
 }
 
 // if is_white sort in descending order, otherwise ascending
@@ -2574,16 +2280,12 @@ void* play_thread(void* arg_void) {
     ChessThread* arg = (ChessThread*)arg_void;
     Chess* chess = &arg->chess;
     TIME_TYPE endtime = arg->endtime;
-    TIME_TYPE start = TIME_NOW();
     Move* move = &arg->move;
     int depth = arg->depth;
-    memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
     Piece capture = Chess_make_move(chess, move);
 
     int score = -minimax(chess, endtime, depth, -INF, INF, capture, 0);
-    *arg->search_cancelled = TIME_NOW() > endtime;
     *arg->score = score;
-    arg->endtime = TIME_NOW() - start;
 
     return NULL;
 }
@@ -2657,46 +2359,31 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     if (millis < 1) return 1;
     memcpy(&chess->zhstack, &zhstack, sizeof(ZHashStack));
 
-#ifdef TRACK_BETA_CUTOFFS
-    atomic_store(&total_nodes, 0);
-    atomic_store(&beta_cutoffs, 0);
-    atomic_store(&first_move_cutoffs, 0);
-    atomic_store(&total_cutoff_index, 0);
-#endif
-
-#ifdef TRACK_TT
-    atomic_store(&tt_lookups, 0);
-    atomic_store(&tt_hits, 0);
-    atomic_store(&tt_collisions, 0);
-    atomic_store(&tt_stores, 0);
-#endif
-
     if (chess->fullmoves <= 5 && openings_db(chess)) {
         return 0;
     }
 
     TIME_TYPE start = TIME_NOW();
     TIME_TYPE endtime = TIME_PLUS_OFFSET_MS(start, millis);
-    double time_wasted = 0.0;
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
-    bool search_cancelled[MAX_LEGAL_MOVES];
     Move moves_at_depth2[MAX_LEGAL_MOVES];
     int scores_at_depth2[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
+    size_t n_moves = Chess_legal_moves_sorted(chess, moves, false);
     if (n_moves < 1) return 1;
 
     Move* best_move = NULL;
     int best_score = -INF;
     int depth = 1;
+    TT_init();
 
     pthread_t* threads = calloc(n_moves, sizeof(pthread_t));
     ChessThread* args = calloc(n_moves, sizeof(ChessThread));
 
     while (TIME_NOW() < endtime) {
         // nodes_total = 0;
+        // is_endgame = Chess_is_endgame(chess);
 
-        TIME_TYPE start_depth = TIME_NOW();
         for (int i = 0; i < n_moves; i++) {
             ChessThread* arg = &args[i];
             memcpy(&arg->chess, chess, sizeof(Chess));
@@ -2704,9 +2391,6 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             arg->endtime = endtime;
             arg->depth = depth;
             arg->score = &scores[i];
-
-            // Use this in case of time cut off to know if we can use this score
-            arg->search_cancelled = &search_cancelled[i];
 
             if (pthread_create(&threads[i], NULL, play_thread, arg) != 0) {
                 perror("pthread_create failed");
@@ -2717,12 +2401,6 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
         // Wait for threads to finish
         for (int i = 0; i < n_moves; i++) {
             pthread_join(threads[i], NULL);
-        }
-
-        // Compute time wasted
-        TIME_TYPE end_depth = TIME_NOW();
-        for (int i = 0; i < n_moves; i++) {
-            time_wasted += TIME_DIFF_S(end_depth - args[i].endtime, start_depth) / n_moves;
         }
 
         if (fancy && depth == 2) {
@@ -2758,18 +2436,6 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
             }
 
             depth++;
-
-        } else if (!search_cancelled[0]) {
-            // In case search was cancelled, try using results from this iteration
-            // Give a null score to moves that didn't complete search
-            for (int i = 1; i < n_moves; i++) {
-                if (search_cancelled[i]) scores[i] = -INF;
-            }
-
-            // Partial sort for the best move at this depth
-            bubble_sort(moves, scores, n_moves);
-            best_score = scores[0];
-            best_move = &moves[0];
         }
     }
 
@@ -2781,43 +2447,19 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
     best_score *= chess->turn == TURN_WHITE ? 1 : -1;
 
     puts("{");
-    // printf("  \"scores\": {\n");
-    // for (int i = 0; i < n_moves; i++) {
-    //     if (i >= n_moves - 1) {
-    //         printf("    \"%s\": %.2f\n", Move_string(moves + i), (double)scores[i] / 100);
-    //     } else {
-    //         printf("    \"%s\": %.2f,\n", Move_string(moves + i), (double)scores[i] / 100);
-    //     }
-    // }
-    // printf("  },\n");
+    printf("  \"scores\": {\n");
+    for (int i = 0; i < n_moves; i++) {
+        if (i >= n_moves - 1) {
+            printf("    \"%s\": %.2f\n", Move_string(moves + i), (double)scores[i] / 100);
+        } else {
+            printf("    \"%s\": %.2f,\n", Move_string(moves + i), (double)scores[i] / 100);
+        }
+    }
+    printf("  },\n");
     printf("  \"millis\": %d,\n", millis);
     printf("  \"depth\": %d,\n", depth);
     printf("  \"time\": %.3lf,\n", cpu_time);
-    printf("  \"time_wasted\": \"%.1lf%%\",\n", time_wasted / cpu_time * 100);
-#ifdef TRACK_BETA_CUTOFFS
-    size_t nodes = atomic_load(&total_nodes);
-    size_t cutoffs = atomic_load(&beta_cutoffs);
-    size_t first_cutoffs = atomic_load(&first_move_cutoffs);
-    size_t cutoff_idx = atomic_load(&total_cutoff_index);
-    double cutoff_rate = nodes > 0 ? (double)cutoffs * 100.0 / nodes : 0;
-    double first_move_rate = cutoffs > 0 ? (double)first_cutoffs * 100.0 / cutoffs : 0;
-    double avg_cutoff_index = cutoffs > 0 ? (double)cutoff_idx / cutoffs : 0;
-    printf("  \"nodes\": %lu,\n", (unsigned long)nodes);
-    printf("  \"beta_cutoff_%%\": %.2f,\n", cutoff_rate);
-    printf("  \"first_move_cutoff_%%\": %.2f,\n", first_move_rate);
-    printf("  \"avg_cutoff_index\": %.2f,\n", avg_cutoff_index);
-#endif
-#ifdef TRACK_TT
-    size_t lookups = atomic_load(&tt_lookups);
-    size_t hits = atomic_load(&tt_hits);
-    size_t collisions = atomic_load(&tt_collisions);
-    size_t stores = atomic_load(&tt_stores);
-    double hit_rate = lookups > 0 ? (double)hits * 100.0 / lookups : 0;
-    double collision_rate = stores > 0 ? (double)collisions * 100.0 / stores : 0;
-    printf("  \"tt_hit_rate_%%\": %.2f,\n", hit_rate);
-    printf("  \"tt_collision_rate_%%\": %.2f,\n", collision_rate);
-    printf("  \"TT_occupancy_%%\": %.2f,\n", TT_occupancy() * 100.0);
-#endif
+    // printf("  \"nodes\": %lu,\n", (unsigned long)nodes_total);
     printf("  \"eval\": %.2f,\n", (double)best_score / 100);
     printf("  \"move\": \"%s\"\n", Move_string(best_move));
     puts("}");
@@ -2825,40 +2467,22 @@ int play(char* fen, int millis, char* game_history, bool fancy) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.7.2 (2025-12-14)\n");
+    printf("SigmaZero Chess Engine 2.5.10 (2025-12-10)\n");
     return 0;
 }
 
 void help(void) {
-    printf("SigmaZero Chess Engine - Command Line Interface\n\n");
-    printf("Usage: sigma-zero <command> [arguments]\n\n");
+    printf("Usage: engine <command>\n");
     printf("Commands:\n");
-#define HELP_WIDTH "  %-30s"
-    printf(HELP_WIDTH " %s\n", "help, -h, --help", "Show this help message");
-    printf(HELP_WIDTH " %s\n", "version, -v, --version", "Show version information");
-    printf("\n");
-    printf(HELP_WIDTH " %s\n", "play <FEN> <millis> [history]", "Play best move for position");
-    printf(HELP_WIDTH " %s\n", "", "  FEN: Position in FEN notation");
-    printf(HELP_WIDTH " %s\n", "", "  millis: Time limit in milliseconds");
-    printf(HELP_WIDTH " %s\n", "", "  history: Optional game history");
-    printf("\n");
-    printf(HELP_WIDTH " %s\n", "fancy <FEN> <millis> [history]", "Play with enhanced scoring");
-    printf("\n");
-    printf(HELP_WIDTH " %s\n", "moves <FEN> <depth>", "Count legal moves at depth");
-    printf(HELP_WIDTH " %s\n", "", "  depth: Search depth (perft)");
-    printf("\n");
-    printf(HELP_WIDTH " %s\n", "eval <FEN>", "Evaluate position");
-    printf(HELP_WIDTH " %s\n", "hash <FEN>", "Show zobrist hash");
-    printf(HELP_WIDTH " %s\n", "scores <FEN>", "Show move scores");
-    printf(HELP_WIDTH " %s\n", "kingsafety <FEN>", "Show king danger scores");
-    printf("\n");
-    printf("Examples:\n");
-    printf("  sigma-zero play \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 1000\n");
-    printf("  sigma-zero moves \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\" 5\n");
-    printf("  sigma-zero eval \"8/8/8/4k3/8/8/4K3/8 w - - 0 1\"\n");
+#define HELP_WIDTH "  %-20s "
+    printf(HELP_WIDTH "Show this help message\n", "help");
+    printf(HELP_WIDTH "Show version information\n", "version");
+    printf(HELP_WIDTH "Show legal moves for the given position\n", "moves <FEN> <depth>");
+    printf(HELP_WIDTH "Get the evaluation of the given position\n", "eval <FEN>");
+    printf(HELP_WIDTH "Bot plays a move based on the given position\n", "play <FEN> <millis>");
 }
 
-int king_safety_command(Chess* chess) {
+int king_safety_command(Chess *chess) {
     int white_score = 0, black_score = 0;
 
     for (int i = 0; i < 64; i++) {
@@ -2877,36 +2501,19 @@ int king_safety_command(Chess* chess) {
     return 0;
 }
 
-int move_scores_command(Chess* chess) {
-    Move moves[MAX_LEGAL_MOVES];
-    size_t n_moves = Chess_legal_moves_scored(chess, moves, false);
-    bool elipses = false;
-
-    for (int i = 0; i < n_moves; i++) {
-        select_best_move(moves, i, n_moves);
-        if (moves[i].score != 0) {
-            printf("%-5s %6d\n", Move_string(moves + i), moves[i].score);
-        } else if (!elipses) {
-            printf("...   %6d\n", 0);
-            elipses = true;
-        }
-    }
-    return 0;
-}
-
 int test() {
-    Chess* chess = Chess_from_fen("8/1k6/8/4R3/8/8/4K3/8 w - - 0 1");
+    Chess* chess = Chess_from_fen("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
     if (!chess) return 1;
 
-    Chess_fill_attack_map(chess);
-    Move moves[MAX_LEGAL_MOVES];
+    Move move = (Move){.from = 36, .to = 43};
+    Piece piece = Chess_make_move(chess, &move);
+    printf("sp=%d\n", chess->zhstack.sp);
+    printf("%" PRIx64 " %" PRIx64 "\n", chess->zhash, Chess_zhash(chess));
+    printf("%" PRIx64 "\n", ZHashStack_peek(&chess->zhstack));
 
-    size_t n_moves = Chess_rook_moves(chess, moves, 36, false);
-
-    printf("%lu moves\n", (unsigned long)n_moves);
-    for (int i = 0; i < n_moves; i++) {
-        Move_print(&moves[i]);
-    }
+    Chess_unmake_move(chess, &move, piece);
+    printf("sp=%d\n", chess->zhstack.sp);
+    printf("%" PRIx64 " %" PRIx64 "\n", chess->zhash, Chess_zhash(chess));
 
     return 0;
 }
@@ -2952,10 +2559,6 @@ int main(int argc, char** argv) {
         Chess* chess = Chess_from_fen(argv[2]);
         if (!chess) return 1;
         return king_safety_command(chess);
-    } else if (argc == 3 && strcmp(argv[1], "scores") == 0) {
-        Chess* chess = Chess_from_fen(argv[2]);
-        if (!chess) return 1;
-        return move_scores_command(chess);
     } else {
         help();
         return 1;

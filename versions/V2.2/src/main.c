@@ -1711,7 +1711,7 @@ int version() {
 }
 
 void help(void) {
-    printf("Usage: sigma-zero <command>\n");
+    printf("Usage: engine <command>\n");
     printf("Commands:\n");
 #define HELP_WIDTH "  %-20s "
     printf(HELP_WIDTH "Show this help message\n", "help");

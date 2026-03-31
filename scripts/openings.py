@@ -2,7 +2,7 @@ from pprint import pprint
 import subprocess
 import re
 from dataclasses import dataclass
-import sigma_zero
+import sigma_zero as sigma_zero
 
 import chess
 

@@ -1,6 +1,6 @@
 import sys
 import time
-from . import sigma_zero
+from ... import sigma_zero
 import chess
 import chess.pgn
 import scripts.optimize_constants as optimize_constants

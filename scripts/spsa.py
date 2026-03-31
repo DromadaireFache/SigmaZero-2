@@ -125,7 +125,7 @@ def build_engine(consts: Consts, exe_name: str) -> None:
     with open("src/consts.c", "w") as f:
         f.write(optimize_constants.make_const_file(consts))
     subprocess.run(["make"], check=True)
-    shutil.move(optimize_constants.executable("sigma-zero"), exe_name)
+    shutil.move(optimize_constants.executable("engine"), exe_name)
 
 
 def evaluate_pair(plus_exe: str, minus_exe: str, n_games: int) -> tuple[float, float, float]:

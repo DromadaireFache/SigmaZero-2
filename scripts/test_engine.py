@@ -6,7 +6,7 @@ import chess
 import pytest
 
 try:
-    import sigma_zero
+    import sigma_zero as sigma_zero
 except ModuleNotFoundError:
     from .. import sigma_zero
 

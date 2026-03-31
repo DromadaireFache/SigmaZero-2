@@ -8,7 +8,7 @@ __pycache__/
 ~$versions.xlsx
 *.exe
 tournament.txt
-sigma-zero
+engine
 old
 consts_backup.c
 consts_best.c
