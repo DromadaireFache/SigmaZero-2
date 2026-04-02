@@ -225,13 +225,13 @@ class ReplayBuffer:
 
 # Helper to load Lichess database of real games for initial learning
 def load_buffer_from_lichess_db(capacity: int = 200_000) -> ReplayBuffer:
-    """Load Lichess game database from data/lichess_db.pkl.
+    """Load Lichess game database from data/lichess-games.pkl.
 
     Returns a list of (FEN, outcome) tuples where outcome ∈ {1.0, 0.5, 0.0}.
     """
-    if os.path.exists("data/lichess_db.pkl"):
-        print("Loading Lichess database from data/lichess_db.pkl...")
-        with open("data/lichess_db.pkl", "rb") as f:
+    if os.path.exists("data/lichess-games.pkl"):
+        print("Loading Lichess database from data/lichess-games.pkl...")
+        with open("data/lichess-games.pkl", "rb") as f:
             return pkl.load(f)
 
     url = "https://database.lichess.org/standard/lichess_db_standard_rated_2014-01.pgn.zst"
@@ -309,7 +309,7 @@ def load_buffer_from_lichess_db(capacity: int = 200_000) -> ReplayBuffer:
 
     if os.path.exists("data/lichess_db.txt"):
         os.remove("data/lichess_db.txt")
-    pkl.dump(buffer, open("data/lichess_db.pkl", "wb"))
+    pkl.dump(buffer, open("data/lichess-games.pkl", "wb"))
     return buffer
 
 

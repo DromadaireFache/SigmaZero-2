@@ -146,14 +146,20 @@ class UCIEngine(Engine):
     def __init__(self, exe: str):
         self.exe = exe
         self.process = subprocess.Popen(exe, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-
-    def play(self, board: chess.Board, millis: int) -> dict:
+        
+    def check_process(self) -> dict | None:
         if self.process.poll() is not None:
             print("UCI engine process has terminated unexpectedly.")
             return {"error": "Engine process terminated"}
         if not shutil.which(self.exe):
             print(f"UCI engine executable '{self.exe}' not found.")
             return {"error": "Engine executable not found"}
+        return None
+
+    def play(self, board: chess.Board, millis: int) -> dict:
+        error = self.check_process()
+        if error:
+            return error
         
         history = get_move_history(board)
         starting_fen = get_position_history(board)[0] if history else board.fen()
@@ -171,6 +177,9 @@ class UCIEngine(Engine):
             eval_score = 0
             time_taken = 0
             while True:
+                error = self.check_process()
+                if error:
+                    return error
                 line = self.process.stdout.readline()
                 if line.startswith("bestmove"):
                     best_move = line.split()[1]
@@ -189,6 +198,33 @@ class UCIEngine(Engine):
                 return {"move": best_move, "depth": depth, "eval": eval_score, "time": time_taken}
             else:
                 return {"error": "No move received from engine"}
+        except Exception as e:
+            print(f"Error communicating with UCI engine: {e}")
+            return {"error": str(e)}
+        
+    def moves(self, fen: str, depth: int) -> dict:
+        error = self.check_process()
+        if error:
+            return error
+        
+        try:
+            self.process.stdin.write(f"position fen {fen}\n")
+            self.process.stdin.flush()
+            self.process.stdin.write(f"go perft {depth}\n")
+            self.process.stdin.flush()
+
+            nodes = None
+            while True:
+                error = self.check_process()
+                if error:
+                    return error
+                line = self.process.stdout.readline()
+                if line.startswith("Nodes searched:"):
+                    nodes = int(line.split(":")[1].strip())
+                    break
+                
+            return {"nodes": nodes} if nodes is not None else {"error": "No nodes count received from engine"}
+            
         except Exception as e:
             print(f"Error communicating with UCI engine: {e}")
             return {"error": str(e)}

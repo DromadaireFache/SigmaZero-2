@@ -4,6 +4,7 @@ import time
 import chess
 
 from .engines import Engine
+from . import chessdata
 
 
 def what_draw(board: chess.Board) -> str:
@@ -32,35 +33,7 @@ def illegal_move(board: chess.Board, move_uci: str, result: dict):
 
 
 def get_tournament_fens(n: int = None):
-    seen_fens = set()
-    with open("data/chessData.csv", "r") as f:
-        i = 0
-        for line_index, line in enumerate(f):
-            if line_index % 10 != 0:
-                continue  # Only take every 10th line to get more variety and avoid similar positions
-            if n is not None and i >= n:
-                break
-            if not line.strip():
-                continue
-
-            fen, score = line.strip().split(",", 1)
-
-            if fen in seen_fens:
-                continue
-            seen_fens.add(fen)
-
-            try:
-                score = int(score)
-                fullmoves = int(fen.split()[-1])
-            except ValueError:
-                continue
-
-            if fullmoves < 10 and abs(score) < 40:
-                yield fen
-                i += 1
-                if i < n:
-                    yield fen  # Twice to play both colors
-                    i += 1
+    yield from chessdata.Dataloader(n=n, postype=chessdata.PosType.OPENING, balanced=True, repeat=True).fens()
 
 
 class Tournament:

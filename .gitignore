@@ -9,6 +9,7 @@ __pycache__/
 *.exe
 tournament.txt
 engine
+engine_debug
 old
 consts_backup.h
 consts_best.c
@@ -20,4 +21,5 @@ profile*
 *.er
 *.o
 *.d
-lichess_db.pkl
+*.pkl
+lichess-positions.csv
