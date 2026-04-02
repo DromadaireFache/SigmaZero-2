@@ -1,24 +1,34 @@
 CC=gcc
-CFLAGS=-Wall -Werror -Wno-unused-function
+CFLAGS=-Wall -Werror -Wno-unused-function -MMD -MP
 OPTIMIZE=-O3 -march=native -mtune=native
+TARGET=engine
+SRC_DIR=src
+BUILD_DIR=.build
+EXCLUDED=consts_backup.h
+EXTRA_SRCS=magicbb/moves.c
 
-# CFLAGS += -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
-# LDFLAGS += -fsanitize=thread -pthread
+SRCS := $(filter-out $(addprefix $(SRC_DIR)/,$(EXCLUDED)),$(wildcard $(SRC_DIR)/*.c))
+SRCS += $(EXTRA_SRCS)
+OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
+DEPS := $(OBJS:.o=.d)
 
-# Default target
-all: engine
+all: $(TARGET)
 
-engine: src/main.c src/consts.c magicbb/moves.o
-	$(CC) $(CFLAGS) $(OPTIMIZE) -o engine magicbb/moves.o src/main.c
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) $(OPTIMIZE) -o $@ $^
 
-quickly: src/main.c src/consts.c magicbb/moves.o
-	$(CC) $(CFLAGS) -o engine magicbb/moves.o src/main.c
+# Compile *.c -> .build/*.o
+$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(OPTIMIZE) -MF $(patsubst %.o,%.d,$@) -c $< -o $@
 
-magicbb_generator: magicbb/magicbb.c
-	$(CC) $(CFLAGS) $(OPTIMIZE) -o magicbb_generator magicbb/magicbb.c
+# Ensure build dir exists
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+	echo '*' > $(BUILD_DIR)/.gitignore
 
-magicbb/moves.o: magicbb/moves.c
-	$(CC) -c magicbb/moves.c -o magicbb/moves.o
-
+.PHONY: clean
 clean:
-	rm -f engine magicbb/moves.o magicbb_generator
+	rm -rf $(BUILD_DIR) $(TARGET) magicbb_generator
+
+-include $(DEPS)

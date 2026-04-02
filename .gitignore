@@ -10,7 +10,7 @@ __pycache__/
 tournament.txt
 engine
 old
-consts_backup.c
+consts_backup.h
 consts_best.c
 *.log
 chessData.csv
@@ -19,4 +19,5 @@ gmon.out
 profile*
 *.er
 *.o
+*.d
 lichess_db.pkl

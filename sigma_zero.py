@@ -104,10 +104,6 @@ def random_stuff_i_need_to_move_somewhere_else():
 
     movegen_df = pd.DataFrame(movegen_df)
     print(movegen_df)
-
-    # TODO: Fix stockfish engine
-    # tournament = Tournament(engine1=latest, engine2=stockfish, millis=(100, 100), n_games=5)
-    # print(tournament.elo())
     sys.exit(0)
 
     # Test nps

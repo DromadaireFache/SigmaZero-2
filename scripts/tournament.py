@@ -138,7 +138,11 @@ class Tournament:
         results = {"wins": 0, "losses": 0, "draws": 0, "avg_depth_1": 0, "avg_depth_2": 0}
         for i, fen in enumerate(get_tournament_fens(self.n_games)):
             try:
-                print(f"Game {i+1}/{self.n_games}")
+                if i == 0:
+                    print(f"Game {i+1}/{self.n_games}")
+                else:
+                    time_left = (time.perf_counter() - start) * (self.n_games - i) / i
+                    print(f"Game {i+1}/{self.n_games} (time left: {time_left:.0f}s)")
                 result = self.play_game(fen, is_white=(i % 2 == 0))
                 print("End FEN:", result.get("end_fen", "N/A"))
                 print(f"Time {result['time_1']:.2f}s / {result['time_2']:.2f}s")

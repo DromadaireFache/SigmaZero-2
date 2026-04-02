@@ -140,9 +140,9 @@ def make_const_file(consts: dict) -> str:
     return text
 
 
-# Read the current constants from consts.c
+# Read the current constants from consts.h
 best_consts = {}
-with open("src/consts.c", "r") as f:
+with open("src/consts.h", "r") as f:
     current_consts = f.read()
     
     for line in current_consts.splitlines():
@@ -161,22 +161,22 @@ with open("src/consts.c", "r") as f:
             continue
 
 
-# If consts.c != consts_backup.c, ask for confirmation
-if os.path.exists("src/consts_backup.c"):
-    with open("src/consts.c", "r") as f:
+# If consts.h != consts_backup.h, ask for confirmation
+if os.path.exists("src/consts_backup.h"):
+    with open("src/consts.h", "r") as f:
         current_consts = f.read()
-    with open("src/consts_backup.c", "r") as f:
+    with open("src/consts_backup.h", "r") as f:
         backup_consts = f.read()
     
     if current_consts != backup_consts:
-        print("Warning: src/consts.c has been modified since the last backup.")
+        print("Warning: src/consts.h has been modified since the last backup.")
         response = input("Do you want to continue and overwrite the backup? (y/n) ")
         if response.lower() != "y":
             print("Exiting without making changes.")
             sys.exit(0)
 
-# Make a backup copy of consts.c
-shutil.copyfile("src/consts.c", "src/consts_backup.c")
+# Make a backup copy of consts.h
+shutil.copyfile("src/consts.h", "src/consts_backup.h")
 
 
 def round_up(n: float, change_percent: float = 0.0) -> int:
@@ -396,13 +396,13 @@ def training_step():
     mut_consts = mutated_consts(best_consts)
     
     # Step 3
-    with open("src/consts.c", "w") as f:
+    with open("src/consts.h", "w") as f:
         f.write(make_const_file(best_consts))
     os.system("make")
     shutil.move(executable("engine"), executable("engine-best"))
     
     # Step 4
-    with open("src/consts.c", "w") as f:
+    with open("src/consts.h", "w") as f:
         f.write(make_const_file(mut_consts))
     os.system("make")
     shutil.move(executable("engine"), executable("engine-mutated"))
@@ -484,7 +484,7 @@ def train_cutoff(value_name: str, maximize: bool):
             mut_consts = mutated_consts(best_consts)
             
             # Step 5
-            with open("src/consts.c", "w") as f:
+            with open("src/consts.h", "w") as f:
                 f.write(make_const_file(mut_consts))
             os.system("make")
             
@@ -513,9 +513,9 @@ def train_cutoff(value_name: str, maximize: bool):
     with open("src/main.c", "wt") as f:
         f.write(main_c)
     
-    with open("src/consts.c", "w") as f:
+    with open("src/consts.h", "w") as f:
         f.write(make_const_file(best_consts))
-    print("Final best constants written to src/consts.c")
+    print("Final best constants written to src/consts.h")
     
     # Cleanup
     if os.path.exists("src/consts_best.c"):
@@ -548,9 +548,9 @@ def optimize():
             log(f"Error during training step: {e}")
             break
     
-    with open("src/consts.c", "w") as f:
+    with open("src/consts.h", "w") as f:
         f.write(make_const_file(best_consts))
-    print("Final best constants written to src/consts.c")
+    print("Final best constants written to src/consts.h")
     
     # Cleanup
     os.remove(executable("engine-best"))
@@ -586,7 +586,7 @@ def train_eval():
     print(f"Initial eval loss: {initial_loss:.0f}")
 
     def build_eval_executable(consts: dict, tag: str) -> str:
-        with open("src/consts.c", "w") as f:
+        with open("src/consts.h", "w") as f:
             f.write(make_const_file(consts))
         if os.system("make quickly") != 0:
             raise RuntimeError("build failed")
@@ -667,9 +667,9 @@ def train_eval():
         log(f"Error during eval training: {e.with_traceback(None)}")
         
     log(f"Final eval loss: {loss:.0f} after {n_mutations} successful mutations in {n_steps} steps (initial loss was {initial_loss:.0f}).")
-    with open("src/consts.c", "w") as f:
+    with open("src/consts.h", "w") as f:
         f.write(make_const_file(best_consts))
-    print("Final best constants written to src/consts.c")
+    print("Final best constants written to src/consts.h")
     
     
 def optimize_pruning(const: str, min_value: int, max_value: int):
@@ -692,7 +692,7 @@ def optimize_pruning(const: str, min_value: int, max_value: int):
             return
         
         nonlocal best_value, best_const
-        with open("src/consts.c", "w") as f:
+        with open("src/consts.h", "w") as f:
             f.write(make_const_file(best_consts))
         subprocess.run("make")
         cutoff_pc = first_move_cutoff_pc()
@@ -718,7 +718,7 @@ def optimize_pruning(const: str, min_value: int, max_value: int):
     best_const = int(sum(best_equivalents) / len(best_equivalents))
     best_consts[const] = best_const
     print(f"Best {const}: {best_const} with first_move_cutoff_%: {best_value}")
-    with open("src/consts.c", "w") as f:
+    with open("src/consts.h", "w") as f:
         f.write(make_const_file(best_consts))
         
     # Plot results

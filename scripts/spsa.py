@@ -70,7 +70,7 @@ def apply_integer_accumulated_step(
     consts: Consts, gradient: Consts, ak: float, residuals: Consts
 ) -> tuple[Consts, Consts, int]:
     """
-    Apply SPSA step while respecting integer constants in consts.c generation.
+    Apply SPSA step while respecting integer constants in consts.h generation.
 
     Fractional updates are accumulated in residuals and converted to integer steps
     once |residual + ak * gradient| reaches >= 1.
@@ -122,7 +122,7 @@ def apply_perturbation(consts: Consts, delta: Consts, mag: Consts, sign: int) ->
 
 
 def build_engine(consts: Consts, exe_name: str) -> None:
-    with open("src/consts.c", "w") as f:
+    with open("src/consts.h", "w") as f:
         f.write(optimize_constants.make_const_file(consts))
     subprocess.run(["make"], check=True)
     shutil.move(optimize_constants.executable("engine"), exe_name)
@@ -163,7 +163,7 @@ def generate_gradient(delta: Consts, mag: Consts, score_diff_raw: float) -> Cons
 
 
 def clamp_consts(consts: Consts) -> Consts:
-    """Match consts.c behavior for scalar defines: clamp to >= 1."""
+    """Match consts.h behavior for scalar defines: clamp to >= 1."""
     out: Consts = {}
     for key, value in consts.items():
         if isinstance(value, list):
@@ -240,13 +240,13 @@ def spsa(
                     print(f"  New best checkpoint constants: {best_elo:+.1f} Elo")
                 checkpoint_elos.append(elo)
     except KeyboardInterrupt:
-        print("SPSA optimization interrupted by user. Writing current best constants to src/consts.c.")
+        print("SPSA optimization interrupted by user. Writing current best constants to src/consts.h.")
 
     finally:
         consts = best_consts if checkpoint_ran else consts
-        with open("src/consts.c", "w") as f:
+        with open("src/consts.h", "w") as f:
             f.write(optimize_constants.make_const_file(consts))
-        print("Final best constants written to src/consts.c")
+        print("Final best constants written to src/consts.h")
         for exe in [baseline_exe, plus_exe, minus_exe, current_exe]:
             if os.path.exists(exe):
                 os.remove(exe)
