@@ -138,7 +138,7 @@ int play(char* fen, int millis, char* game_history) {
     double collision_rate = stores > 0 ? (double)collisions * 100.0 / stores : 0;
     printf("  \"tt_hit_rate_%%\": %.2f,\n", hit_rate);
     printf("  \"tt_collision_rate_%%\": %.2f,\n", collision_rate);
-    printf("  \"TT_occupancy_%%\": %.2f,\n", TT_occupancy() * 100.0);
+    printf("  \"tt_occupancy_%%\": %.2f,\n", TT_occupancy() * 100.0);
 #endif
 #ifdef TRACK_NODES
     size_t nodes = atomic_load(&nodes_searched);

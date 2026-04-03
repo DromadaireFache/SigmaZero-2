@@ -10,6 +10,24 @@
 
 TTItem tt[TT_LENGTH] = {0};
 
+#ifdef TRACK_BETA_CUTOFFS
+atomic_size_t total_nodes = 0;
+atomic_size_t beta_cutoffs = 0;
+atomic_size_t first_move_cutoffs = 0;
+atomic_size_t total_cutoff_index = 0;
+#endif
+
+#ifdef TRACK_TT
+atomic_size_t tt_lookups = 0;
+atomic_size_t tt_hits = 0;
+atomic_size_t tt_collisions = 0;
+atomic_size_t tt_stores = 0;
+#endif
+
+#ifdef TRACK_NODES
+atomic_size_t nodes_searched = 0;
+#endif
+
 /* ~~~~~~~~~~~~~~~~~~~~~ Move counting ~~~~~~~~~~~~~~~~~~~~~ */
 
 size_t Chess_count_moves(Chess* chess, int depth) {

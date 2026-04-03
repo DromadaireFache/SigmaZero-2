@@ -1,5 +1,7 @@
 #pragma once
 #include <stdbool.h>
+#include <stdatomic.h>
+
 #include "chess.h"
 
 #define INF 1000000000
@@ -8,27 +10,27 @@
 // #define TRACK_BETA_CUTOFFS
 
 #ifdef TRACK_BETA_CUTOFFS
-static atomic_size_t total_nodes = 0;
-static atomic_size_t beta_cutoffs = 0;
-static atomic_size_t first_move_cutoffs = 0;
-static atomic_size_t total_cutoff_index = 0;
+extern atomic_size_t total_nodes;
+extern atomic_size_t beta_cutoffs;
+extern atomic_size_t first_move_cutoffs;
+extern atomic_size_t total_cutoff_index;
 #endif
 
 // Uncomment to enable TT tracking (has performance cost)
 // #define TRACK_TT
 
 #ifdef TRACK_TT
-static atomic_size_t tt_lookups = 0;
-static atomic_size_t tt_hits = 0;
-static atomic_size_t tt_collisions = 0;
-static atomic_size_t tt_stores = 0;
+extern atomic_size_t tt_lookups;
+extern atomic_size_t tt_hits;
+extern atomic_size_t tt_collisions;
+extern atomic_size_t tt_stores;
 #endif
 
 // Uncomment to enable node tracking (has performance cost)
 // #define TRACK_NODES
 
 #ifdef TRACK_NODES
-static atomic_size_t nodes_searched = 0;
+extern atomic_size_t nodes_searched;
 #endif
 
 #ifdef _WIN32

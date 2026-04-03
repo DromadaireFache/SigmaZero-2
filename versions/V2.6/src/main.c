@@ -16,7 +16,7 @@
 #define INF 1000000000
 
 // Uncomment to enable beta cutoff tracking (has performance cost)
-#define TRACK_BETA_CUTOFFS
+// #define TRACK_BETA_CUTOFFS
 
 #ifdef TRACK_BETA_CUTOFFS
 #include <stdatomic.h>

@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import chess
 
@@ -51,8 +52,52 @@ class Engine(ABC):
 
 class SigmaZeroEngine(Engine):
     def __init__(self, exe: str = executable("engine")):
-        self.make()
         self.exe = exe
+        self.src_dir = Path("src")
+        self.untrack_metrics()
+        self.make()
+        
+    def untrack_metrics(self):
+        for file in self.src_dir.rglob("*.[ch]"):
+            contents = file.read_text()
+            lines = contents.splitlines(keepends=True)
+            changed = False
+            for i, line in enumerate(lines):
+                stripped = line.lstrip()
+                if stripped.startswith("#define TRACK_"):
+                    idx = line.find("#define TRACK_")
+                    lines[i] = f"{line[:idx]}// {line[idx:]}"
+                    changed = True
+            if changed:
+                file.write_text("".join(lines))
+    
+    def track_metrics(self, metrics: list[str] = None):
+        for file in self.src_dir.rglob("*.[ch]"):
+            contents = file.read_text()
+            lines = contents.splitlines(keepends=True)
+            changed = False
+            for i, line in enumerate(lines):
+                stripped = line.lstrip()
+                if not stripped.startswith("//"):
+                    continue
+
+                uncommented = stripped[2:]
+                if uncommented.startswith(" "):
+                    uncommented = uncommented[1:]
+                
+                if metrics is None:
+                    if not uncommented.startswith("#define TRACK_"):
+                        continue
+                else:
+                    if not any(uncommented.startswith(f"#define TRACK_{metric}") for metric in metrics):
+                        continue
+
+                prefix_len = len(line) - len(stripped)
+                lines[i] = f"{line[:prefix_len]}{uncommented}"
+                changed = True
+            if changed:
+                file.write_text("".join(lines))
+        self.make()
 
     def make(self):
         result = subprocess.run("make -s", shell=True, capture_output=True)
@@ -81,7 +126,9 @@ class SigmaZeroEngine(Engine):
         else:
             return result.stdout.strip()
 
-    def play(self, board: chess.Board, millis: int) -> dict:
+    def play(self, board: chess.Board | str, millis: int) -> dict:
+        if isinstance(board, str):
+            board = chess.Board(board)
         history = get_position_history(board)
         history_str = ",".join(history) if history else ""
         if history_str:
@@ -114,8 +161,10 @@ class OldEngine(SigmaZeroEngine):
             print(f"Version {version} not found in versions/")
             sys.exit(1)
 
-        self.make(version)
         self.exe = f"versions/{version}/{executable('engine')}"
+        self.src_dir = Path(f"versions/{version}/src")
+        self.untrack_metrics()
+        self.make(version)
 
     def make(self, version: str):
         if subprocess.run("make magicbb/moves.o", shell=True, capture_output=True).returncode != 0:
