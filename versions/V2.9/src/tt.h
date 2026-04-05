@@ -1,6 +1,6 @@
 #pragma once
-#include <stdbool.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 // Transposition table
 typedef enum { TT_EXACT, TT_LOWER, TT_UPPER } TTNodeType;
@@ -22,7 +22,7 @@ extern TTItem tt[TT_LENGTH];
 
 // Store an entry with fine-grained locking
 static inline int TT_store(uint64_t key, int eval, int depth, TTNodeType node_type,
-                           Move best_move) {
+                           uint8_t best_from, uint8_t best_to) {
     size_t i = key & (TT_LENGTH - 1);
     TTItem* item = &tt[i];
 
@@ -38,8 +38,8 @@ static inline int TT_store(uint64_t key, int eval, int depth, TTNodeType node_ty
         item->eval = eval;
         item->depth = depth;
         item->type = node_type;
-        item->best_from = best_move.from;
-        item->best_to = best_move.to;
+        item->best_from = best_from;
+        item->best_to = best_to;
     }
 
     return eval;

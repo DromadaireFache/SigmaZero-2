@@ -1,7 +1,6 @@
-#include "chess.h"
-
 #include <stdlib.h>
 
+#include "chess.h"
 #include "move.h"
 #include "piece.h"
 
@@ -10,8 +9,27 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     Piece moving_piece = chess->board[move->from];
     Piece target_piece = chess->board[move->to];
 
+    bitboard_t from_bb = bitboard_from_index(move->from);
+    bitboard_t to_bb = bitboard_from_index(move->to);
+
+    // Update bitboards
+    if (chess->turn == TURN_WHITE) {
+        chess->bb_white &= ~from_bb;  // Remove from source
+        chess->bb_white |= to_bb;     // Add to destination
+        chess->bb_black &= ~to_bb;    // Remove captured piece
+    } else {
+        chess->bb_black &= ~from_bb;
+        chess->bb_black |= to_bb;
+        chess->bb_white &= ~to_bb;
+    }
+
     // Remove piece from source square
-    Chess_remove(chess, move->from);
+    chess->zhash ^= Piece_zhash_at(moving_piece, move->from);
+    chess->eval -= Piece_value_at(moving_piece, move->from);
+
+    // Remove captured piece (if any)
+    chess->zhash ^= Piece_zhash_at(target_piece, move->to);
+    chess->eval -= Piece_value_at(target_piece, move->to);
 
     // Update gamestate hash
     chess->zhash ^= ZHASH_STATE[chess->gamestate];
@@ -23,6 +41,9 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     } else {
         chess->halfmoves = 0;
     }
+
+    // Update number of pawns
+    if (Piece_is_pawn(target_piece)) chess->number_of_pawns--;
 
     // Update fullmove number
     if (chess->turn == TURN_BLACK) {
@@ -41,9 +62,11 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     if (moving_piece == WHITE_KING) {
         Chess_castle_K_set(chess, false);
         Chess_castle_Q_set(chess, false);
+        chess->king_white = move->to;
     } else if (moving_piece == BLACK_KING) {
         Chess_castle_k_set(chess, false);
         Chess_castle_q_set(chess, false);
+        chess->king_black = move->to;
     } else if (moving_piece == WHITE_ROOK) {
         if (move->from == 0) {
             Chess_castle_Q_set(chess, false);
@@ -76,23 +99,47 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     // Move the rook if castling
     if (moving_piece == WHITE_KING && move->from == 4 && move->to == 6) {
         // White kingside
-        Chess_remove(chess, 7);           // Remove rook from h1
-        Chess_add(chess, WHITE_ROOK, 5);  // Add rook to f1
+        chess->board[5] = WHITE_ROOK;
+        chess->board[7] = EMPTY;
+        chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 7);
+        chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 5);
+        chess->eval -= Piece_value_at(WHITE_ROOK, 7);
+        chess->eval += Piece_value_at(WHITE_ROOK, 5);
+        chess->bb_white &= ~bitboard_from_index(7);  // Remove rook from h1
+        chess->bb_white |= bitboard_from_index(5);   // Add rook to f1
         chess->white_has_castled = true;
     } else if (moving_piece == WHITE_KING && move->from == 4 && move->to == 2) {
         // White queenside
-        Chess_remove(chess, 0);           // Remove rook from a1
-        Chess_add(chess, WHITE_ROOK, 3);  // Add rook to d1
+        chess->board[3] = WHITE_ROOK;
+        chess->board[0] = EMPTY;
+        chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 0);
+        chess->zhash ^= Piece_zhash_at(WHITE_ROOK, 3);
+        chess->eval -= Piece_value_at(WHITE_ROOK, 0);
+        chess->eval += Piece_value_at(WHITE_ROOK, 3);
+        chess->bb_white &= ~bitboard_from_index(0);  // Remove rook from a1
+        chess->bb_white |= bitboard_from_index(3);   // Add rook to d1
         chess->white_has_castled = true;
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 62) {
         // Black kingside
-        Chess_remove(chess, 63);           // Remove rook from h8
-        Chess_add(chess, BLACK_ROOK, 61);  // Add rook to f8
+        chess->board[61] = BLACK_ROOK;
+        chess->board[63] = EMPTY;
+        chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 63);
+        chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 61);
+        chess->eval -= Piece_value_at(BLACK_ROOK, 63);
+        chess->eval += Piece_value_at(BLACK_ROOK, 61);
+        chess->bb_black &= ~bitboard_from_index(63);  // Remove rook from h8
+        chess->bb_black |= bitboard_from_index(61);   // Add rook to f8
         chess->black_has_castled = true;
     } else if (moving_piece == BLACK_KING && move->from == 60 && move->to == 58) {
         // Black queenside
-        Chess_remove(chess, 56);           // Remove rook from a8
-        Chess_add(chess, BLACK_ROOK, 59);  // Add rook to d8
+        chess->board[59] = BLACK_ROOK;
+        chess->board[56] = EMPTY;
+        chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 56);
+        chess->zhash ^= Piece_zhash_at(BLACK_ROOK, 59);
+        chess->eval -= Piece_value_at(BLACK_ROOK, 56);
+        chess->eval += Piece_value_at(BLACK_ROOK, 59);
+        chess->bb_black &= ~bitboard_from_index(56);  // Remove rook from a8
+        chess->bb_black |= bitboard_from_index(59);   // Add rook to d8
         chess->black_has_castled = true;
     }
 
@@ -100,21 +147,32 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     if (moving_piece == WHITE_PAWN && index_col(move->from) != index_col(move->to) &&
         target_piece == EMPTY) {
         // White pawn capturing en passant
-        Chess_remove(chess, move->to - 8);
+        chess->zhash ^= Piece_zhash_at(BLACK_PAWN, move->to - 8);
+        chess->eval -= Piece_value_at(BLACK_PAWN, move->to - 8);
+        chess->board[move->to - 8] = EMPTY;
+        chess->pawn_row_sum += 2;
+        chess->bb_black &= ~bitboard_from_index(move->to - 8);
+        chess->number_of_pawns--;
     } else if (moving_piece == BLACK_PAWN && index_col(move->from) != index_col(move->to) &&
                target_piece == EMPTY) {
         // Black pawn capturing en passant
-        Chess_remove(chess, move->to + 8);
+        chess->zhash ^= Piece_zhash_at(WHITE_PAWN, move->to + 8);
+        chess->eval -= Piece_value_at(WHITE_PAWN, move->to + 8);
+        chess->board[move->to + 8] = EMPTY;
+        chess->pawn_row_sum -= 2;
+        chess->bb_white &= ~bitboard_from_index(move->to + 8);
+        chess->number_of_pawns--;
     }
 
     // Handle promotion and update pawn row sum number
     if (moving_piece == WHITE_PAWN) {
-        // chess->pawn_row_sum += index_row(move->to - move->from + 1);
-        // if (target_piece == BLACK_PAWN) chess->pawn_row_sum -= index_row(move->to) - 6;
+        chess->pawn_row_sum += index_row(move->to - move->from + 1);
+        if (target_piece == BLACK_PAWN) chess->pawn_row_sum -= index_row(move->to) - 6;
 
-        // if (move->promotion != NO_PROMOTION) {
-        //     chess->pawn_row_sum -= index_row(move->to) - 1;
-        // }
+        if (move->promotion != NO_PROMOTION) {
+            chess->pawn_row_sum -= index_row(move->to) - 1;
+            chess->number_of_pawns--;
+        }
 
         switch (move->promotion) {
             case PROMOTE_QUEEN:
@@ -133,12 +191,13 @@ Piece Chess_make_move(Chess* chess, Move* move) {
                 break;
         }
     } else if (moving_piece == BLACK_PAWN) {
-        // chess->pawn_row_sum += index_row(move->to - move->from - 1);
-        // if (target_piece == WHITE_PAWN) chess->pawn_row_sum -= index_row(move->to) - 1;
+        chess->pawn_row_sum += index_row(move->to - move->from - 1);
+        if (target_piece == WHITE_PAWN) chess->pawn_row_sum -= index_row(move->to) - 1;
 
-        // if (move->promotion != NO_PROMOTION) {
-        //     chess->pawn_row_sum -= index_row(move->to) - 6;
-        // }
+        if (move->promotion != NO_PROMOTION) {
+            chess->pawn_row_sum -= index_row(move->to) - 6;
+            chess->number_of_pawns--;
+        }
 
         switch (move->promotion) {
             case PROMOTE_QUEEN:
@@ -162,12 +221,17 @@ Piece Chess_make_move(Chess* chess, Move* move) {
     chess->zhash ^= ZHASH_WHITE ^ ZHASH_BLACK;
     chess->turn = !chess->turn;
 
-    // Add piece to destination square (also remove target piece if there is one)
-    Chess_add(chess, moving_piece, move->to);
+    chess->board[move->to] = moving_piece;
+    chess->board[move->from] = EMPTY;
 
     // Update gamestate in hash
     chess->zhash ^= ZHASH_STATE[chess->gamestate];
 
+    // Add piece to destination square
+    chess->zhash ^= Piece_zhash_at(moving_piece, move->to);
+    chess->eval += Piece_value_at(moving_piece, move->to);
+
+    // uint64_t hash = Chess_zhash(chess);
     ZHashStack_push(&chess->zhstack, chess->zhash);
     return target_piece;
 }
@@ -185,40 +249,41 @@ void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
         case PROMOTE_QUEEN:
         case PROMOTE_ROOK:
             moving_piece = chess->turn == TURN_WHITE ? WHITE_PAWN : BLACK_PAWN;
+            chess->number_of_pawns++;
             break;
         default:
             moving_piece = chess->board[move->to];
             break;
     }
 
-    // Add the captured piece back to the board (this will also remove the piece from the 'to' square)
-    Chess_add(chess, capture, move->to);
-
-    // Put the moving piece back to its original square
-    Chess_add(chess, moving_piece, move->from);
+    chess->board[move->from] = moving_piece;
+    chess->board[move->to] = capture;
+    if (Piece_is_pawn(capture)) chess->number_of_pawns++;
 
     if (Piece_is_king(moving_piece)) {
         // castling
-        if (move->from == 4 && move->to == 6) {
-            // White kingside
-            Chess_remove(chess, 5);           // Remove rook from f1
-            Chess_add(chess, WHITE_ROOK, 7);  // Add rook to h1
-            chess->white_has_castled = false;
-        } else if (move->from == 4 && move->to == 2) {
-            // White queenside
-            Chess_remove(chess, 3);           // Remove rook from d1
-            Chess_add(chess, WHITE_ROOK, 0);  // Add rook to a1
-            chess->white_has_castled = false;
-        } else if (move->from == 60 && move->to == 62) {
-            // Black kingside
-            Chess_remove(chess, 61);           // Remove rook from f8
-            Chess_add(chess, BLACK_ROOK, 63);  // Add rook to h8
-            chess->black_has_castled = false;
-        } else if (move->from == 60 && move->to == 58) {
-            // Black queenside
-            Chess_remove(chess, 59);           // Remove rook from d8
-            Chess_add(chess, BLACK_ROOK, 56);  // Add rook to a8
-            chess->black_has_castled = false;
+        uint8_t king_move = abs(move->to - move->from);
+        if (king_move == 2) {
+            Position pos = Position_from_index(move->to);
+            if (pos.col < 4) {  // queen side castling
+                chess->board[8 * pos.row] = chess->board[8 * pos.row + 3];
+                chess->board[8 * pos.row + 3] = EMPTY;
+            } else {  // king side castling
+                chess->board[8 * pos.row + 7] = chess->board[8 * pos.row + 5];
+                chess->board[8 * pos.row + 5] = EMPTY;
+            }
+            if (moving_piece == WHITE_KING) {
+                chess->white_has_castled = false;
+            } else {
+                chess->black_has_castled = false;
+            }
+        }
+
+        // Reset king position
+        if (moving_piece == WHITE_KING) {
+            chess->king_white = move->from;
+        } else {
+            chess->king_black = move->from;
         }
 
     } else if (Piece_is_pawn(moving_piece) && capture == EMPTY) {
@@ -227,10 +292,11 @@ void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
         if (pawn_move == 7 || pawn_move == 9) {
             int col = index_col(move->to);
             if (chess->turn == TURN_WHITE) {
-                Chess_add(chess, BLACK_PAWN, col + 32);
+                chess->board[col + 32] = BLACK_PAWN;
             } else {
-                Chess_add(chess, WHITE_PAWN, col + 24);
+                chess->board[col + 24] = WHITE_PAWN;
             }
+            chess->number_of_pawns++;
         }
     }
 
@@ -309,8 +375,8 @@ Piece Chess_user_move(Chess* chess, char* move_input) {
         INVALID_MOVE("Invalid position");
     }
 
-    int from_i = Position_to_index(from);
-    int to_i = Position_to_index(to);
+    int from_i = Position_to_index(&from);
+    int to_i = Position_to_index(&to);
     Move move_ = {.from = from_i, .to = to_i, .promotion = promotion};
 
     // if piece at 'from' is empty or not friendly
@@ -415,7 +481,7 @@ Chess* Chess_from_fen(char* fen) {
             if (piece == EMPTY) {
                 FEN_PARSING_ERROR("Invalid piece");
             }
-            Chess_add(board, piece, Position_to_index(pos));
+            Chess_add(board, piece, pos);
             pos.col += 1;
         }
         if (pos.col == 8) {
@@ -469,6 +535,10 @@ Chess* Chess_from_fen(char* fen) {
         FEN_PARSING_ERROR("Full move clock overflow");
     }
     board->fullmoves = (uint8_t)fullmoves;
+    Chess_find_kings(board);
+    Chess_find_pawns(board);
+    Chess_init_eval(board);
+    Chess_init_bb(board);
     board->zhash = Chess_zhash(board);
     board->white_has_castled = false;
     board->black_has_castled = false;

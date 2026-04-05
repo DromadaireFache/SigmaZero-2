@@ -57,6 +57,7 @@ __attribute__((always_inline)) static inline uint64_t now_nanos() {
 #ifdef __linux__
     clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
 #else
+    // TODO: check with CLOCK_MONOTONIC_RAW and variants
     clock_gettime(CLOCK_MONOTONIC, &ts);
 #endif
     return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;

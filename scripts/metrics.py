@@ -18,7 +18,7 @@ def mean_and_se(values: list[float | int]) -> tuple[float, float]:
 class TimedProgress:
     def __init__(self, name: str, duration: int):
         self.end = time() + duration
-        self.pbar = tqdm(total=duration, desc=name, bar_format="{l_bar}{bar}| {n:.1f}/{total:.0f}s")
+        self.pbar = tqdm(total=duration, desc=name, unit="s", leave=False)
         self._last = time()
 
     def __bool__(self):
@@ -50,11 +50,11 @@ def report_movegen(engine: SigmaZeroEngine, duration: int = 60):
     depth = 5
     fens = chessdata.Dataloader().fens()
     progress = TimedProgress("movegen", duration)
-    
+
     while progress:
         fen = next(fens)
         result = engine.moves(fen, depth=depth)
-        
+
         if "time" in result:
             times.append(result["time"])
         if "depth" in result:
@@ -80,19 +80,19 @@ def report_depth(engine: SigmaZeroEngine, duration: int = 60):
     depths_earlygame = []
     fens = chessdata.Dataloader().fens()
     progress = TimedProgress("depth", duration)
-    
+
     while progress:
         fen = next(fens)
         postype = chessdata.get_postype(fen)
         result = engine.play(fen, 1000)
-        
+
         if "depth" in result and result["depth"] > 0:
             depths.append(result["depth"])
             if postype == chessdata.PosType.ENDGAME:
                 depths_endgame.append(result["depth"])
             else:
                 depths_earlygame.append(result["depth"])
-                
+
     print_formatted_results(
         {
             "Depth": mean_and_se(depths),
@@ -102,16 +102,47 @@ def report_depth(engine: SigmaZeroEngine, duration: int = 60):
     )
 
 
+def report_accuracy(engine: SigmaZeroEngine, duration: int = 60):
+    engine.untrack_metrics()
+    engine.make()
+    accuracies_earlygame = []
+    accuracies_endgame = []
+    fens = chessdata.Dataloader().fen_moves()  # Get FENs with moves for accuracy testing
+    progress = TimedProgress("accuracy", duration)
+
+    while progress:
+        fen, move = next(fens)
+        result = engine.play(fen, 100)
+
+        if "move" in result:
+            predicted_move = result["move"]
+            postype = chessdata.get_postype(fen)
+            is_correct = (predicted_move == move) * 100  # Scale to percentage
+            if postype == chessdata.PosType.ENDGAME:
+                accuracies_endgame.append(is_correct)
+            else:
+                accuracies_earlygame.append(is_correct)
+
+    accuracies = accuracies_earlygame + accuracies_endgame
+    print_formatted_results(
+        {
+            "Accuracy": mean_and_se(accuracies),
+            "Accuracy (Endgame)": mean_and_se(accuracies_endgame),
+            "Accuracy (Earlygame)": mean_and_se(accuracies_earlygame),
+        }
+    )
+
+
 available_metrics = {
     "movegen": report_movegen,
     "depth": report_depth,  # Placeholder for depth metric
     "nodes": lambda engine, duration: None,  # Placeholder for nodes metric
     "beta_cutoffs": lambda engine, duration: None,  # Placeholder for beta cutoffs metric
-    # TODO: add accuracy metric, tt metric, etc.
+    "accuracy": report_accuracy,
 }
 
 
 def report(engine: SigmaZeroEngine, metrics_to_track: list[str], duration: int = 60):
-    duration_per_metric = duration // len(metrics_to_track)
+    duration_per_metric = max(1, duration // len(metrics_to_track))
     for metric in metrics_to_track:
         available_metrics[metric](engine, duration=duration_per_metric)

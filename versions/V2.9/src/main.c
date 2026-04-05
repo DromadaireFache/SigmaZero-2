@@ -3,10 +3,10 @@
 #include <stdio.h>
 
 #define CONSTS_IMPL
-#include "eval.h"
 #include "movegen.h"
 #include "search.h"
 #include "tt.h"
+#include "eval.h"
 
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
@@ -415,41 +415,18 @@ int compute_baseline_loss() {
 }
 
 int test() {
-    Chess* chess = Chess_from_fen(strdup("rnbqk2r/pppQnpp1/4P2p/6N1/1P6/b7/P1P1PPPP/RNB1KB1R b KQq - 0 4"));
-    Chess_friendly_check(chess) ? printf("In check\n") : printf("Not in check\n");
-    int king_i = Chess_friendly_king_i(chess);
+    // Chess* chess = Chess_from_fen("8/1k6/8/4R3/8/8/4K3/8 w - - 0 1");
+    // if (!chess) return 1;
 
-    bitboard_t piece_mask = bitboard_bishop_mask(king_i);
-    bitboard_t target_mask = piece_mask & (chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white);
-    int index = (target_mask * BISHOP_MAGIC_NUMS[king_i]) >> BISHOP_MAGIC_SHIFTS[king_i];
-    bitboard_t moves = BISHOP_MOVES[king_i][index];
-    printf("Bishop rays from king:\n");
-    bitboard_print(moves);
-    printf("\n");
+    // Chess_fill_attack_map(chess);
+    // Move moves[MAX_LEGAL_MOVES];
 
-    for (int i = 0; i < 4; i++) {
-        bitboard_t ray = QUADRANTS[i][king_i] & moves;
-        printf("Ray:\n");
-        bitboard_print(ray);
+    // size_t n_moves = Chess_rook_moves(chess, moves, 36, false);
 
-        bitboard_t attacker = ray & (Chess_enemy_bishops_bb(chess) | Chess_enemy_queens_bb(chess));
-        if (attacker) {
-            printf("Attacked in quadrant %d\n", i);
-        } else {
-            printf("Not attacked in quadrant %d\n", i);
-            continue;
-        }
-
-        bitboard_t blockers = ray & (chess->turn == TURN_WHITE ? chess->bb_white : chess->bb_black);
-        int n_blockers = bitboard_popcount(blockers);
-        if (n_blockers == 0) {
-            printf("Attacked with no blockers in quadrant %d: in check\n", i);
-        } else if (n_blockers > 1) {
-            printf("Attacked with multiple blockers in quadrant %d: no pin\n", i);
-        } else {
-            printf("Attacked with 1 blocker in quadrant %d: pinned\n", i);
-        }
-    }
+    // printf("%lu moves\n", (unsigned long)n_moves);
+    // for (int i = 0; i < n_moves; i++) {
+    //     Move_print(&moves[i]);
+    // }
 
     return 0;
 }

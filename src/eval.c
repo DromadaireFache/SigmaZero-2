@@ -1,3 +1,5 @@
+#include <assert.h>
+
 #include "chess.h"
 #include "movegen.h"
 
@@ -54,6 +56,101 @@ int king_safety(Chess* chess) {
     return e;
 }
 
+void assert_consistency(Chess* chess) {
+    bitboard_t bb_white_check = 0;
+    bitboard_t bb_black_check = 0;
+    BitboardMap bb_check = {0};
+    int eval_check = 0, pawn_row_sum_check = 0;
+    int white_king_i = -1, black_king_i = -1;
+
+    for (int i = 0; i < 64; i++) {
+        Piece piece = chess->board[i];
+        bitboard_t bit = 1ULL << i;
+        eval_check += Piece_value_at(piece, i);
+        switch (piece) {
+            case WHITE_PAWN:
+                bb_check.white_pawns |= bit;
+                bb_white_check |= bit;
+                pawn_row_sum_check += index_row(i) - 1;
+                break;
+            case BLACK_PAWN:
+                bb_check.black_pawns |= bit;
+                bb_black_check |= bit;
+                pawn_row_sum_check += index_row(i) - 6;
+                break;
+            case WHITE_KNIGHT:
+                bb_check.white_knights |= bit;
+                bb_white_check |= bit;
+                break;
+            case BLACK_KNIGHT:
+                bb_check.black_knights |= bit;
+                bb_black_check |= bit;
+                break;
+            case WHITE_BISHOP:
+                bb_check.white_bishops |= bit;
+                bb_white_check |= bit;
+                break;
+            case BLACK_BISHOP:
+                bb_check.black_bishops |= bit;
+                bb_black_check |= bit;
+                break;
+            case WHITE_ROOK:
+                bb_check.white_rooks |= bit;
+                bb_white_check |= bit;
+                break;
+            case BLACK_ROOK:
+                bb_check.black_rooks |= bit;
+                bb_black_check |= bit;
+                break;
+            case WHITE_QUEEN:
+                bb_check.white_queens |= bit;
+                bb_white_check |= bit;
+                break;
+            case BLACK_QUEEN:
+                bb_check.black_queens |= bit;
+                bb_black_check |= bit;
+                break;
+            case WHITE_KING:
+                bb_check.white_kings |= bit;
+                bb_white_check |= bit;
+                white_king_i = i;
+                break;
+            case BLACK_KING:
+                bb_check.black_kings |= bit;
+                bb_black_check |= bit;
+                black_king_i = i;
+                break;
+            default:
+                break;
+        }
+    }
+
+    assert(eval_check == chess->eval);
+    assert(white_king_i == chess->king_white);
+    assert(black_king_i == chess->king_black);
+    assert(pawn_row_sum_check == chess->pawn_row_sum);
+    assert(bb_white_check == chess->bb_white);
+    assert(bb_black_check == chess->bb_black);
+    assert(bb_check.white_pawns == chess->bb.white_pawns);
+    assert(bb_check.black_pawns == chess->bb.black_pawns);
+    assert(bb_check.white_knights == chess->bb.white_knights);
+    assert(bb_check.black_knights == chess->bb.black_knights);
+    assert(bb_check.white_bishops == chess->bb.white_bishops);
+    assert(bb_check.black_bishops == chess->bb.black_bishops);
+    assert(bb_check.white_rooks == chess->bb.white_rooks);
+    assert(bb_check.black_rooks == chess->bb.black_rooks);
+    assert(bb_check.white_queens == chess->bb.white_queens);
+    assert(bb_check.black_queens == chess->bb.black_queens);
+    assert(bb_check.white_kings == chess->bb.white_kings);
+    assert(bb_check.black_kings == chess->bb.black_kings);
+    assert(chess->bb_white ==
+           (chess->bb.white_pawns | chess->bb.white_knights | chess->bb.white_bishops |
+            chess->bb.white_rooks | chess->bb.white_queens | chess->bb.white_kings));
+    assert(chess->bb_black ==
+           (chess->bb.black_pawns | chess->bb.black_knights | chess->bb.black_bishops |
+            chess->bb.black_rooks | chess->bb.black_queens | chess->bb.black_kings));
+}
+
 int eval(Chess* chess) {
     uint8_t fullmoves = chess->fullmoves > FULLMOVES_ENDGAME ? FULLMOVES_ENDGAME : chess->fullmoves;
     int e = chess->eval;
@@ -75,5 +172,11 @@ int eval(Chess* chess) {
     e -= chess->black_has_castled * CASTLE_BONUS;
 
     e += king_safety(chess);
+
+    // Check that the bitboards and board array are consistent
+#ifdef DEBUG
+    assert_consistency(chess);
+#endif
+
     return e;
 }

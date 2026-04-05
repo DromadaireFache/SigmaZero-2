@@ -47,11 +47,15 @@ size_t Chess_count_moves(Chess* chess, int depth) {
     for (int i = 0; i < n_moves; i++) {
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
+        bitboard_t bb_white = chess->bb_white;
+        bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, &moves[i]);
         nodes += Chess_count_moves(chess, depth - 1);
         Chess_unmake_move(chess, &moves[i], capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
+        chess->bb_white = bb_white;
+        chess->bb_black = bb_black;
     }
 
     return nodes;
@@ -372,6 +376,10 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
 
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
+        int e = chess->eval;
+        int pawn_row_sum = chess->pawn_row_sum;
+        bitboard_t bb_white = chess->bb_white;
+        bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax_captures_only(chess, endtime, depth - 1, -b, -a);
@@ -379,6 +387,10 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
+        chess->eval = e;
+        chess->pawn_row_sum = pawn_row_sum;
+        chess->bb_white = bb_white;
+        chess->bb_black = bb_black;
 
         if (score > best_score) {
             best_score = score;
@@ -419,7 +431,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             extensions++;
         } else {
             return TT_store(hash, chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), depth,
-                            TT_EXACT, (Move){0});
+                            TT_EXACT, 0, 0);
         }
     }
 
@@ -440,10 +452,10 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     if (n_moves == 0) {
         if (in_check) {
             // Checkmate
-            return TT_store(hash, -1000000 - depth, depth, TT_EXACT, (Move){0});
+            return TT_store(hash, -1000000 - depth, depth, TT_EXACT, 0, 0);
         } else {
             // draw by stalemate
-            return TT_store(hash, 0, depth, TT_EXACT, (Move){0});
+            return TT_store(hash, 0, depth, TT_EXACT, 0, 0);
         }
     }
 
@@ -452,12 +464,12 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
         int margin = FP_BASE + depth * FP_FACTOR;
         if (e + margin <= a) {
-            return TT_store(hash, a, depth, TT_UPPER, (Move){0});  // Failed low
+            return TT_store(hash, a, depth, TT_UPPER, 0, 0);  // Failed low
         }
 
         margin = RFP_BASE + depth * RFP_FACTOR;
         if (e - 2 * margin >= b) {
-            return TT_store(hash, b, depth, TT_LOWER, (Move){0});  // Failed high
+            return TT_store(hash, b, depth, TT_LOWER, 0, 0);  // Failed high
         }
     }
 
@@ -511,7 +523,10 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
 
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
+        int e = chess->eval;
         int pawn_row_sum = chess->pawn_row_sum;
+        bitboard_t bb_white = chess->bb_white;
+        bitboard_t bb_black = chess->bb_black;
         Piece capture = Chess_make_move(chess, move);
 
         int score;
@@ -547,7 +562,10 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
+        chess->eval = e;
         chess->pawn_row_sum = pawn_row_sum;
+        chess->bb_white = bb_white;
+        chess->bb_black = bb_black;
 
         if (score > best_score) {
             best_score = score;
@@ -565,10 +583,12 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
                 if (!(chess->killer_moves[0][depth].from == move->from &&
                       chess->killer_moves[0][depth].to == move->to)) {
                     chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
-                    chess->killer_moves[0][depth] = *move;
+                    chess->killer_moves[0][depth].from = move->from;
+                    chess->killer_moves[0][depth].to = move->to;
                 }
             }
-            return TT_store(hash, best_score, depth, TT_LOWER, best_move);  // Failed high
+            return TT_store(hash, best_score, depth, TT_LOWER, best_move.from,
+                            best_move.to);  // Failed high
         }
     }
 
@@ -576,9 +596,10 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     atomic_fetch_add(&total_cutoff_index, n_moves - 1);
 #endif
     if (best_score <= original_a) {
-        return TT_store(hash, best_score, depth, TT_UPPER, best_move);  // Failed low
+        return TT_store(hash, best_score, depth, TT_UPPER, best_move.from,
+                        best_move.to);  // Failed low
     }
-    return TT_store(hash, best_score, depth, TT_EXACT, best_move);
+    return TT_store(hash, best_score, depth, TT_EXACT, best_move.from, best_move.to);
 }
 
 void* play_thread(void* arg) {

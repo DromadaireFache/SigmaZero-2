@@ -66,7 +66,7 @@ static inline char* Position_to_string(Position* pos) {
 }
 
 // Convert a position to an index (0-63)
-static inline int Position_to_index(Position pos) { return pos.row * 8 + pos.col; }
+static inline int Position_to_index(Position* pos) { return pos->row * 8 + pos->col; }
 
 static inline Position Position_from_index(int index) {
     return (Position){.col = index_col(index), .row = index_row(index)};

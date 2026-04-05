@@ -52,11 +52,6 @@ typedef struct {
     bitboard_t valid_map[64];
 } EnemyAttackMap;
 
-typedef struct {
-    bitboard_t white_pawns, black_pawns, white_knights, black_knights, white_bishops, black_bishops,
-        white_rooks, black_rooks, white_queens, black_queens, white_kings, black_kings;
-} BitboardMap;
-
 // The chessboard
 typedef struct {
     Piece board[64];        // Array of pieces, index 0 is a1, index 63 is h8
@@ -76,7 +71,7 @@ typedef struct {
     Move killer_moves[2][64];  // Used for move ordering [id][depth]
     bool white_has_castled;
     bool black_has_castled;
-    BitboardMap bb;  // Bitboards to store the pieces
+    uint8_t number_of_pawns;
 } Chess;
 
 #define BITMASK(nbit) (1 << (nbit))
@@ -279,137 +274,12 @@ static inline uint8_t Chess_enemy_king_i(Chess* chess) {
     return chess->turn == TURN_WHITE ? chess->king_black : chess->king_white;
 }
 
-// Remove a piece from the board at a given position (updates board, eval, zhash, and bitboards
-// accordingly)
-static inline void Chess_remove(Chess* chess, int i) {
-    Piece piece = chess->board[i];
-    chess->eval -= Piece_value_at(piece, i);
-    chess->zhash ^= Piece_zhash_at(piece, i);
-    chess->board[i] = EMPTY;
-    bitboard_t bb = bitboard_from_index(i);
-    switch (piece) {
-        case WHITE_PAWN:
-            chess->bb_white &= ~bb;
-            chess->bb.white_pawns &= ~bb;
-            chess->pawn_row_sum -= index_row(i) - 1;
-            break;
-        case BLACK_PAWN:
-            chess->bb_black &= ~bb;
-            chess->bb.black_pawns &= ~bb;
-            chess->pawn_row_sum -= index_row(i) - 6;
-            break;
-        case WHITE_KNIGHT:
-            chess->bb_white &= ~bb;
-            chess->bb.white_knights &= ~bb;
-            break;
-        case BLACK_KNIGHT:
-            chess->bb_black &= ~bb;
-            chess->bb.black_knights &= ~bb;
-            break;
-        case WHITE_BISHOP:
-            chess->bb_white &= ~bb;
-            chess->bb.white_bishops &= ~bb;
-            break;
-        case BLACK_BISHOP:
-            chess->bb_black &= ~bb;
-            chess->bb.black_bishops &= ~bb;
-            break;
-        case WHITE_ROOK:
-            chess->bb_white &= ~bb;
-            chess->bb.white_rooks &= ~bb;
-            break;
-        case BLACK_ROOK:
-            chess->bb_black &= ~bb;
-            chess->bb.black_rooks &= ~bb;
-            break;
-        case WHITE_QUEEN:
-            chess->bb_white &= ~bb;
-            chess->bb.white_queens &= ~bb;
-            break;
-        case BLACK_QUEEN:
-            chess->bb_black &= ~bb;
-            chess->bb.black_queens &= ~bb;
-            break;
-        case WHITE_KING:
-            chess->bb_white &= ~bb;
-            chess->bb.white_kings &= ~bb;
-            break;
-        case BLACK_KING:
-            chess->bb_black &= ~bb;
-            chess->bb.black_kings &= ~bb;
-            break;
-        default:
-            break;
-    }
-}
-
-// Add a piece to the board at a given position (updates board, eval, zhash, and bitboards
-// accordingly) Will overwrite piece at square i
-static inline Piece Chess_add(Chess* chess, Piece piece, int i) {
-    // if board[i] != EMPTY, remove that piece first
-    Piece capture = chess->board[i];
-    if (capture != EMPTY) Chess_remove(chess, i);
+// Add a piece to the board at a given position
+// Only meant for initializing the board
+static inline void Chess_add(Chess* chess, Piece piece, Position pos) {
+    if (!Position_valid(&pos)) return;
+    int i = Position_to_index(&pos);
     chess->board[i] = piece;
-    chess->eval += Piece_value_at(piece, i);
-    chess->zhash ^= Piece_zhash_at(piece, i);
-    bitboard_t bb = bitboard_from_index(i);
-    switch (piece) {
-        case WHITE_PAWN:
-            chess->bb_white |= bb;
-            chess->bb.white_pawns |= bb;
-            chess->pawn_row_sum += index_row(i) - 1;
-            break;
-        case BLACK_PAWN:
-            chess->bb_black |= bb;
-            chess->bb.black_pawns |= bb;
-            chess->pawn_row_sum += index_row(i) - 6;
-            break;
-        case WHITE_KNIGHT:
-            chess->bb_white |= bb;
-            chess->bb.white_knights |= bb;
-            break;
-        case BLACK_KNIGHT:
-            chess->bb_black |= bb;
-            chess->bb.black_knights |= bb;
-            break;
-        case WHITE_BISHOP:
-            chess->bb_white |= bb;
-            chess->bb.white_bishops |= bb;
-            break;
-        case BLACK_BISHOP:
-            chess->bb_black |= bb;
-            chess->bb.black_bishops |= bb;
-            break;
-        case WHITE_ROOK:
-            chess->bb_white |= bb;
-            chess->bb.white_rooks |= bb;
-            break;
-        case BLACK_ROOK:
-            chess->bb_black |= bb;
-            chess->bb.black_rooks |= bb;
-            break;
-        case WHITE_QUEEN:
-            chess->bb_white |= bb;
-            chess->bb.white_queens |= bb;
-            break;
-        case BLACK_QUEEN:
-            chess->bb_black |= bb;
-            chess->bb.black_queens |= bb;
-            break;
-        case WHITE_KING:
-            chess->bb_white |= bb;
-            chess->bb.white_kings |= bb;
-            chess->king_white = i;
-            break;
-        case BLACK_KING:
-            chess->bb_black |= bb;
-            chess->bb.black_kings |= bb;
-            chess->king_black = i;
-            break;
-        default:
-            break;
-    }
-    return capture;
 }
 
 static inline void Chess_empty_board(Chess* chess) {
@@ -431,6 +301,13 @@ static inline void Chess_find_kings(Chess* chess) {
         } else if (piece == BLACK_KING) {
             chess->king_black = i;
         }
+    }
+}
+
+static inline void Chess_find_pawns(Chess* chess) {
+    for (int i = 0; i < 64; i++) {
+        Piece piece = chess->board[i];
+        if (piece == WHITE_PAWN || piece == BLACK_PAWN) chess->number_of_pawns++;
     }
 }
 
@@ -487,8 +364,7 @@ static inline uint64_t Chess_zhash(Chess* chess) {
 
 static inline bool Chess_has_non_pawn_material(Chess* chess) {
     int number_of_piece = __builtin_popcountll(chess->bb_white | chess->bb_black);
-    int number_of_pawns = __builtin_popcountll(chess->bb.white_pawns | chess->bb.black_pawns);
-    return number_of_piece - number_of_pawns > 2;  // 2 because of the kings
+    return number_of_piece - chess->number_of_pawns > 2;  // 2 because of the kings
 }
 
 static inline bool Chess_square_available(Chess* chess, int index, bool captures_only) {
@@ -509,62 +385,6 @@ static inline int Chess_3fold_repetition(Chess* chess) {
     }
 
     return count;
-}
-
-static inline bitboard_t Chess_friendly_pawns_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.white_pawns : chess->bb.black_pawns;
-}
-
-static inline bitboard_t Chess_enemy_pawns_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.black_pawns : chess->bb.white_pawns;
-}
-
-static inline bitboard_t Chess_friendly_knights_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.white_knights : chess->bb.black_knights;
-}
-
-static inline bitboard_t Chess_enemy_knights_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.black_knights : chess->bb.white_knights;
-}
-
-static inline bitboard_t Chess_friendly_bishops_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.white_bishops : chess->bb.black_bishops;
-}
-
-static inline bitboard_t Chess_enemy_bishops_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.black_bishops : chess->bb.white_bishops;
-}
-
-static inline bitboard_t Chess_friendly_rooks_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.white_rooks : chess->bb.black_rooks;
-}
-
-static inline bitboard_t Chess_enemy_rooks_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.black_rooks : chess->bb.white_rooks;
-}
-
-static inline bitboard_t Chess_friendly_queens_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.white_queens : chess->bb.black_queens;
-}
-
-static inline bitboard_t Chess_enemy_queens_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.black_queens : chess->bb.white_queens;
-}
-
-static inline bitboard_t Chess_friendly_kings_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.white_kings : chess->bb.black_kings;
-}
-
-static inline bitboard_t Chess_enemy_kings_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb.black_kings : chess->bb.white_kings;
-}
-
-static inline bitboard_t Chess_friendly_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb_white : chess->bb_black;
-}
-
-static inline bitboard_t Chess_enemy_bb(Chess* chess) {
-    return chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white;
 }
 
 Piece Chess_make_move(Chess* chess, Move* move);

@@ -161,19 +161,20 @@ class OldEngine(SigmaZeroEngine):
             print(f"Version {version} not found in versions/")
             sys.exit(1)
 
+        self.version_name = version
         self.exe = f"versions/{version}/{executable('engine')}"
         self.src_dir = Path(f"versions/{version}/src")
         self.untrack_metrics()
-        self.make(version)
+        self.make()
 
-    def make(self, version: str):
+    def make(self):
         if subprocess.run("make magicbb/moves.o", shell=True, capture_output=True).returncode != 0:
             print("Compilation failed for magicbb/moves.o")
             sys.exit(1)
             
         def link_moves(filename: str):
             src_path = os.path.abspath(f"magicbb/{filename}")
-            link_path = os.path.abspath(f"versions/{version}/magicbb/{filename}")
+            link_path = os.path.abspath(f"versions/{self.version_name}/magicbb/{filename}")
             if not os.path.exists(link_path):
                 os.makedirs(os.path.dirname(link_path), exist_ok=True)
                 os.symlink(src_path, link_path)
@@ -181,13 +182,13 @@ class OldEngine(SigmaZeroEngine):
         link_moves("moves.o")
         link_moves("moves.c")
         
-        gitignore = os.path.abspath(f"versions/{version}/magicbb/.gitignore")
+        gitignore = os.path.abspath(f"versions/{self.version_name}/magicbb/.gitignore")
         if not os.path.exists(gitignore):
             with open(gitignore, "w") as f:
                 f.write("*\n")
         
-        if subprocess.run(f"make -s -C versions/{version}", shell=True, capture_output=True).returncode != 0:
-            print(f"Compilation failed for version {version}")
+        if subprocess.run(f"make -s -C versions/{self.version_name}", shell=True, capture_output=True).returncode != 0:
+            print(f"Compilation failed for version {self.version_name}")
             sys.exit(1)
             
             

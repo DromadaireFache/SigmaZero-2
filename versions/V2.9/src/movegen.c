@@ -2,79 +2,13 @@
 
 #include <stdlib.h>
 
-// Change this to have one function for bishop and one for rook
-static inline bitboard_t Chess_magic_moves_bb(Chess* chess, int from, bool is_bishop,
-                                              const bitboard_t MAGIC_NUMS[64],
-                                              const int MAGIC_SHIFTS[64],
-                                              const bitboard_t* MOVES[64]) {
-    bitboard_t friendly_bb = Chess_friendly_bb(chess);
-    bitboard_t all_bb = chess->bb_white | chess->bb_black;
-
-    // Get piece mask from table (all pseudo-legal moves, exluding moves to the edge of board)
-    bitboard_t piece_mask = is_bishop ? bitboard_bishop_mask(from) : bitboard_rook_mask(from);
-
-    // Get target mask (blockers in the path of the sliding piece)
-    bitboard_t target_mask = piece_mask & all_bb;
-
-    // Get move index from magic bitboard multiplication
-    int index = (target_mask * MAGIC_NUMS[from]) >> MAGIC_SHIFTS[from];
-
-    // Get pseudo-legal moves from table
-    bitboard_t moves = MOVES[from][index] & ~friendly_bb;
-
-    return moves;
-}
-
-// Returns true if double check, otherwise fills the enemy attack map with check and pin information
-static inline bool sliding_piece_attack_map(Chess* chess, bool is_bishop,
-                                            const bitboard_t MAGIC_NUMS[64],
-                                            const int MAGIC_SHIFTS[64],
-                                            const bitboard_t* MOVES[64]) {
-    // New approach using bitboards for bishop/queen attacks
-    bitboard_t friendly_bb = Chess_friendly_bb(chess);
-    int king_i = Chess_friendly_king_i(chess);
-    EnemyAttackMap* eam = &chess->enemy_attack_map;
-
-    // Get the piece mask for the bishop moves from the king
-    // X-ray through friendly pieces to find potential pins
-    bitboard_t enemies = (is_bishop ? Chess_enemy_bishops_bb(chess) : Chess_enemy_rooks_bb(chess)) |
-                         Chess_enemy_queens_bb(chess);
-    bitboard_t piece_mask = is_bishop ? bitboard_bishop_mask(king_i) : bitboard_rook_mask(king_i);
-    bitboard_t target_mask = piece_mask & Chess_enemy_bb(chess);
-    int index = (target_mask * MAGIC_NUMS[king_i]) >> MAGIC_SHIFTS[king_i];
-    bitboard_t bishop_xray = MOVES[king_i][index];
-
-    for (int i = 0; i < 4; i++) {
-        // Get the X-ray in this quadrant
-        bitboard_t ray = QUADRANTS[i][king_i] & bishop_xray;
-
-        // Get the bitboard of a potential attacker in this quadrant
-        bitboard_t attacker = ray & enemies;
-        if (!attacker) continue;  // no attacker in this quadrant, so skip
-
-        // If there's an attacker, check the number of pieces between the king and the attacker to
-        // determine if it's a check (0 pieces), a pin (1 piece), or no threat (2+ pieces)
-        bitboard_t blockers = ray & friendly_bb;
-        int n_blockers = bitboard_popcount(blockers);
-        if (n_blockers == 0) {  // check
-            eam->n_checks++;
-            if (eam->n_checks == 1) eam->block_attack_map = ray;
-            if (eam->n_checks >= 2) return true;  // double check, so return immediately
-        } else if (n_blockers == 1) {             // pin
-            uint8_t pinned_piece = __builtin_ctzll(blockers);
-            eam->valid_map[pinned_piece] = ray;
-            eam->pinned_piece_map |= bitboard_from_index(pinned_piece);
-        }
-    }
-    return false;  // not double check
-}
-
 void Chess_fill_attack_map(Chess* chess) {
     EnemyAttackMap* eam = &chess->enemy_attack_map;
     eam->n_checks = 0;
 
     uint8_t king_i = Chess_friendly_king_i(chess);
     Position king_pos = Position_from_index(king_i);
+    bitboard_t occupied = chess->bb_white | chess->bb_black;
 
 #define ENEMY_ATTACK(condition1, condition2, attack_map)              \
     if ((condition1) && (condition2)) {                               \
@@ -96,12 +30,29 @@ void Chess_fill_attack_map(Chess* chess) {
         PAWN_ATTACK(king_pos.row > 0 && king_pos.col < 7, -7)
     }
 
-    // Look for knight attacks
-    bitboard_t knight_attacks = KNIGHT_MOVES[king_i] & Chess_enemy_knights_bb(chess);
-    if (knight_attacks) {
-        eam->n_checks += __builtin_popcountll(knight_attacks);
-        if (eam->n_checks == 1) eam->block_attack_map = knight_attacks;
-        if (eam->n_checks >= 2) return;
+    // TODO FIX THIS WITH BITBOARDS
+// Look for knight attacks
+#define KNIGHT_ATTACK(condition, offset)                                     \
+    ENEMY_ATTACK(condition, Chess_enemy_knight_at(chess, king_i + (offset)), \
+                 bitboard_from_index(king_i + (offset)))
+    if (chess->turn == TURN_WHITE) {
+        KNIGHT_ATTACK(king_pos.row < 7 && king_pos.col > 1, 6)
+        KNIGHT_ATTACK(king_pos.row < 7 && king_pos.col < 6, 10)
+        KNIGHT_ATTACK(king_pos.row < 6 && king_pos.col > 0, 15)
+        KNIGHT_ATTACK(king_pos.row < 6 && king_pos.col < 7, 17)
+        KNIGHT_ATTACK(king_pos.row > 1 && king_pos.col > 0, -17)
+        KNIGHT_ATTACK(king_pos.row > 1 && king_pos.col < 7, -15)
+        KNIGHT_ATTACK(king_pos.row > 0 && king_pos.col > 1, -10)
+        KNIGHT_ATTACK(king_pos.row > 0 && king_pos.col < 6, -6)
+    } else {
+        KNIGHT_ATTACK(king_pos.row > 1 && king_pos.col > 0, -17)
+        KNIGHT_ATTACK(king_pos.row > 1 && king_pos.col < 7, -15)
+        KNIGHT_ATTACK(king_pos.row > 0 && king_pos.col > 1, -10)
+        KNIGHT_ATTACK(king_pos.row > 0 && king_pos.col < 6, -6)
+        KNIGHT_ATTACK(king_pos.row < 7 && king_pos.col > 1, 6)
+        KNIGHT_ATTACK(king_pos.row < 7 && king_pos.col < 6, 10)
+        KNIGHT_ATTACK(king_pos.row < 6 && king_pos.col > 0, 15)
+        KNIGHT_ATTACK(king_pos.row < 6 && king_pos.col < 7, 17)
     }
 
     // Look for king attacks
@@ -110,32 +61,83 @@ void Chess_fill_attack_map(Chess* chess) {
     ENEMY_ATTACK(abs(enemy_king_pos.row - king_pos.row) <= 1,
                  abs(enemy_king_pos.col - king_pos.col) <= 1, 0)
 
+    int i;
+    bitboard_t attack_map;
+    bool found_pinned_piece;
+    uint8_t pinned_piece = -1;
+
     // Reset the pinned piece map
     eam->pinned_piece_map = 0;
 
-    // Look for bishop/queen attacks
-    bool double_check =
-        sliding_piece_attack_map(chess, true, BISHOP_MAGIC_NUMS, BISHOP_MAGIC_SHIFTS, BISHOP_MOVES);
-    if (double_check) return;
+    // TODO: fix this with bitboards
+#define SLIDING_PIECE_ATTACK(fn, condition, offset)                            \
+    attack_map = 0;                                                            \
+    found_pinned_piece = false;                                                \
+    for (i = 0; (condition); i++) {                                            \
+        int square = king_i + (offset);                                        \
+        bitboard_t square_bit = bitboard_from_index(square);                   \
+        attack_map |= square_bit;                                              \
+        if (Chess_friendly_piece_at(chess, square)) {                          \
+            if (found_pinned_piece) {                                          \
+                break; /* two pieces stack so pin possible*/                   \
+            } else {                                                           \
+                /* found a friendly piece, will keep looking for a pin */      \
+                found_pinned_piece = true;                                     \
+                pinned_piece = square;                                         \
+            }                                                                  \
+        } else if (fn(chess, square) || Chess_enemy_queen_at(chess, square)) { \
+            if (found_pinned_piece) {                                          \
+                /* found an enemy behind friendly, so piece pinned */          \
+                eam->valid_map[pinned_piece] = attack_map;                     \
+                eam->pinned_piece_map |= bitboard_from_index(pinned_piece);    \
+            } else {                                                           \
+                /* found an enemy without a pin, so it's a check */            \
+                eam->n_checks++;                                               \
+                if (eam->n_checks == 1) eam->block_attack_map = attack_map;    \
+                if (eam->n_checks >= 2) return;                                \
+                break;                                                         \
+            }                                                                  \
+        } else if (occupied & square_bit)                                      \
+            break;                                                             \
+    }
+#define kp king_pos
 
-    // Look for rook/queen attacks
-    double_check =
-        sliding_piece_attack_map(chess, false, ROOK_MAGIC_NUMS, ROOK_MAGIC_SHIFTS, ROOK_MOVES);
-    if (double_check) return;
+// Look for bishop/queen attacks
+#define BISHOP_ATTACK(condition, offset) \
+    SLIDING_PIECE_ATTACK(Chess_enemy_bishop_at, condition, offset)
+    if (chess->turn == TURN_WHITE) {
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7)
+    } else {
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7)
+        BISHOP_ATTACK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7)
+        BISHOP_ATTACK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9)
+    }
+
+// Look for rook/queen attacks
+#define ROOK_ATTACK(condition, offset) SLIDING_PIECE_ATTACK(Chess_enemy_rook_at, condition, offset)
+    if (chess->turn == TURN_WHITE) {
+        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8)
+        ROOK_ATTACK(king_pos.col + i < 7, (i + 1))
+        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1)
+        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8)
+    } else {
+        ROOK_ATTACK(king_pos.row - i > 0, (i + 1) * -8)
+        ROOK_ATTACK(king_pos.col + i < 7, (i + 1))
+        ROOK_ATTACK(king_pos.col - i > 0, (i + 1) * -1)
+        ROOK_ATTACK(king_pos.row + i < 7, (i + 1) * 8)
+    }
 }
 
 Piece Chess_set_friendly_king_i(Chess* chess, uint8_t index) {
     if (chess->turn == TURN_WHITE) {
         chess->king_white = index;
-        chess->bb_white &= ~chess->bb.white_kings;  // remove old king from bitboard
-        chess->bb.white_kings = bitboard_from_index(index);
-        chess->bb_white |= chess->bb.white_kings;  // add new king to bitboard
         return WHITE_KING;
     } else {
         chess->king_black = index;
-        chess->bb_black &= ~chess->bb.black_kings;  // remove old king from bitboard
-        chess->bb.black_kings = bitboard_from_index(index);
-        chess->bb_black |= chess->bb.black_kings;  // add new king to bitboard
         return BLACK_KING;
     }
 }
@@ -160,7 +162,27 @@ bool Chess_friendly_check(Chess* chess) {
     }
 
     // Look for knight attacks
-    if (KNIGHT_MOVES[king_i] & Chess_enemy_knights_bb(chess)) return true;
+#define KNIGHT_CHECK(condition, offset) \
+    ENEMY_CHECK(condition, Chess_enemy_knight_at(chess, king_i + (offset)))
+    if (chess->turn == TURN_WHITE) {
+        KNIGHT_CHECK(king_pos.row < 7 && king_pos.col > 1, 6)
+        KNIGHT_CHECK(king_pos.row < 7 && king_pos.col < 6, 10)
+        KNIGHT_CHECK(king_pos.row < 6 && king_pos.col > 0, 15)
+        KNIGHT_CHECK(king_pos.row < 6 && king_pos.col < 7, 17)
+        KNIGHT_CHECK(king_pos.row > 1 && king_pos.col > 0, -17)
+        KNIGHT_CHECK(king_pos.row > 1 && king_pos.col < 7, -15)
+        KNIGHT_CHECK(king_pos.row > 0 && king_pos.col > 1, -10)
+        KNIGHT_CHECK(king_pos.row > 0 && king_pos.col < 6, -6)
+    } else {
+        KNIGHT_CHECK(king_pos.row > 1 && king_pos.col > 0, -17)
+        KNIGHT_CHECK(king_pos.row > 1 && king_pos.col < 7, -15)
+        KNIGHT_CHECK(king_pos.row > 0 && king_pos.col > 1, -10)
+        KNIGHT_CHECK(king_pos.row > 0 && king_pos.col < 6, -6)
+        KNIGHT_CHECK(king_pos.row < 7 && king_pos.col > 1, 6)
+        KNIGHT_CHECK(king_pos.row < 7 && king_pos.col < 6, 10)
+        KNIGHT_CHECK(king_pos.row < 6 && king_pos.col > 0, 15)
+        KNIGHT_CHECK(king_pos.row < 6 && king_pos.col < 7, 17)
+    }
 
     // Look for king attacks
     uint8_t enemy_king_i = Chess_enemy_king_i(chess);
@@ -170,15 +192,44 @@ bool Chess_friendly_check(Chess* chess) {
         return true;
     }
 
+    int i;
+#define SLIDING_PIECE_CHECK(fn, condition, offset)                                            \
+    for (i = 0; (condition); i++) {                                                           \
+        if (fn(chess, king_i + (offset)) || Chess_enemy_queen_at(chess, king_i + (offset))) { \
+            return true;                                                                      \
+        }                                                                                     \
+        if (chess->board[king_i + (offset)] != EMPTY) break;                                  \
+    }
+#define kp king_pos
+
     // Look for bishop/queen attacks
-    bitboard_t bishop_moves = Chess_magic_moves_bb(chess, king_i, true, BISHOP_MAGIC_NUMS,
-                                                   BISHOP_MAGIC_SHIFTS, BISHOP_MOVES);
-    if (bishop_moves & (Chess_enemy_bishops_bb(chess) | Chess_enemy_queens_bb(chess))) return true;
+#define BISHOP_CHECK(condition, offset) \
+    SLIDING_PIECE_CHECK(Chess_enemy_bishop_at, condition, offset)
+    if (chess->turn == TURN_WHITE) {
+        BISHOP_CHECK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7)
+        BISHOP_CHECK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9)
+        BISHOP_CHECK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9)
+        BISHOP_CHECK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7)
+    } else {
+        BISHOP_CHECK(kp.col - i > 0 && kp.row - i > 0, (i + 1) * -9)
+        BISHOP_CHECK(kp.col + i < 7 && kp.row - i > 0, (i + 1) * -7)
+        BISHOP_CHECK(kp.col - i > 0 && kp.row + i < 7, (i + 1) * 7)
+        BISHOP_CHECK(kp.col + i < 7 && kp.row + i < 7, (i + 1) * 9)
+    }
 
     // Look for rook/queen attacks
-    bitboard_t rook_moves =
-        Chess_magic_moves_bb(chess, king_i, false, ROOK_MAGIC_NUMS, ROOK_MAGIC_SHIFTS, ROOK_MOVES);
-    if (rook_moves & (Chess_enemy_rooks_bb(chess) | Chess_enemy_queens_bb(chess))) return true;
+#define ROOK_CHECK(condition, offset) SLIDING_PIECE_CHECK(Chess_enemy_rook_at, condition, offset)
+    if (chess->turn == TURN_WHITE) {
+        ROOK_CHECK(king_pos.row + i < 7, (i + 1) * 8)
+        ROOK_CHECK(king_pos.col + i < 7, (i + 1))
+        ROOK_CHECK(king_pos.col - i > 0, (i + 1) * -1)
+        ROOK_CHECK(king_pos.row - i > 0, (i + 1) * -8)
+    } else {
+        ROOK_CHECK(king_pos.row - i > 0, (i + 1) * -8)
+        ROOK_CHECK(king_pos.col + i < 7, (i + 1))
+        ROOK_CHECK(king_pos.col - i > 0, (i + 1) * -1)
+        ROOK_CHECK(king_pos.row + i < 7, (i + 1) * 8)
+    }
 
     return false;
 }
@@ -240,10 +291,36 @@ bool Chess_is_move_legal(Chess* chess, Move* move) {
         }                                                             \
     }
 
-// This will mask out moves that are illegal due to checks or pins, but won't check for legality
-// of the move itself
-static inline bitboard_t Chess_legal_moves_mask(Chess* chess, int from, bitboard_t moves) {
+size_t Chess_knight_moves(Chess* chess, Move* move, int from, bool captures_only) {
+    size_t n_moves = 0;
+    Position pos = Position_from_index(from);
+
+    ADD_MOVE_IF(pos.row < 6 && pos.col < 7, 17)   // 2 up 1 right
+    ADD_MOVE_IF(pos.row > 1 && pos.col > 0, -17)  // 2 down 1 left
+    ADD_MOVE_IF(pos.row < 6 && pos.col > 0, 15)   // 2 up 1 left
+    ADD_MOVE_IF(pos.row > 1 && pos.col < 7, -15)  // 2 down 1 right
+    ADD_MOVE_IF(pos.row < 7 && pos.col < 6, 10)   // 1 up 2 right
+    ADD_MOVE_IF(pos.row > 0 && pos.col > 1, -10)  // 1 down 2 left
+    ADD_MOVE_IF(pos.row < 7 && pos.col > 1, 6)    // 1 up 2 left
+    ADD_MOVE_IF(pos.row > 0 && pos.col < 6, -6)   // 1 down 2 right
+
+    return n_moves;
+}
+
+__attribute__((always_inline)) static inline size_t  //
+Chess_sliding_piece_moves(Chess* chess, Move* move, int from, bool captures_only, bool is_bishop,
+                          const bitboard_t MAGIC_NUMS[64], const int MAGIC_SHIFTS[64],
+                          const bitboard_t* MOVES[64]) {
     EnemyAttackMap* eam = &chess->enemy_attack_map;
+
+    bitboard_t piece_mask = is_bishop ? bitboard_bishop_mask(from) : bitboard_rook_mask(from);
+    bitboard_t friendly_bb = chess->turn == TURN_WHITE ? chess->bb_white : chess->bb_black;
+    bitboard_t all_bb = chess->bb_white | chess->bb_black;
+    bitboard_t target_mask = piece_mask & all_bb;
+    int index = (target_mask * MAGIC_NUMS[from]) >> MAGIC_SHIFTS[from];
+    bitboard_t moves = MOVES[from][index] & ~friendly_bb;
+    if (captures_only) moves &= chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white;
+
     bitboard_t from_bb = bitboard_from_index(from);
     bool is_pinned = from_bb & eam->pinned_piece_map;
 
@@ -256,11 +333,7 @@ static inline bitboard_t Chess_legal_moves_mask(Chess* chess, int from, bitboard
         // single check: has to block the attack with the piece
         moves &= eam->block_attack_map;
     }
-    return moves;
-}
 
-// Converts a bitboard of moves into Move structs, returns number of moves added
-static inline size_t moves_from_bb(Move* move, int from, bitboard_t moves) {
     size_t n_moves = __builtin_popcountll(moves);
     while (moves) {
         move->from = from;
@@ -270,42 +343,6 @@ static inline size_t moves_from_bb(Move* move, int from, bitboard_t moves) {
         move++;
     }
     return n_moves;
-}
-
-size_t Chess_knight_moves(Chess* chess, Move* move, int from, bool captures_only) {
-    // Get pseudo-legal moves from table
-    bitboard_t moves = KNIGHT_MOVES[from];
-
-    // Remove friendly captures
-    moves &= ~(Chess_friendly_bb(chess));
-
-    // If only looking for captures, remove non-captures
-    if (captures_only) moves &= chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white;
-
-    // Mask out illegal moves that don't resolve checks or pins
-    moves = Chess_legal_moves_mask(chess, from, moves);
-
-    // Convert bitboard to move list
-    return moves_from_bb(move, from, moves);
-}
-
-static inline size_t Chess_sliding_piece_moves(Chess* chess, Move* move, int from,
-                                               bool captures_only, bool is_bishop,
-                                               const bitboard_t MAGIC_NUMS[64],
-                                               const int MAGIC_SHIFTS[64],
-                                               const bitboard_t* MOVES[64]) {
-    // Get pseudo-legal moves from magic bitboard
-    bitboard_t moves =
-        Chess_magic_moves_bb(chess, from, is_bishop, MAGIC_NUMS, MAGIC_SHIFTS, MOVES);
-
-    // If only looking for captures, remove non-captures
-    if (captures_only) moves &= chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white;
-
-    // Mask out illegal moves that don't resolve checks or pins
-    moves = Chess_legal_moves_mask(chess, from, moves);
-
-    // Convert bitboard to move list
-    return moves_from_bb(move, from, moves);
 }
 
 size_t Chess_bishop_moves(Chess* chess, Move* move, int from, bool captures_only) {
@@ -407,6 +444,10 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     move->promotion = NO_PROMOTION;               \
     gamestate_t gamestate = chess->gamestate;     \
     uint64_t hash = chess->zhash;                 \
+    int e = chess->eval;                          \
+    int pawn_row_sum = chess->pawn_row_sum;       \
+    bitboard_t bb_white = chess->bb_white;        \
+    bitboard_t bb_black = chess->bb_black;        \
     Piece capture = Chess_make_move(chess, move); \
     chess->turn = !chess->turn;                   \
     bool in_check = Chess_friendly_check(chess);  \
@@ -414,6 +455,10 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     Chess_unmake_move(chess, move, capture);      \
     chess->gamestate = gamestate;                 \
     chess->zhash = hash;                          \
+    chess->eval = e;                              \
+    chess->pawn_row_sum = pawn_row_sum;           \
+    chess->bb_white = bb_white;                   \
+    chess->bb_black = bb_black;                   \
     if (!in_check) {                              \
         move++;                                   \
         n_moves++;                                \
@@ -505,6 +550,19 @@ size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) 
     return n_moves;
 }
 
+
+typedef size_t (*MoveFn)(Chess*, Move*, int, bool);
+
+// Lookup table for move generation functions
+static const MoveFn move_fns[256] = {
+    [WHITE_PAWN] = Chess_pawn_moves,     [WHITE_KNIGHT] = Chess_knight_moves,
+    [WHITE_BISHOP] = Chess_bishop_moves, [WHITE_ROOK] = Chess_rook_moves,
+    [WHITE_QUEEN] = Chess_queen_moves,   [WHITE_KING] = Chess_king_moves,
+    [BLACK_PAWN] = Chess_pawn_moves,     [BLACK_KNIGHT] = Chess_knight_moves,
+    [BLACK_BISHOP] = Chess_bishop_moves, [BLACK_ROOK] = Chess_rook_moves,
+    [BLACK_QUEEN] = Chess_queen_moves,   [BLACK_KING] = Chess_king_moves,
+};
+
 size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     // make the enemy attack map to check legality
     Chess_fill_attack_map(chess);
@@ -520,22 +578,22 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
     int king_i = Chess_friendly_king_i(chess);
     n_moves += Chess_king_moves(chess, &moves[n_moves], king_i, captures_only);
 
-    // Iterate over pieces by type using bitboards
-    bitboard_t bb;
-#define MOVES_FOR_PIECE(piece_type)                                                      \
-    bb = Chess_friendly_##piece_type##s_bb(chess);                                       \
-    while (bb) {                                                                         \
-        int i = __builtin_ctzll(bb); /* Get the index */                                 \
-        bb &= bb - 1;                /* Clear the least significant bit */               \
-        n_moves += Chess_##piece_type##_moves(chess, &moves[n_moves], i, captures_only); \
+    // Remove king from bitboard before iterating
+    bitboard_t friendly_bb = chess->turn == TURN_WHITE ? chess->bb_white : chess->bb_black;
+    friendly_bb &= ~bitboard_from_index(king_i);
+
+    // Iterate over friendly pieces using bitboard
+    while (friendly_bb) {
+        int i = __builtin_ctzll(friendly_bb);  // Get the index
+        friendly_bb &= friendly_bb - 1;        // Clear the least significant bit
+
+        Piece piece = chess->board[i];
+
+        // A piece is represented by its character in the board array
+        // Grab the move generation function from the lookup table
+        // and generate moves for that piece
+        n_moves += move_fns[piece](chess, &moves[n_moves], i, captures_only);
     }
-
-    MOVES_FOR_PIECE(pawn);
-    MOVES_FOR_PIECE(knight);
-    MOVES_FOR_PIECE(bishop);
-    MOVES_FOR_PIECE(rook);
-    MOVES_FOR_PIECE(queen);
-
     return n_moves;
 }
 

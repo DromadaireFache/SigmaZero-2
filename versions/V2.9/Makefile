@@ -5,7 +5,7 @@ DEBUG_TARGET=$(TARGET)_debug
 SRC_DIR=src
 BUILD_DIR=.build
 DEBUG_MODE ?= full
-DEBUG_ALLOWED_MODES := full symbols asan ubsan tsan lsan define
+DEBUG_ALLOWED_MODES := full symbols asan ubsan tsan lsan
 EXCLUDED=consts_backup.h
 EXTRA_SRCS=magicbb/moves.c
 
@@ -37,7 +37,7 @@ DEBUG_MODE_CFLAGS_asan := -fsanitize=address -fno-sanitize-recover=all
 DEBUG_MODE_CFLAGS_ubsan := -fsanitize=undefined -fno-sanitize-recover=all
 DEBUG_MODE_CFLAGS_tsan := -fsanitize=thread
 DEBUG_MODE_CFLAGS_lsan := -fsanitize=leak
-DEBUG_MODE_CFLAGS_define := -DDEBUG
+
 DEBUG_CFLAGS := $(DEBUG_COMMON_CFLAGS) $(DEBUG_MODE_CFLAGS_$(DEBUG_MODE))
 DEBUG_LDFLAGS := $(DEBUG_MODE_CFLAGS_$(DEBUG_MODE))
 
@@ -59,7 +59,6 @@ help:
 	@echo "  ubsan    - UndefinedBehaviorSanitizer"
 	@echo "  tsan     - ThreadSanitizer"
 	@echo "  lsan     - LeakSanitizer"
-	@echo "  define   - Compile with -DDEBUG (no optimizations, no sanitizers)"
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^

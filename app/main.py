@@ -214,25 +214,9 @@ class Api:
                 return self.bot_move(millis, version, tries + 1)
             sys.exit(1)
         
-        # TODO fix this bullshit
-        eval = result.get("eval", 0)
-        if isinstance(eval, (int, float)):
-            if eval > 9000:
-                mate = result.get("depth", 0) - int((eval - 10000) * 101)
-                if mate > 0:
-                    eval = f"Mate for white in {mate - 1 if board.turn == chess.WHITE else mate}"
-                else:
-                    eval = "Checkmate for white"
-            elif eval < -9000:
-                mate = result.get("depth", 0) - int((-eval - 10000) * 101)
-                if mate > 0:
-                    eval = f"Mate for black in {mate - 1 if board.turn == chess.BLACK else mate}"
-                else:
-                    eval = "Checkmate for black"
-        
         return {
             "depth": result.get("depth", 0),
-            "eval": eval,
+            "eval": result.get("eval", 0),
             "move": result.get("move", 0),
         }
     
