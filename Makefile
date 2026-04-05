@@ -8,6 +8,12 @@ DEBUG_MODE ?= full
 DEBUG_ALLOWED_MODES := full symbols asan ubsan tsan lsan define
 EXCLUDED=consts_backup.h
 EXTRA_SRCS=magicbb/moves.c
+UNAME_S := $(shell uname -s)
+MATH_LIB :=
+
+ifeq ($(UNAME_S),Linux)
+MATH_LIB := -lm
+endif
 
 SRCS := $(filter-out $(addprefix $(SRC_DIR)/,$(EXCLUDED)),$(wildcard $(SRC_DIR)/*.c))
 SRCS += $(EXTRA_SRCS)
@@ -62,10 +68,10 @@ help:
 	@echo "  define   - Compile with -DDEBUG (no optimizations, no sanitizers)"
 
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(MATH_LIB)
 
 $(DEBUG_TARGET): $(DEBUG_OBJS)
-	$(CC) $(DEBUG_CFLAGS) $(DEBUG_LDFLAGS) -o $@ $^
+	$(CC) $(DEBUG_CFLAGS) $(DEBUG_LDFLAGS) -o $@ $^ $(MATH_LIB)
 
 # Compile *.c -> .build/*.o
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
