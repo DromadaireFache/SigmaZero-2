@@ -512,6 +512,9 @@ size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) 
     // Add legal castling moves back in
     moves |= castles;
 
+    // Filter out non-captures if only looking for captures
+    if (captures_only) moves &= enemy_bb;
+
     // Remove king from bitboards to avoid self-attacks
     if (chess->turn == TURN_WHITE) {
         chess->bb_white &= ~chess->bb.white_kings;
@@ -639,9 +642,6 @@ size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) 
     } else {
         chess->bb_black |= chess->bb.black_kings;
     }
-
-    // Filter out non-captures if only looking for captures
-    if (captures_only) moves &= enemy_bb;
 
     // Convert bitboard to move list
     return moves_from_bb(move, from, moves);

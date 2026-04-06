@@ -452,7 +452,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
 
     // Futility pruning
     if (!in_check && last_capture == EMPTY && depth < FP_DEPTH) {
-        int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
+        int e = chess->turn == TURN_WHITE ? chess->eval : -chess->eval;
         int margin = FP_BASE + depth * FP_FACTOR;
         if (e + margin <= a) {
             return TT_store(hash, a, depth, TT_UPPER, (Move){0});  // Failed low

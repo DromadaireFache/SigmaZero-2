@@ -57,6 +57,7 @@ class Tournament:
         self.score_to_beat = score_to_beat
         self.required_score = required_score
         self.exit_on_interrupt = exit_on_interrupt
+        self.elo_is_available = False
         self.results = self.run()
 
     def play_game(self, fen: str, is_white: bool) -> dict:
@@ -148,20 +149,24 @@ class Tournament:
                 else:
                     raise e
 
-        # Calculate Elo difference. Add a small pseudocount for sweep cases to avoid division by zero.
-        score_for = results["wins"] + 0.5 * results["draws"]
-        score_against = results["losses"] + 0.5 * results["draws"]
-        if score_for == 0 and score_against == 0:
-            elo = 0.0
-        elif score_for == 0 or score_against == 0:
-            elo = 400 * math.log10((score_for + 0.5) / (score_against + 0.5))
-        else:
-            elo = 400 * math.log10(score_for / score_against)
-        results["elo"] = elo
-
         print(f"Tournament completed in {time.perf_counter() - start:.2f} seconds.")
         print("Tournament Results:")
-        print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}, {elo:+.2f} Elo")
+        print(f"Wins: {results['wins']}, Losses: {results['losses']}, Draws: {results['draws']}")
+
+        # Calculate the elo uncertainty and 95% confidence interval
+        n = results["wins"] + results["losses"] + results["draws"]
+        w, l, d = results["wins"], results["losses"], results["draws"]
+        if n > 0 and w + d > 0:  # Avoid division by zero
+            self.elo_is_available = True
+            s = (w + 0.5 * d) / n
+            elo = 400 * math.log10(s / (1 - s))
+            # trinomial variance of the score
+            sigma_s = (w / n * (1 - s) ** 2 + l / n * s**2 + d / n * (0.5 - s) ** 2) ** 0.5 / n
+            sigma_elo = 400 / math.log(10) * sigma_s / (s * (1 - s))
+            ci_95 = 1.96 * sigma_elo
+            print(f"Elo: {elo:+.2f} ± {ci_95:.2f} (95% confidence interval)")
+            result["elo"] = elo
+            result["elo_ci"] = ci_95
 
         depth_diff = results["avg_depth_1"] - results["avg_depth_2"]
         depth_diff = ("+" if depth_diff >= 0 else "") + f"{depth_diff:.2f}"
@@ -173,6 +178,8 @@ class Tournament:
         return results
 
     def elo(self) -> float:
+        if not self.elo_is_available:
+            raise ValueError("Elo is not available for this tournament. Not enough games played.")
         return self.results.get("elo", 0.0)
 
     def score(self) -> tuple[bool, int]:
