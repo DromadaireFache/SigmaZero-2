@@ -24,6 +24,16 @@ def test_move_generation(fen: str):
 
 
 def find_wrong_move_generation(board: chess.Board, depth: int, search_depth: int = 1):
+    # Skip the current position if it leads to no mismatch at the current depth
+    if depth > search_depth:
+        sf_moves = count_moves(board, depth)
+        n_moves = sigma_zero.latest.moves(board.fen(), depth).get("nodes", -1)
+        if sf_moves == n_moves:
+            return
+        else:
+            print(f"Mismatch found at depth {depth} for FEN:\n{board.fen()}")
+            print(f"Stockfish moves: {sf_moves}, SigmaZero moves: {n_moves}")
+    
     sf_moves = count_moves(board, search_depth)
     n_moves = sigma_zero.latest.moves(board.fen(), search_depth).get("nodes", -1)
     if sf_moves != n_moves:
@@ -44,8 +54,8 @@ if __name__ == "__main__":
     #     pprint(sigma_zero.old_play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 10000))
     #     pprint(sigma_zero.play("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 2000))
 
-    FEN = "rnbqk2r/ppppnpp1/4P2p/8/1P6/b7/P1P1PPPP/RNBQKBNR w KQkq - 1 2"
-    DEPTH = 6
+    FEN = "8/p5p1/3kp1p1/PPp1np2/2P1p3/4P2P/3KBPP1/8 w - - 0 60"
+    DEPTH = 5
 
     print("----- Stockfish -----")
     print("total =", count_moves(chess.Board(FEN), DEPTH))

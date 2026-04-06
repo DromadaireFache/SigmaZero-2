@@ -66,6 +66,7 @@ typedef struct {
     TIME_TYPE endtime;
     int* score;
     bool* search_cancelled;
+    size_t nodes;
 } ChessThread;
 
 void* Chess_count_moves_thread(void* arg_void) {
@@ -75,11 +76,7 @@ void* Chess_count_moves_thread(void* arg_void) {
     Move* move = &arg->move;
 
     Chess_make_move(chess, move);
-    size_t nodes = Chess_count_moves(chess, depth - 1);
-
-    pthread_mutex_lock(&lock);    // enter critical section
-    nodes_total += nodes;         // update shared variable
-    pthread_mutex_unlock(&lock);  // leave critical section
+    arg->nodes = Chess_count_moves(chess, depth - 1);
 
     return NULL;
 }
@@ -114,6 +111,12 @@ size_t Chess_count_moves_multi(Chess* chess, int depth) {
     // Wait for threads to finish
     for (int i = 0; i < n_moves; i++) {
         pthread_join(threads[i], NULL);
+    }
+
+    // Sum up results
+    for (int i = 0; i < n_moves; i++) {
+        nodes_total += args[i].nodes;
+        // printf("%s: %lu\n", Move_string(&moves[i]), (unsigned long)args[i].nodes);
     }
 
     // Clean up

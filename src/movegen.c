@@ -72,15 +72,45 @@ void Chess_fill_attack_map(Chess* chess) {
     // Reset the pinned piece map
     eam->pinned_piece_map = 0;
 
+    // Treat the en-passant enemy pawn as a friendly piece for the purposes of calculating pins
+    // since it can't be captured like a normal piece
+    int en_passant_col = Chess_en_passant(chess);
+    bitboard_t en_passant_bb = 0;
+    if (en_passant_col != NO_ENPASSANT) {
+        int en_passant_row = chess->turn == TURN_WHITE ? 4 : 3;
+        int en_passant_i = en_passant_row * 8 + en_passant_col;
+        en_passant_bb = bitboard_from_index(en_passant_i);
+
+        if (chess->turn == TURN_WHITE) {
+            chess->bb_white |= en_passant_bb;   // Add en passant pawn to white bitboard
+            chess->bb_black &= ~en_passant_bb;  // Remove en passant pawn from black bitboard
+        } else {
+            chess->bb_black |= en_passant_bb;   // Add en passant pawn to black bitboard
+            chess->bb_white &= ~en_passant_bb;  // Remove en passant pawn from white bitboard
+        }
+    }
+
     // Look for bishop/queen attacks
     bool double_check =
         sliding_piece_attack_map(chess, true, BISHOP_MAGIC_NUMS, BISHOP_MAGIC_SHIFTS, BISHOP_MOVES);
-    if (double_check) return;
+    if (double_check) goto cleanup;
 
     // Look for rook/queen attacks
     double_check =
         sliding_piece_attack_map(chess, false, ROOK_MAGIC_NUMS, ROOK_MAGIC_SHIFTS, ROOK_MOVES);
-    if (double_check) return;
+    if (double_check) goto cleanup;
+
+cleanup:
+    // Remove the en-passant pawn from the bitboards if it was added
+    if (en_passant_col != NO_ENPASSANT) {
+        if (chess->turn == TURN_WHITE) {
+            chess->bb_white &= ~en_passant_bb;  // Remove en passant pawn from white bitboard
+            chess->bb_black |= en_passant_bb;   // Add en passant pawn to black bitboard
+        } else {
+            chess->bb_black &= ~en_passant_bb;  // Remove en passant pawn from black bitboard
+            chess->bb_white |= en_passant_bb;   // Add en passant pawn to white bitboard
+        }
+    }
 }
 
 Piece Chess_set_friendly_king_i(Chess* chess, uint8_t index) {
@@ -192,6 +222,25 @@ static inline bitboard_t Chess_legal_moves_mask(Chess* chess, int from, bitboard
     return moves;
 }
 
+static inline bitboard_t Chess_en_passant_moves_mask(Chess* chess, bitboard_t en_passant_bb,
+                                                     int from, bitboard_t moves) {
+    EnemyAttackMap* eam = &chess->enemy_attack_map;
+    bitboard_t from_bb = bitboard_from_index(from);
+    bool is_pinned = from_bb & eam->pinned_piece_map;
+
+    if (is_pinned) {
+        // if pinned and king is in check, can't move to block the attack
+        if (eam->n_checks == 1) moves = 0;
+        // if pinned, limit movement to stay pinned
+        moves &= eam->valid_map[from];
+    } else if (eam->n_checks == 1 && !(en_passant_bb == eam->block_attack_map)) {
+        // single check: has to block the attack with the piece
+        // or en passant capture has to capture the checking piece
+        moves &= eam->block_attack_map;
+    }
+    return moves;
+}
+
 // Converts a bitboard of moves into Move structs, returns number of moves added
 static inline size_t moves_from_bb(Move* move, int from, bitboard_t moves) {
     size_t n_moves = __builtin_popcountll(moves);
@@ -256,117 +305,180 @@ size_t Chess_queen_moves(Chess* chess, Move* move, int from, bool captures_only)
     return n_moves + Chess_bishop_moves(chess, move + n_moves, from, captures_only);
 }
 
-// TODO: optimize this with bitboards like the others
-size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) {
-    Position pos = Position_from_index(from);
+// New approach using bitboards and return moves for ALL pawns at once
+size_t Chess_all_pawn_moves(Chess* chess, Move* move, bool captures_only) {
     size_t n_moves = 0;
-    int one_forward, left_capture, right_capture;
-    bool at_home_rank, at_last_rank, at_en_passant_rank;
+    EnemyAttackMap* eam = &chess->enemy_attack_map;
+    // single check: has to block the attack with the piece
+    bitboard_t block_attack_map = (eam->n_checks == 1) ? eam->block_attack_map : ~0;
+    bitboard_t enemy_bb = Chess_enemy_bb(chess) & block_attack_map;
+    bitboard_t empty = captures_only ? 0 : ~(chess->bb_white | chess->bb_black);
+    bitboard_t pawns = Chess_friendly_pawns_bb(chess);
+    bitboard_t pinned_pawns = pawns & eam->pinned_piece_map;
+    pawns &= ~pinned_pawns;  // remove pinned pawns since they will be handled separately
+
+#define PAWN_ADD_MOVE(bb, from_expr)      \
+    n_moves += bitboard_popcount(bb);     \
+    while (bb) {                          \
+        int to = bitboard_pop_lsb(&(bb)); \
+        move->from = (from_expr);         \
+        move->to = to;                    \
+        move->promotion = NO_PROMOTION;   \
+        move++;                           \
+    }
+
+#define PAWN_ADD_MOVE_PROMOTE(bb, from_expr) \
+    n_moves += 4 * bitboard_popcount(bb);    \
+    while (bb) {                             \
+        int to = bitboard_pop_lsb(&(bb));    \
+        move->from = (from_expr);            \
+        move->to = to;                       \
+        move->promotion = PROMOTE_QUEEN;     \
+        move++;                              \
+        move->from = (from_expr);            \
+        move->to = to;                       \
+        move->promotion = PROMOTE_ROOK;      \
+        move++;                              \
+        move->from = (from_expr);            \
+        move->to = to;                       \
+        move->promotion = PROMOTE_KNIGHT;    \
+        move++;                              \
+        move->from = (from_expr);            \
+        move->to = to;                       \
+        move->promotion = PROMOTE_BISHOP;    \
+        move++;                              \
+    }
 
     if (chess->turn == TURN_WHITE) {
-        one_forward = from + 8, left_capture = from + 7, right_capture = from + 9;
-        at_home_rank = pos.row == 1, at_last_rank = pos.row == 6, at_en_passant_rank = pos.row == 4;
+        // Add moves for non-pinned pawns in bulk using bitboard operations
+        bitboard_t single_push = (pawns << 8) & empty;
+        // only pawns that have made the single push can double push
+        bitboard_t double_push = ((single_push & 0x0000000000FF0000ULL) << 8) & empty;
+        single_push &= block_attack_map;
+        double_push &= block_attack_map;
+        bitboard_t left_captures = (pawns << 7) & enemy_bb & ~0x8080808080808080ULL;
+        bitboard_t right_captures = (pawns << 9) & enemy_bb & ~0x0101010101010101ULL;
+
+        // Promotions
+        bitboard_t promotion_pushes = single_push & 0xFF00000000000000ULL;
+        bitboard_t promotion_left_captures = left_captures & 0xFF00000000000000ULL;
+        bitboard_t promotion_right_captures = right_captures & 0xFF00000000000000ULL;
+        single_push &= ~promotion_pushes;
+        left_captures &= ~promotion_left_captures;
+        right_captures &= ~promotion_right_captures;
+
+        // Convert bitboards to moves
+        PAWN_ADD_MOVE(single_push, to - 8);
+        PAWN_ADD_MOVE(double_push, to - 16);
+        PAWN_ADD_MOVE(left_captures, to - 7);
+        PAWN_ADD_MOVE(right_captures, to - 9);
+        PAWN_ADD_MOVE_PROMOTE(promotion_pushes, to - 8);
+        PAWN_ADD_MOVE_PROMOTE(promotion_left_captures, to - 7);
+        PAWN_ADD_MOVE_PROMOTE(promotion_right_captures, to - 9);
+
+        // Add moves for pinned pawns one by one since they require special handling
+        while (pinned_pawns) {
+            int from = bitboard_pop_lsb(&pinned_pawns);
+            bitboard_t from_bb = bitboard_from_index(from);
+            bitboard_t single_push = (from_bb << 8) & empty;
+            bitboard_t double_push = ((single_push & 0x0000000000FF0000ULL) << 8) & empty;
+            bitboard_t captures = ((from_bb << 7) & enemy_bb & ~0x8080808080808080ULL) |
+                                  ((from_bb << 9) & enemy_bb & ~0x0101010101010101ULL);
+            bitboard_t moves = (single_push | double_push | captures) & block_attack_map;
+            moves = Chess_legal_moves_mask(chess, from, moves);
+
+            if (from >= 48) {  // Promotions
+                PAWN_ADD_MOVE_PROMOTE(moves, from);
+            } else {  // not promotion, so just add the moves
+                PAWN_ADD_MOVE(moves, from);
+            }
+        }
+
     } else {
-        one_forward = from - 8, left_capture = from - 9, right_capture = from - 7;
-        at_home_rank = pos.row == 6, at_last_rank = pos.row == 1, at_en_passant_rank = pos.row == 3;
-    }
+        // Add moves for non-pinned pawns in bulk using bitboard operations
+        bitboard_t single_push = (pawns >> 8) & empty;
+        // only pawns that have made the single push can double push
+        bitboard_t double_push = ((single_push & 0x0000FF0000000000ULL) >> 8) & empty;
+        single_push &= block_attack_map;
+        double_push &= block_attack_map;
+        bitboard_t left_captures = (pawns >> 9) & enemy_bb & ~0x8080808080808080ULL;
+        bitboard_t right_captures = (pawns >> 7) & enemy_bb & ~0x0101010101010101ULL;
 
-#define PAWN_ADD_MOVE_PROMOTE(to_square)    \
-    move->from = from;                      \
-    move->to = (to_square);                 \
-    if (Chess_is_move_legal(chess, move)) { \
-        move->promotion = PROMOTE_QUEEN;    \
-        move++;                             \
-        n_moves++;                          \
-        move->from = from;                  \
-        move->to = (to_square);             \
-        move->promotion = PROMOTE_ROOK;     \
-        move++;                             \
-        n_moves++;                          \
-        move->from = from;                  \
-        move->to = (to_square);             \
-        move->promotion = PROMOTE_KNIGHT;   \
-        move++;                             \
-        n_moves++;                          \
-        move->from = from;                  \
-        move->to = (to_square);             \
-        move->promotion = PROMOTE_BISHOP;   \
-        move++;                             \
-        n_moves++;                          \
-    }
+        // Promotions
+        bitboard_t promotion_pushes = single_push & 0x00000000000000FFULL;
+        bitboard_t promotion_left_captures = left_captures & 0x00000000000000FFULL;
+        bitboard_t promotion_right_captures = right_captures & 0x00000000000000FFULL;
+        single_push &= ~promotion_pushes;
+        left_captures &= ~promotion_left_captures;
+        right_captures &= ~promotion_right_captures;
 
-#define PAWN_ADD_MOVE(to_square)            \
-    move->from = from;                      \
-    move->to = (to_square);                 \
-    if (Chess_is_move_legal(chess, move)) { \
-        move->promotion = NO_PROMOTION;     \
-        move++;                             \
-        n_moves++;                          \
-    }
+        // Convert bitboards to moves
+        PAWN_ADD_MOVE(single_push, to + 8);
+        PAWN_ADD_MOVE(double_push, to + 16);
+        PAWN_ADD_MOVE(left_captures, to + 9);
+        PAWN_ADD_MOVE(right_captures, to + 7);
+        PAWN_ADD_MOVE_PROMOTE(promotion_pushes, to + 8);
+        PAWN_ADD_MOVE_PROMOTE(promotion_left_captures, to + 9);
+        PAWN_ADD_MOVE_PROMOTE(promotion_right_captures, to + 7);
 
-    // 1 row up
-    if (chess->board[one_forward] == EMPTY && !captures_only) {
-        if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(one_forward)
-        } else {
-            PAWN_ADD_MOVE(one_forward)
+        // Add moves for pinned pawns one by one since they require special handling
+        while (pinned_pawns) {
+            int from = bitboard_pop_lsb(&pinned_pawns);
+            bitboard_t from_bb = bitboard_from_index(from);
+            bitboard_t single_push = (from_bb >> 8) & empty;
+            bitboard_t double_push = ((single_push & 0x0000FF0000000000ULL) >> 8) & empty;
+            bitboard_t captures = ((from_bb >> 9) & enemy_bb & ~0x8080808080808080ULL) |
+                                  ((from_bb >> 7) & enemy_bb & ~0x0101010101010101ULL);
+            bitboard_t moves = (single_push | double_push | captures) & block_attack_map;
+            moves = Chess_legal_moves_mask(chess, from, moves);
 
-            // 2 rows up
-            int two_forward = chess->turn == TURN_WHITE ? from + 16 : from - 16;
-            if (at_home_rank && chess->board[two_forward] == EMPTY) {
-                PAWN_ADD_MOVE(two_forward)
+            if (from < 16) {  // Promotions
+                PAWN_ADD_MOVE_PROMOTE(moves, from);
+            } else {  // not promotion, so just add the moves
+                PAWN_ADD_MOVE(moves, from);
             }
         }
     }
 
-    // normal captures
-    if (pos.col > 0 && Chess_enemy_piece_at(chess, left_capture)) {
-        if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(left_capture)
-        } else {
-            PAWN_ADD_MOVE(left_capture)
-        }
-    }
-    if (pos.col < 7 && Chess_enemy_piece_at(chess, right_capture)) {
-        if (at_last_rank) {
-            PAWN_ADD_MOVE_PROMOTE(right_capture)
-        } else {
-            PAWN_ADD_MOVE(right_capture)
-        }
-    }
-
-#define PAWN_EN_PASSANT(to_square)                \
-    move->from = from;                            \
-    move->to = (to_square);                       \
-    move->promotion = NO_PROMOTION;               \
-    gamestate_t gamestate = chess->gamestate;     \
-    uint64_t hash = chess->zhash;                 \
-    Piece capture = Chess_make_move(chess, move); \
-    chess->turn = !chess->turn;                   \
-    bool in_check = Chess_friendly_check(chess);  \
-    chess->turn = !chess->turn;                   \
-    Chess_unmake_move(chess, move, capture);      \
-    chess->gamestate = gamestate;                 \
-    chess->zhash = hash;                          \
-    if (!in_check) {                              \
-        move++;                                   \
-        n_moves++;                                \
-    }
-
-    // en passant capture
+    // Add en passant moves
     uint8_t en_passant_col = Chess_en_passant(chess);
-    if (at_en_passant_rank && en_passant_col != NO_ENPASSANT) {
-        if (en_passant_col == pos.col - 1) {
-            PAWN_EN_PASSANT(left_capture)
-        } else if (en_passant_col == pos.col + 1) {
-            PAWN_EN_PASSANT(right_capture)
+    if (en_passant_col != NO_ENPASSANT) {
+        int en_passant_row = chess->turn == TURN_WHITE ? 4 : 3;
+        int en_passant_i = en_passant_row * 8 + en_passant_col;
+        bitboard_t en_passant_bb = bitboard_from_index(en_passant_i);
+        bitboard_t moves = chess->turn == TURN_WHITE ? (en_passant_bb << 8) : (en_passant_bb >> 8);
+
+        // Check if the en passant capture is pinned and if so, whether it resolves the pin
+        // There can be a situation where the capture pawn is pinned, but capturing en passant
+        // would still block the check against the king
+        bool en_passant_capture_is_pinned = en_passant_bb & eam->pinned_piece_map;
+        bool capture_would_resolve_pin = eam->valid_map[en_passant_i] & moves;
+        bool is_pinned = en_passant_capture_is_pinned && !capture_would_resolve_pin;
+
+        if (!is_pinned) {
+            // Left capture
+            if (en_passant_col > 0 && Chess_friendly_pawn_at(chess, en_passant_i - 1)) {
+                int from = en_passant_i - 1;
+                moves = Chess_en_passant_moves_mask(chess, en_passant_bb, from, moves);
+                size_t x = moves_from_bb(move, from, moves);
+                n_moves += x;
+                move += x;  // move the pointer forward by the number of moves added
+            }
+
+            // Right capture
+            if (en_passant_col < 7 && Chess_friendly_pawn_at(chess, en_passant_i + 1)) {
+                int from = en_passant_i + 1;
+                moves = Chess_en_passant_moves_mask(chess, en_passant_bb, from, moves);
+                size_t x = moves_from_bb(move, from, moves);
+                n_moves += x;
+                // no need to move the pointer forward here since it's the last thing we do in this
+            }
         }
     }
 
     return n_moves;
 }
 
-// New approach using bitboards
 size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) {
     int king_i = Chess_friendly_king_i(chess);
     bitboard_t moves = KING_MOVES[king_i];  // Get pseudo-legal moves from table
@@ -560,7 +672,8 @@ size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {
         n_moves += Chess_##piece_type##_moves(chess, &moves[n_moves], i, captures_only); \
     }
 
-    MOVES_FOR_PIECE(pawn);
+    // All pawn moves at once
+    n_moves += Chess_all_pawn_moves(chess, &moves[n_moves], captures_only);
     MOVES_FOR_PIECE(knight);
     MOVES_FOR_PIECE(bishop);
     MOVES_FOR_PIECE(rook);
