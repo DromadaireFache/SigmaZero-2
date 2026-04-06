@@ -415,10 +415,9 @@ int compute_baseline_loss() {
 }
 
 int test() {
-    Chess* chess = Chess_from_fen(
-        strdup("4k3/1b6/8/3pP3/8/5K2/8/8 w - d6 0 1"));
-    Chess_fill_attack_map(chess);
-    bitboard_print(chess->enemy_attack_map.pinned_piece_map);
+    Chess* chess = Chess_from_fen(strdup("1k1r1r2/pbp3pp/1p1q1p2/2p2Q2/4P3/1P1PB3/P1P3PP/4RRK1 w - - 0 30"));
+    printf("White bishop-pawn penalty: %d\n", bishop_pawn_penalty(chess->bb.white_bishops, chess->bb.white_pawns));
+    printf("Black bishop-pawn penalty: %d\n", bishop_pawn_penalty(chess->bb.black_bishops, chess->bb.black_pawns));
     return 0;
 }
 

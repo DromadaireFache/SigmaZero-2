@@ -184,8 +184,10 @@ int eval(Chess* chess) {
     e += king_safety(chess);
 
     // Light/dark square bonuses
-    e -= bishop_pawn_penalty(chess->bb.white_bishops, chess->bb.white_pawns);
-    e += bishop_pawn_penalty(chess->bb.black_bishops, chess->bb.black_pawns);
+    if (bitboard_popcount(chess->bb.white_bishops) == 1) // No penalty for bishop pair
+        e -= bishop_pawn_penalty(chess->bb.white_bishops, chess->bb.white_pawns);
+    if (bitboard_popcount(chess->bb.black_bishops) == 1)
+        e += bishop_pawn_penalty(chess->bb.black_bishops, chess->bb.black_pawns);
 
     // Check that the bitboards and board array are consistent
 #ifdef DEBUG
