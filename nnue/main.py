@@ -251,7 +251,7 @@ def training_loop(
 
 def load_model(model_path: str) -> NNUE:
     model = NNUE()
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
     return model
 
@@ -367,7 +367,7 @@ if __name__ == "__main__":
 
         nnue = NNUE().to(device)
         if os.path.exists("nnue.pth"):
-            nnue.load_state_dict(torch.load("nnue.pth"))
+            nnue.load_state_dict(torch.load("nnue.pth", map_location=device))
             print("Loaded existing model from nnue.pth")
         print("NNUE parameters:", sum(p.numel() for p in nnue.parameters()))
 
@@ -382,7 +382,7 @@ if __name__ == "__main__":
 
         nnue = NNUE()
         if os.path.exists("nnue.pth"):
-            nnue.load_state_dict(torch.load("nnue.pth"))
+            nnue.load_state_dict(torch.load("nnue.pth", map_location=device))
             print("Loaded existing model from nnue.pth")
         else:
             print("No trained model found. Please train the model first.")
@@ -407,7 +407,7 @@ if __name__ == "__main__":
     elif command == "quantize":
         model = NNUE()
         if os.path.exists("nnue.pth"):
-            model.load_state_dict(torch.load("nnue.pth"))
+            model.load_state_dict(torch.load("nnue.pth", map_location=device))
             print("Loaded existing model from nnue.pth")
         else:
             print("No trained model found. Please train the model first.")

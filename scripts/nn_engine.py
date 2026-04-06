@@ -649,7 +649,7 @@ class SearchEngine:
     def __init__(
         self,
         board: chess.Board,
-        evaluator: torch.Module,
+        evaluator: torch.nn.Module,
         millis: int,
         neg_inf: float = 0.0,
         pos_inf: float = 1.0,
