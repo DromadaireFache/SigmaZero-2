@@ -151,6 +151,16 @@ void assert_consistency(Chess* chess) {
             chess->bb.black_rooks | chess->bb.black_queens | chess->bb.black_kings));
 }
 
+int bishop_pawn_penalty(bitboard_t bishops, bitboard_t pawns) {
+    int penalty = 0;
+    while (bishops) {
+        int bishop_i = bitboard_pop_lsb(&bishops);
+        bitboard_t mask = bishop_i % 2 == 0 ? DARK_SQUARES : LIGHT_SQUARES;
+        penalty += bitboard_popcount(pawns & mask) * BISHOP_PAWN_PENALTY;
+    }
+    return penalty;
+}
+
 int eval(Chess* chess) {
     uint8_t fullmoves = chess->fullmoves > FULLMOVES_ENDGAME ? FULLMOVES_ENDGAME : chess->fullmoves;
     int e = chess->eval;
@@ -172,6 +182,10 @@ int eval(Chess* chess) {
     e -= chess->black_has_castled * CASTLE_BONUS;
 
     e += king_safety(chess);
+
+    // Light/dark square bonuses
+    e -= bishop_pawn_penalty(chess->bb.white_bishops, chess->bb.white_pawns);
+    e += bishop_pawn_penalty(chess->bb.black_bishops, chess->bb.black_pawns);
 
     // Check that the bitboards and board array are consistent
 #ifdef DEBUG

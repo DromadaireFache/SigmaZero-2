@@ -11,6 +11,9 @@ static inline int index_row(int index) { return index / 8; }
 // and the most significant bit (MSB) represents h8.
 typedef uint64_t bitboard_t;
 
+#define DARK_SQUARES 0xAA55AA55AA55AA55ULL
+#define LIGHT_SQUARES 0x55AA55AA55AA55AAULL
+
 // Print a bitboard as a 64-character string of 0s and 1s
 static inline void bitboard_print(bitboard_t bb) {
     for (int rank = 7; rank >= 0; rank--) {
