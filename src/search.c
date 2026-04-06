@@ -355,11 +355,11 @@ void select_best_move(Move* moves, int* scores, int start, int n_moves) {
     }
 }
 
-int minimax_captures_only(Chess* chess, int depth, int a, int b) {
+int minimax_captures_only(Chess* chess, int a, int b) {
     int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
-    if (depth == 0 || best_score >= b) return best_score;
+    if (best_score >= b) return best_score;
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
@@ -374,7 +374,7 @@ int minimax_captures_only(Chess* chess, int depth, int a, int b) {
         uint64_t hash = chess->zhash;
         Piece capture = Chess_make_move(chess, move);
 
-        int score = -minimax_captures_only(chess, depth - 1, -b, -a);
+        int score = -minimax_captures_only(chess, -b, -a);
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
@@ -414,7 +414,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             depth++;
             extensions++;
         } else {
-            int e = minimax_captures_only(chess, QUIES_DEPTH, a, b);
+            int e = minimax_captures_only(chess, a, b);
             return TT_store(hash, e, depth, TT_EXACT, (Move){0});
         }
     }
