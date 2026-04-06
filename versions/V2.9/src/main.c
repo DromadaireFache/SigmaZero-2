@@ -94,7 +94,7 @@ int play(char* fen, int millis, char* game_history) {
     // Select best move in results
     bool has_next = true;
     int depth = 0, best_score = -INF;
-    Move best_move;
+    Move best_move = moves[0];
     for (depth = 1; depth < 63 && has_next; depth++) {
         best_score = -INF;
         for (int i = 0; i < n_moves; i++) {

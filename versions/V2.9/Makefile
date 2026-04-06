@@ -5,9 +5,15 @@ DEBUG_TARGET=$(TARGET)_debug
 SRC_DIR=src
 BUILD_DIR=.build
 DEBUG_MODE ?= full
-DEBUG_ALLOWED_MODES := full symbols asan ubsan tsan lsan
+DEBUG_ALLOWED_MODES := full symbols asan ubsan tsan lsan define
 EXCLUDED=consts_backup.h
 EXTRA_SRCS=magicbb/moves.c
+UNAME_S := $(shell uname -s)
+MATH_LIB :=
+
+ifeq ($(UNAME_S),Linux)
+MATH_LIB := -lm
+endif
 
 SRCS := $(filter-out $(addprefix $(SRC_DIR)/,$(EXCLUDED)),$(wildcard $(SRC_DIR)/*.c))
 SRCS += $(EXTRA_SRCS)
@@ -37,9 +43,13 @@ DEBUG_MODE_CFLAGS_asan := -fsanitize=address -fno-sanitize-recover=all
 DEBUG_MODE_CFLAGS_ubsan := -fsanitize=undefined -fno-sanitize-recover=all
 DEBUG_MODE_CFLAGS_tsan := -fsanitize=thread
 DEBUG_MODE_CFLAGS_lsan := -fsanitize=leak
-
+DEBUG_MODE_CFLAGS_define := -DDEBUG
 DEBUG_CFLAGS := $(DEBUG_COMMON_CFLAGS) $(DEBUG_MODE_CFLAGS_$(DEBUG_MODE))
 DEBUG_LDFLAGS := $(DEBUG_MODE_CFLAGS_$(DEBUG_MODE))
+
+ADDITIONAL_FLAGS :=
+CFLAGS += $(ADDITIONAL_FLAGS)
+DEBUG_CFLAGS += $(ADDITIONAL_FLAGS)
 
 all: $(TARGET)
 debug: $(DEBUG_TARGET)
@@ -59,12 +69,13 @@ help:
 	@echo "  ubsan    - UndefinedBehaviorSanitizer"
 	@echo "  tsan     - ThreadSanitizer"
 	@echo "  lsan     - LeakSanitizer"
+	@echo "  define   - Compile with -DDEBUG (no optimizations, no sanitizers)"
 
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(MATH_LIB)
 
 $(DEBUG_TARGET): $(DEBUG_OBJS)
-	$(CC) $(DEBUG_CFLAGS) $(DEBUG_LDFLAGS) -o $@ $^
+	$(CC) $(DEBUG_CFLAGS) $(DEBUG_LDFLAGS) -o $@ $^ $(MATH_LIB)
 
 # Compile *.c -> .build/*.o
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
