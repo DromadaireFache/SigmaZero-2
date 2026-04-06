@@ -355,14 +355,11 @@ void select_best_move(Move* moves, int* scores, int start, int n_moves) {
     }
 }
 
-int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int b) {
+int minimax_captures_only(Chess* chess, int depth, int a, int b) {
     int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
 
     // Stand Pat
-    if (depth == 0 || best_score >= b) {
-        // nodes_total++;
-        return best_score;
-    }
+    if (depth == 0 || best_score >= b) return best_score;
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
@@ -377,7 +374,7 @@ int minimax_captures_only(Chess* chess, TIME_TYPE endtime, int depth, int a, int
         uint64_t hash = chess->zhash;
         Piece capture = Chess_make_move(chess, move);
 
-        int score = -minimax_captures_only(chess, endtime, depth - 1, -b, -a);
+        int score = -minimax_captures_only(chess, depth - 1, -b, -a);
 
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
@@ -404,12 +401,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     atomic_fetch_add(&nodes_searched, 1);
 #endif
 
-    if (depth == 0 && last_capture != EMPTY) {
-        return minimax_captures_only(chess, endtime, QUIES_DEPTH, a, b);
-    }
-
     // Look for existing eval in transposition table
-    uint64_t hash = ZHashStack_peek(&chess->zhstack);
+    uint64_t hash = chess->zhash;
     int tt_eval;
     if (TT_get(hash, &tt_eval, depth, a, b)) {
         return tt_eval;
@@ -421,8 +414,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             depth++;
             extensions++;
         } else {
-            return TT_store(hash, chess->turn == TURN_WHITE ? eval(chess) : -eval(chess), depth,
-                            TT_EXACT, (Move){0});
+            int e = minimax_captures_only(chess, QUIES_DEPTH, a, b);
+            return TT_store(hash, e, depth, TT_EXACT, (Move){0});
         }
     }
 
