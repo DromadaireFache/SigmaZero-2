@@ -2,29 +2,6 @@
 
 #include <stdlib.h>
 
-// Change this to have one function for bishop and one for rook
-static inline bitboard_t Chess_magic_moves_bb(Chess* chess, int from, bool is_bishop,
-                                              const bitboard_t MAGIC_NUMS[64],
-                                              const int MAGIC_SHIFTS[64],
-                                              const bitboard_t* MOVES[64]) {
-    bitboard_t friendly_bb = Chess_friendly_bb(chess);
-    bitboard_t all_bb = chess->bb_white | chess->bb_black;
-
-    // Get piece mask from table (all pseudo-legal moves, exluding moves to the edge of board)
-    bitboard_t piece_mask = is_bishop ? bitboard_bishop_mask(from) : bitboard_rook_mask(from);
-
-    // Get target mask (blockers in the path of the sliding piece)
-    bitboard_t target_mask = piece_mask & all_bb;
-
-    // Get move index from magic bitboard multiplication
-    int index = (target_mask * MAGIC_NUMS[from]) >> MAGIC_SHIFTS[from];
-
-    // Get pseudo-legal moves from table
-    bitboard_t moves = MOVES[from][index] & ~friendly_bb;
-
-    return moves;
-}
-
 // Returns true if double check, otherwise fills the enemy attack map with check and pin information
 static inline bool sliding_piece_attack_map(Chess* chess, bool is_bishop,
                                             const bitboard_t MAGIC_NUMS[64],
@@ -39,6 +16,7 @@ static inline bool sliding_piece_attack_map(Chess* chess, bool is_bishop,
     // X-ray through friendly pieces to find potential pins
     bitboard_t enemies = (is_bishop ? Chess_enemy_bishops_bb(chess) : Chess_enemy_rooks_bb(chess)) |
                          Chess_enemy_queens_bb(chess);
+    if (!enemies) return false;  // no potential attackers, so skip
     bitboard_t piece_mask = is_bishop ? bitboard_bishop_mask(king_i) : bitboard_rook_mask(king_i);
     bitboard_t target_mask = piece_mask & Chess_enemy_bb(chess);
     int index = (target_mask * MAGIC_NUMS[king_i]) >> MAGIC_SHIFTS[king_i];
@@ -74,26 +52,13 @@ void Chess_fill_attack_map(Chess* chess) {
     eam->n_checks = 0;
 
     uint8_t king_i = Chess_friendly_king_i(chess);
-    Position king_pos = Position_from_index(king_i);
 
-#define ENEMY_ATTACK(condition1, condition2, attack_map)              \
-    if ((condition1) && (condition2)) {                               \
-        eam->n_checks++;                                              \
-        if (eam->n_checks == 1) eam->block_attack_map = (attack_map); \
-        /* return if 2 checks, because only king can move! */         \
-        if (eam->n_checks >= 2) return;                               \
-    }
-
-// Look for pawn attacks
-#define PAWN_ATTACK(condition, offset)                                     \
-    ENEMY_ATTACK(condition, Chess_enemy_pawn_at(chess, king_i + (offset)), \
-                 bitboard_from_index(king_i + (offset)))
-    if (chess->turn == TURN_WHITE) {
-        PAWN_ATTACK(king_pos.row < 7 && king_pos.col < 7, 9)
-        PAWN_ATTACK(king_pos.row < 7 && king_pos.col > 0, 7)
-    } else {
-        PAWN_ATTACK(king_pos.row > 0 && king_pos.col > 0, -9)
-        PAWN_ATTACK(king_pos.row > 0 && king_pos.col < 7, -7)
+    // Look for pawn attacks
+    bitboard_t pawn_attacks = PAWN_CAPTURES[chess->turn][king_i] & Chess_enemy_pawns_bb(chess);
+    if (pawn_attacks) {
+        eam->n_checks += bitboard_popcount(pawn_attacks);
+        if (eam->n_checks == 1) eam->block_attack_map = pawn_attacks;
+        if (eam->n_checks >= 2) return;
     }
 
     // Look for knight attacks
@@ -103,12 +68,6 @@ void Chess_fill_attack_map(Chess* chess) {
         if (eam->n_checks == 1) eam->block_attack_map = knight_attacks;
         if (eam->n_checks >= 2) return;
     }
-
-    // Look for king attacks
-    uint8_t enemy_king_i = Chess_enemy_king_i(chess);
-    Position enemy_king_pos = Position_from_index(enemy_king_i);
-    ENEMY_ATTACK(abs(enemy_king_pos.row - king_pos.row) <= 1,
-                 abs(enemy_king_pos.col - king_pos.col) <= 1, 0)
 
     // Reset the pinned piece map
     eam->pinned_piece_map = 0;
@@ -141,34 +100,21 @@ Piece Chess_set_friendly_king_i(Chess* chess, uint8_t index) {
 }
 
 bool Chess_friendly_check(Chess* chess) {
-    // Find the king
     uint8_t king_i = Chess_friendly_king_i(chess);
-    Position king_pos = Position_from_index(king_i);
-
-#define ENEMY_CHECK(condition1, condition2) \
-    if ((condition1) && (condition2)) return true;
 
     // Look for pawn attacks
-#define PAWN_CHECK(condition, offset) \
-    ENEMY_CHECK(condition, Chess_enemy_pawn_at(chess, king_i + (offset)))
-    if (chess->turn == TURN_WHITE) {
-        PAWN_CHECK(king_pos.row < 7 && king_pos.col < 7, 9)
-        PAWN_CHECK(king_pos.row < 7 && king_pos.col > 0, 7)
-    } else {
-        PAWN_CHECK(king_pos.row > 0 && king_pos.col > 0, -9)
-        PAWN_CHECK(king_pos.row > 0 && king_pos.col < 7, -7)
-    }
+    if (PAWN_CAPTURES[chess->turn][king_i] & Chess_enemy_pawns_bb(chess)) return true;
 
     // Look for knight attacks
     if (KNIGHT_MOVES[king_i] & Chess_enemy_knights_bb(chess)) return true;
 
-    // Look for king attacks
-    uint8_t enemy_king_i = Chess_enemy_king_i(chess);
-    Position enemy_king_pos = Position_from_index(enemy_king_i);
-    if (abs(enemy_king_pos.row - king_pos.row) <= 1 &&
-        abs(enemy_king_pos.col - king_pos.col) <= 1) {
-        return true;
-    }
+    // Look for king attacks (not really necessary since we don't expect illegal moves)
+    // uint8_t enemy_king_i = Chess_enemy_king_i(chess);
+    // Position enemy_king_pos = Position_from_index(enemy_king_i);
+    // if (abs(enemy_king_pos.row - king_pos.row) <= 1 &&
+    //     abs(enemy_king_pos.col - king_pos.col) <= 1) {
+    //     return true;
+    // }
 
     // Look for bishop/queen attacks
     bitboard_t bishop_moves = Chess_magic_moves_bb(chess, king_i, true, BISHOP_MAGIC_NUMS,
@@ -227,19 +173,6 @@ bool Chess_is_move_legal(Chess* chess, Move* move) {
     return true;
 }
 
-// Move *move, size_t n_moves NEED to be defined within scope
-#define ADD_MOVE_IF(condition, offset)                                \
-    if (condition) {                                                  \
-        move->from = from;                                            \
-        move->to = from + (offset);                                   \
-        move->promotion = NO_PROMOTION;                               \
-        if (Chess_square_available(chess, move->to, captures_only) && \
-            Chess_is_move_legal(chess, move)) {                       \
-            move++;                                                   \
-            n_moves++;                                                \
-        }                                                             \
-    }
-
 // This will mask out moves that are illegal due to checks or pins, but won't check for legality
 // of the move itself
 static inline bitboard_t Chess_legal_moves_mask(Chess* chess, int from, bitboard_t moves) {
@@ -280,7 +213,7 @@ size_t Chess_knight_moves(Chess* chess, Move* move, int from, bool captures_only
     moves &= ~(Chess_friendly_bb(chess));
 
     // If only looking for captures, remove non-captures
-    if (captures_only) moves &= chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white;
+    if (captures_only) moves &= Chess_enemy_bb(chess);
 
     // Mask out illegal moves that don't resolve checks or pins
     moves = Chess_legal_moves_mask(chess, from, moves);
@@ -299,7 +232,7 @@ static inline size_t Chess_sliding_piece_moves(Chess* chess, Move* move, int fro
         Chess_magic_moves_bb(chess, from, is_bishop, MAGIC_NUMS, MAGIC_SHIFTS, MOVES);
 
     // If only looking for captures, remove non-captures
-    if (captures_only) moves &= chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white;
+    if (captures_only) moves &= Chess_enemy_bb(chess);
 
     // Mask out illegal moves that don't resolve checks or pins
     moves = Chess_legal_moves_mask(chess, from, moves);
@@ -323,6 +256,7 @@ size_t Chess_queen_moves(Chess* chess, Move* move, int from, bool captures_only)
     return n_moves + Chess_bishop_moves(chess, move + n_moves, from, captures_only);
 }
 
+// TODO: optimize this with bitboards like the others
 size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) {
     Position pos = Position_from_index(from);
     size_t n_moves = 0;
@@ -432,77 +366,173 @@ size_t Chess_pawn_moves(Chess* chess, Move* move, int from, bool captures_only) 
     return n_moves;
 }
 
+// New approach using bitboards
 size_t Chess_king_moves(Chess* chess, Move* move, int from, bool captures_only) {
-    Position pos = Position_from_index(from);
-    size_t n_moves = 0;
-    bool left_safe = false;
-    bool right_safe = false;
+    int king_i = Chess_friendly_king_i(chess);
+    bitboard_t moves = KING_MOVES[king_i];  // Get pseudo-legal moves from table
+    bitboard_t castles = 0;                 // Hold potential castling moves
+    bitboard_t friendly_bb = Chess_friendly_bb(chess);
+    bitboard_t enemy_bb = Chess_enemy_bb(chess);
+    bitboard_t all_bb = friendly_bb | enemy_bb;
 
-    ADD_MOVE_IF(pos.row > 0 && pos.col > 0, -9)
-    ADD_MOVE_IF(pos.row > 0 && pos.col < 7, -7)
-    ADD_MOVE_IF(pos.row < 7 && pos.col > 0, 7)
-    ADD_MOVE_IF(pos.row < 7 && pos.col < 7, 9)
-    ADD_MOVE_IF(pos.row > 0, -8)
-    ADD_MOVE_IF(pos.row < 7, 8)
-    if (pos.col > 0) {  // left
-        move->from = from;
-        move->to = from - 1;
-        move->promotion = NO_PROMOTION;
-        if (Chess_square_available(chess, move->to, captures_only) &&
-            Chess_is_move_legal(chess, move)) {
-            left_safe = true;
-            move++;
-            n_moves++;
+    // Add castling moves if available
+    int n_checks = chess->enemy_attack_map.n_checks;
+    if (n_checks == 0) {
+        bitboard_t kingside_empty = king_i == 4 ? 0x0000000000000060ULL : 0x6000000000000000ULL;
+        bitboard_t queenside_empty = king_i == 4 ? 0x000000000000000EULL : 0x0E00000000000000ULL;
+        if (Chess_castle_king_side(chess) && !(all_bb & kingside_empty))
+            castles |= king_i == 4 ? 0x0000000000000040ULL : 0x4000000000000000ULL;
+        if (Chess_castle_queen_side(chess) && !(all_bb & queenside_empty))
+            castles |= king_i == 4 ? 0x0000000000000004ULL : 0x0400000000000000ULL;
+    }
+
+    /* First, filter out moves with the pre-filled attack map */
+    // Remove squares that are occupied by friendly pieces
+    bitboard_t illegal_squares = friendly_bb;
+    if (n_checks > 0) {
+        // A king can't block it's own attack, so remove squares of the attack blocking bitboard
+        // Except if those squares are occupied by enemy pieces, in which case the king can capture
+        illegal_squares |= chess->enemy_attack_map.block_attack_map & ~enemy_bb;
+    }
+    // Remove illegal squares from moves
+    moves &= ~illegal_squares;
+    castles &= ~illegal_squares;
+    // Add legal castling moves back in
+    moves |= castles;
+
+    // Remove king from bitboards to avoid self-attacks
+    if (chess->turn == TURN_WHITE) {
+        chess->bb_white &= ~chess->bb.white_kings;
+    } else {
+        chess->bb_black &= ~chess->bb.black_kings;
+    }
+
+    // Filter for non-sliding pieces (king, pawns, and knights)
+
+    // Knight attacks
+    bitboard_t knight_attacks = 0;
+    bitboard_t remaining_squares = Chess_enemy_knights_bb(chess);
+    while (remaining_squares) knight_attacks |= KNIGHT_MOVES[bitboard_pop_lsb(&remaining_squares)];
+    moves &= ~knight_attacks;
+
+    // King attacks
+    bitboard_t king_attacks = KING_MOVES[Chess_enemy_king_i(chess)];
+    moves &= ~king_attacks;
+
+    // Pawn attacks
+    bitboard_t enemy_pawns = Chess_enemy_pawns_bb(chess);
+    bitboard_t pawn_danger;
+    if (chess->turn == TURN_WHITE) {
+        // Enemy is black, black pawns attack downward
+        pawn_danger = ((enemy_pawns >> 7) & ~0x0101010101010101ULL)     // attack left
+                      | ((enemy_pawns >> 9) & ~0x8080808080808080ULL);  // attack right
+    } else {
+        // Enemy is white, white pawns attack upward
+        pawn_danger = ((enemy_pawns << 9) & ~0x0101010101010101ULL)     // attack right
+                      | ((enemy_pawns << 7) & ~0x8080808080808080ULL);  // attack left
+    }
+    moves &= ~pawn_danger;
+
+    /* Secondly, filter move squares that are attacked by sliding pieces using magic bitboards */
+    remaining_squares = moves;
+    bitboard_t enemy_bishops = Chess_enemy_bishops_bb(chess) | Chess_enemy_queens_bb(chess);
+    bitboard_t enemy_rooks = Chess_enemy_rooks_bb(chess) | Chess_enemy_queens_bb(chess);
+    // If there are no sliding attackers, we can skip this step
+    if (!enemy_bishops && !enemy_rooks) remaining_squares = 0;
+    while (remaining_squares) {
+        int i = bitboard_pop_lsb(&remaining_squares);  // Get the index of the lsb and clear it
+        bitboard_t move_bb = bitboard_from_index(i);   // Bitboard of the move square
+        bitboard_t sector1 = QUADRANTS[0][i] | QUADRANTS[2][i];  // Up-right diagonal and colmun
+        bitboard_t sector2 = QUADRANTS[1][i] | QUADRANTS[3][i];  // Up-left diagonal and row
+
+        // Filter for bishop/queen attacks
+        if (enemy_bishops) {
+            bitboard_t bishop_moves = Chess_magic_moves_bb(chess, i, true, BISHOP_MAGIC_NUMS,
+                                                           BISHOP_MAGIC_SHIFTS, BISHOP_MOVES);
+            bitboard_t bishop_attackers = bishop_moves & enemy_bishops;
+
+            // Bishop/queen attack on the up-right diagonal
+            if (bishop_attackers & sector1) {
+                if (enemy_bb & move_bb) {
+                    // If there's an attacker on the move square, it might be blocking attacks on
+                    // other squares so only remove this square
+                    moves &= ~move_bb;
+                } else {
+                    // Otherwise, remove all squares in this sector, since the king can't move there
+                    // without being attacked by the bishop/queen
+                    moves &= ~(bishop_moves & sector1 & ~enemy_bishops) & ~move_bb;
+                }
+            }
+
+            // Bishop/queen attack on the up-left diagonal
+            if (bishop_attackers & sector2) {
+                if (enemy_bb & move_bb) {  // Same logic as above
+                    moves &= ~move_bb;
+                } else {
+                    moves &= ~(bishop_moves & sector2 & ~enemy_bishops) & ~move_bb;
+                }
+            }
+
+            if (bishop_attackers) {
+                // update remaining squares after filtering bishop attacks
+                remaining_squares &= moves;
+                // skip rook checks since the square is already illegal
+                continue;
+            }
         }
-    }
-    if (pos.col < 7) {  // right
-        move->from = from;
-        move->to = from + 1;
-        move->promotion = NO_PROMOTION;
-        if (Chess_square_available(chess, move->to, captures_only) &&
-            Chess_is_move_legal(chess, move)) {
-            right_safe = true;
-            move++;
-            n_moves++;
+
+        // Filter for rook/queen attacks
+        if (!enemy_rooks) continue;  // skip rook checks if no enemy rooks/queens
+        bitboard_t rook_moves =
+            Chess_magic_moves_bb(chess, i, false, ROOK_MAGIC_NUMS, ROOK_MAGIC_SHIFTS, ROOK_MOVES);
+        bitboard_t rook_attackers = rook_moves & enemy_rooks;
+
+        // Rook/queen attack on the column
+        if (rook_attackers & sector1) {
+            if (enemy_bb & move_bb) {  // Same logic as above
+                moves &= ~move_bb;
+            } else {
+                moves &= ~(rook_moves & sector1 & ~enemy_rooks) & ~move_bb;
+            }
         }
-    }
-    if (captures_only) return n_moves;
 
-#define ADD_KING_MOVE_IF(offset)                           \
-    if (!Chess_friendly_check(chess)) {                    \
-        Chess_set_friendly_king_i(chess, from + (offset)); \
-        if (!Chess_friendly_check(chess)) {                \
-            move->from = from;                             \
-            move->to = from + (offset);                    \
-            move->promotion = NO_PROMOTION;                \
-            move++;                                        \
-            n_moves++;                                     \
-        }                                                  \
-        Chess_set_friendly_king_i(chess, from);            \
-    }
-
-    // Castling
-#define ADD_CASTLE_MOVE(k1, k2, q1, q2, q3)                                         \
-    /* King side castling */                                                        \
-    if (right_safe && Chess_castle_king_side(chess) && chess->board[k1] == EMPTY && \
-        chess->board[k2] == EMPTY) {                                                \
-        ADD_KING_MOVE_IF(2)                                                         \
-    } /* Queen side castling */                                                     \
-    if (left_safe && Chess_castle_queen_side(chess) && chess->board[q1] == EMPTY && \
-        chess->board[q2] == EMPTY && chess->board[q3] == EMPTY) {                   \
-        ADD_KING_MOVE_IF(-2)                                                        \
-    }
-
-    bool king_in_check = chess->enemy_attack_map.n_checks > 0;
-    if (!king_in_check) {
-        if (chess->turn == TURN_WHITE) {
-            ADD_CASTLE_MOVE(5, 6, 1, 2, 3)
-        } else {
-            ADD_CASTLE_MOVE(61, 62, 57, 58, 59)
+        // Rook/queen attack on the row
+        if (rook_attackers & sector2) {
+            if (enemy_bb & move_bb) {  // Same logic as above
+                moves &= ~move_bb;
+            } else {
+                moves &= ~(rook_moves & sector2 & ~enemy_rooks) & ~move_bb;
+            }
         }
+
+        remaining_squares &= moves;  // update remaining squares after filtering rook attacks
     }
 
-    return n_moves;
+    // Remove castling moves if the king would be in check in the intermediate square
+    if (king_i == 4) {
+        // if f1 is attacked, remove g1
+        if (!(moves & 0x0000000000000020ULL)) moves &= ~0x0000000000000040ULL;
+        // if d1 is attacked, remove c1
+        if (!(moves & 0x0000000000000008ULL)) moves &= ~0x0000000000000004ULL;
+    } else if (king_i == 60) {
+        // if f8 is attacked, remove g8
+        if (!(moves & 0x2000000000000000ULL)) moves &= ~0x4000000000000000ULL;
+        // if d8 is attacked, remove c8
+        if (!(moves & 0x0800000000000000ULL)) moves &= ~0x0400000000000000ULL;
+    }
+
+    // Restore king bitboards
+    if (chess->turn == TURN_WHITE) {
+        chess->bb_white |= chess->bb.white_kings;
+    } else {
+        chess->bb_black |= chess->bb.black_kings;
+    }
+
+    // Filter out non-captures if only looking for captures
+    if (captures_only) moves &= enemy_bb;
+
+    // Convert bitboard to move list
+    return moves_from_bb(move, from, moves);
 }
 
 size_t Chess_legal_moves(Chess* chess, Move* moves, bool captures_only) {

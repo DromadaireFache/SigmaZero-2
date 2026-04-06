@@ -2,6 +2,7 @@ import os
 import sys
 import chess
 import pytest
+from tqdm import tqdm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sigma_zero
@@ -53,6 +54,32 @@ if __name__ == "__main__":
 
     find_wrong_move_generation(chess.Board(FEN), DEPTH)
     print("No mismatches found")
+    
+    # fens = chessdata.Dataloader().fens()
+    # for fen in tqdm(fens):
+    #     a = set(sigma_zero.latest.moves(fen, 0)["moves"])
+    #     b = set(sigma_zero.old["V2.9"].moves(fen, 0)["moves"])
+    #     if a != b:
+    #         print(f"Mismatch found for FEN:\n{fen}")
+    #         print(f"SigmaZero 2 moves: {a}")
+    #         print(f"SigmaZero 1 moves: {b}")
+    #         if len(a) < len(b):
+    #             print("Missing moves:", b - a)
+    #         else:
+    #             print("Extra moves:", a - b)
+    #         sys.exit(1)
+            
+        # a = sigma_zero.latest.moves(fen, 3)["nodes"]
+        # b = sigma_zero.old["V2.9"].moves(fen, 3)["nodes"]
+        # if a != b:
+        #     print(f"Mismatch found for FEN:\n{fen}")
+        #     print(f"SigmaZero 2 nodes: {a}")
+        #     print(f"SigmaZero 1 nodes: {b}")
+        #     if a < b:
+        #         print("Missing nodes:", b - a)
+        #     else:
+        #         print("Extra nodes:", a - b)
+        #     sys.exit(1)
 
     # board = chess.Board(FEN)
     # for move in board.legal_moves:

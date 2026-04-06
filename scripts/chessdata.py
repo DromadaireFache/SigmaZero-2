@@ -38,6 +38,8 @@ class Dataloader:
                 if h in hashset:
                     continue
                 hashset.add(h)
+                if not chess.Board(normalized["fen"]).is_valid():
+                    continue
                 prepared = self._prepare_item_for_output(normalized)
                 if prepared is None:
                     continue
@@ -61,6 +63,8 @@ class Dataloader:
                 if h in hashset:
                     continue
                 hashset.add(h)
+                if not chess.Board(normalized["fen"]).is_valid():
+                    continue
 
                 if len(items) < CACHE_LIMIT:
                     items.append(

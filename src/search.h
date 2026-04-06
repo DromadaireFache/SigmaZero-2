@@ -37,6 +37,7 @@ extern atomic_size_t nodes_searched;
 #define TIME_TYPE clock_t
 #define TIME_NOW() clock()
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
+#define TIME_TO_S(t) ((double)(t) / CLOCKS_PER_SEC)
 #define TIME_PLUS_OFFSET_MS(start, millis) ((start) + CLOCKS_PER_SEC * (millis) / 1000)
 #include <windows.h>
 static inline int cpu_count(void) {
@@ -64,6 +65,7 @@ __attribute__((always_inline)) static inline uint64_t now_nanos() {
 #define TIME_TYPE uint64_t
 #define TIME_NOW() now_nanos()
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / 1000000000.0)
+#define TIME_TO_S(t) ((double)(t) / 1000000000.0)
 #define TIME_PLUS_OFFSET_MS(start, millis) ((start) + ((uint64_t)millis) * 1000000)
 #endif
 
@@ -85,6 +87,7 @@ typedef struct {
 int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last_capture,
             int extensions);
 void select_best_move(Move* moves, int* scores, int start, int n_moves);
+size_t Chess_count_moves(Chess* chess, int depth);
 size_t Chess_count_moves_multi(Chess* chess, int depth);
 void task_destroy(void);
 void* play_thread(void* arg);

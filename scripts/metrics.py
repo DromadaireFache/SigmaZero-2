@@ -67,7 +67,7 @@ def report_movegen(engine: SigmaZeroEngine, duration: int = 60):
         if avg_time > 1.0:
             depth = max(1, depth - 1)
         elif avg_time < 0.02:
-            depth += 1
+            depth = min(6, depth + 1)
 
     print_formatted_results({"Time": mean_and_se(times), "Depth": mean_and_se(depths), "NPS": mean_and_se(nps_values)})
 
