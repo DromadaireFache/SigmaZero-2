@@ -129,7 +129,13 @@ class Tournament:
                 else:
                     time_left = (time.perf_counter() - start) * (self.n_games - i) / i
                     print(f"Game {i+1}/{self.n_games} (time left: {time_left:.0f}s)")
-                result = self.play_game(fen, is_white=(i % 2 == 0))
+
+                try:
+                    result = self.play_game(fen, is_white=(i % 2 == 0))
+                except FunctionTimedOut:
+                    print("Game timed out. Skipping to next game.")
+                    continue
+
                 print("End FEN:", result.get("end_fen", "N/A"))
                 print(f"Time {result['time_1']:.2f}s / {result['time_2']:.2f}s")
                 print(f"Avg Depth {result['avg_depth_1']:.2f} / {result['avg_depth_2']:.2f}")
@@ -307,7 +313,12 @@ class SprtTournament(Tournament):
                             f"ETA {eta:.0f}s"
                         )
 
-                    game = self.play_game(fen, is_white)
+                    try:
+                        game = self.play_game(fen, is_white)
+                    except FunctionTimedOut:
+                        print("Game timed out. Skipping to next game.")
+                        continue
+
                     games_played += 1
 
                     if game["score"] == 1:
