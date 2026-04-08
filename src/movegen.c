@@ -49,10 +49,7 @@ static inline bool sliding_piece_attack_map(Chess* chess, bool is_bishop,
 
 void Chess_fill_attack_map(Chess* chess) {
     EnemyAttackMap* eam = &chess->enemy_attack_map;
-    if (eam->is_valid) return;  // if the map is already valid, no need to recalculate
-
     eam->n_checks = 0;
-    eam->is_valid = true;  // mark the attack map as valid since we're filling it now
 
     uint8_t king_i = Chess_friendly_king_i(chess);
 
@@ -133,8 +130,33 @@ Piece Chess_set_friendly_king_i(Chess* chess, uint8_t index) {
 }
 
 bool Chess_friendly_check(Chess* chess) {
-    Chess_fill_attack_map(chess);
-    return chess->enemy_attack_map.n_checks > 0;
+    uint8_t king_i = Chess_friendly_king_i(chess);
+
+    // Look for pawn attacks
+    if (PAWN_CAPTURES[chess->turn][king_i] & Chess_enemy_pawns_bb(chess)) return true;
+
+    // Look for knight attacks
+    if (KNIGHT_MOVES[king_i] & Chess_enemy_knights_bb(chess)) return true;
+
+    // Look for king attacks (not really necessary since we don't expect illegal moves)
+    // uint8_t enemy_king_i = Chess_enemy_king_i(chess);
+    // Position enemy_king_pos = Position_from_index(enemy_king_i);
+    // if (abs(enemy_king_pos.row - king_pos.row) <= 1 &&
+    //     abs(enemy_king_pos.col - king_pos.col) <= 1) {
+    //     return true;
+    // }
+
+    // Look for bishop/queen attacks
+    bitboard_t bishop_moves = Chess_magic_moves_bb(chess, king_i, true, BISHOP_MAGIC_NUMS,
+                                                   BISHOP_MAGIC_SHIFTS, BISHOP_MOVES);
+    if (bishop_moves & (Chess_enemy_bishops_bb(chess) | Chess_enemy_queens_bb(chess))) return true;
+
+    // Look for rook/queen attacks
+    bitboard_t rook_moves =
+        Chess_magic_moves_bb(chess, king_i, false, ROOK_MAGIC_NUMS, ROOK_MAGIC_SHIFTS, ROOK_MOVES);
+    if (rook_moves & (Chess_enemy_rooks_bb(chess) | Chess_enemy_queens_bb(chess))) return true;
+
+    return false;
 }
 
 // This will mask out moves that are illegal due to checks or pins, but won't check for legality

@@ -50,8 +50,6 @@ typedef struct {
     bitboard_t pinned_piece_map;
     // once you know a piece is pinned, check this to find legal moves map
     bitboard_t valid_map[64];
-    // if false, then the map needs to be recalculated
-    bool is_valid;
 } EnemyAttackMap;
 
 typedef struct {
