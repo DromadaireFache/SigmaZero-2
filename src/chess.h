@@ -567,6 +567,13 @@ static inline bitboard_t Chess_enemy_bb(Chess* chess) {
     return chess->turn == TURN_WHITE ? chess->bb_black : chess->bb_white;
 }
 
+static inline int Chess_non_pawn_material(Chess* chess) {
+    return 4 * bitboard_popcount(chess->bb.white_queens | chess->bb.black_queens) +
+           2 * bitboard_popcount(chess->bb.white_rooks | chess->bb.black_rooks) +
+           1 * bitboard_popcount(chess->bb.white_bishops | chess->bb.black_bishops |
+                                 chess->bb.white_knights | chess->bb.black_knights);
+}
+
 Piece Chess_make_move(Chess* chess, Move* move);
 void Chess_unmake_move(Chess* chess, Move* move, Piece capture);
 gamestate_t Chess_make_null_move(Chess* chess);

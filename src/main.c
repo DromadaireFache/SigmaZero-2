@@ -186,7 +186,7 @@ int moves(char* fen, int depth) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.10.2 (2026-04-06)\n");
+    printf("SigmaZero Chess Engine 2.10.3 (2026-04-06)\n");
     return 0;
 }
 
@@ -415,9 +415,8 @@ int compute_baseline_loss() {
 }
 
 int test() {
-    Chess* chess = Chess_from_fen(strdup("1k1r1r2/pbp3pp/1p1q1p2/2p2Q2/4P3/1P1PB3/P1P3PP/4RRK1 w - - 0 30"));
-    printf("White bishop-pawn penalty: %d\n", bishop_pawn_penalty(chess->bb.white_bishops, chess->bb.white_pawns));
-    printf("Black bishop-pawn penalty: %d\n", bishop_pawn_penalty(chess->bb.black_bishops, chess->bb.black_pawns));
+    size_t tt_size = sizeof(tt);
+    printf("Transposition Table size: %zu MB\n", tt_size / 1000000);
     return 0;
 }
 
