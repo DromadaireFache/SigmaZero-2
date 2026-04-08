@@ -27,6 +27,40 @@ int king_mobility(Chess* chess, bool is_white, int king_i, bool only_attacks) {
            KING_SAFETY_FACTOR3 * __builtin_popcountll(attacks);
 }
 
+// TODO: move this into bitboards.h
+const bitboard_t NEAR_KING_MASKS[64] = {
+    0x0000000003070f0fULL, 0x00000000070f1f1fULL, 0x000000000e1f3f3fULL, 0x000000001c3e7f7fULL,
+    0x00000000387cfefeULL, 0x0000000070f8fcfcULL, 0x00000000e0f0f8f8ULL, 0x00000000c0e0f0f0ULL,
+    0x00000003070f0f0fULL, 0x000000070f1f1f1fULL, 0x0000000e1f3f3f3fULL, 0x0000001c3e7f7f7fULL,
+    0x000000387cfefefeULL, 0x00000070f8fcfcfcULL, 0x000000e0f0f8f8f8ULL, 0x000000c0e0f0f0f0ULL,
+    0x000003070f0f0f07ULL, 0x0000070f1f1f1f0fULL, 0x00000e1f3f3f3f1fULL, 0x00001c3e7f7f7f3eULL,
+    0x0000387cfefefe7cULL, 0x000070f8fcfcfcf8ULL, 0x0000e0f0f8f8f8f0ULL, 0x0000c0e0f0f0f0e0ULL,
+    0x0003070f0f0f0703ULL, 0x00070f1f1f1f0f07ULL, 0x000e1f3f3f3f1f0eULL, 0x001c3e7f7f7f3e1cULL,
+    0x00387cfefefe7c38ULL, 0x0070f8fcfcfcf870ULL, 0x00e0f0f8f8f8f0e0ULL, 0x00c0e0f0f0f0e0c0ULL,
+    0x03070f0f0f070300ULL, 0x070f1f1f1f0f0700ULL, 0x0e1f3f3f3f1f0e00ULL, 0x1c3e7f7f7f3e1c00ULL,
+    0x387cfefefe7c3800ULL, 0x70f8fcfcfcf87000ULL, 0xe0f0f8f8f8f0e000ULL, 0xc0e0f0f0f0e0c000ULL,
+    0x070f0f0f07030000ULL, 0x0f1f1f1f0f070000ULL, 0x1f3f3f3f1f0e0000ULL, 0x3e7f7f7f3e1c0000ULL,
+    0x7cfefefe7c380000ULL, 0xf8fcfcfcf8700000ULL, 0xf0f8f8f8f0e00000ULL, 0xe0f0f0f0e0c00000ULL,
+    0x0f0f0f0703000000ULL, 0x1f1f1f0f07000000ULL, 0x3f3f3f1f0e000000ULL, 0x7f7f7f3e1c000000ULL,
+    0xfefefe7c38000000ULL, 0xfcfcfcf870000000ULL, 0xf8f8f8f0e0000000ULL, 0xf0f0f0e0c0000000ULL,
+    0x0f0f070300000000ULL, 0x1f1f0f0700000000ULL, 0x3f3f1f0e00000000ULL, 0x7f7f3e1c00000000ULL,
+    0xfefe7c3800000000ULL, 0xfcfcf87000000000ULL, 0xf8f8f0e000000000ULL, 0xf0f0e0c000000000ULL};
+
+static inline int near_king_penalty(int king_i, bitboard_t friendly_queens,
+                                    bitboard_t friendly_rooks, bitboard_t friendly_minor_pieces,
+                                    bitboard_t enemy_queens, bitboard_t enemy_rooks,
+                                    bitboard_t enemy_minor_pieces) {
+    bitboard_t near_king_mask = NEAR_KING_MASKS[king_i];
+    int penalty = 0;
+    penalty += 4 * bitboard_popcount(near_king_mask & enemy_queens);
+    penalty += 2 * bitboard_popcount(near_king_mask & enemy_rooks);
+    penalty += bitboard_popcount(near_king_mask & enemy_minor_pieces);
+    penalty -= 2 * bitboard_popcount(near_king_mask & friendly_queens);
+    penalty -= bitboard_popcount(near_king_mask & friendly_rooks);
+    penalty -= bitboard_popcount(near_king_mask & friendly_minor_pieces);
+    return penalty;
+}
+
 int king_safety(Chess* chess, int endness) {
     if (endness >= FULLMOVES_ENDGAME) return 0;
     uint8_t fullmoves_min = endness;
@@ -51,6 +85,15 @@ int king_safety(Chess* chess, int endness) {
         e -= king_mobility(chess, true, chess->king_white + 1, true);
     if (king_black_col < 7 && chess->board[chess->king_black + 1] == EMPTY)
         e += king_mobility(chess, false, chess->king_black + 1, true);
+
+    e -= 30 * near_king_penalty(chess->king_white, chess->bb.white_queens, chess->bb.white_rooks,
+                                chess->bb.white_bishops | chess->bb.white_knights,
+                                chess->bb.black_queens, chess->bb.black_rooks,
+                                chess->bb.black_bishops | chess->bb.black_knights);
+    e += 30 * near_king_penalty(chess->king_black, chess->bb.black_queens, chess->bb.black_rooks,
+                                chess->bb.black_bishops | chess->bb.black_knights,
+                                chess->bb.white_queens, chess->bb.white_rooks,
+                                chess->bb.white_bishops | chess->bb.white_knights);
 
     e = e * fullmoves_score / 64;
     return e;

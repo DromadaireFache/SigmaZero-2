@@ -106,14 +106,14 @@ class SigmaZeroEngine(Engine):
             print(result.stderr.decode())
             sys.exit(1)
 
-    def command(self, cmd: list[str], JSON: bool = False) -> str | dict:
+    def command(self, cmd: list[str], JSON: bool = False, timeout: int = None) -> str | dict:
         try:
             result = subprocess.run(
                 self.exe + " " + " ".join(f'"{arg}"' for arg in cmd),
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=timeout,
             )
         except subprocess.TimeoutExpired:
             print(f"Command timed out: {cmd}")
@@ -126,16 +126,26 @@ class SigmaZeroEngine(Engine):
         else:
             return result.stdout.strip()
 
-    def play(self, board: chess.Board | str, millis: int) -> dict:
+    def play(self, board: chess.Board | str, millis: int, tries: int = 3) -> dict:
         if isinstance(board, str):
             board = chess.Board(board)
         history = get_position_history(board)
         history_str = ",".join(history) if history else ""
         if history_str:
             result = self.command(["play", board.fen(), str(millis), history_str], JSON=True)
-            if result.get("error") is None:
+            if "error" not in result:
                 return result
-        return self.command(["play", board.fen(), str(millis)], JSON=True)
+        result = self.command(["play", board.fen(), str(millis)], JSON=True, timeout=millis/100 + 5)
+        if "error" not in result:
+            return result
+        if tries > 0:
+            print(f"Play command failed, retrying... ({tries} tries left)")
+            return self.play(board, millis, tries - 1)
+        else:
+            print("Play command failed after multiple attempts.")
+            print("Error details:", result)
+            print(f"fen: {board.fen()}, millis: {millis}, history: {history_str}")
+            sys.exit(1)
 
     def version(self) -> str:
         return self.command(["version"], JSON=False)

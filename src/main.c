@@ -415,8 +415,7 @@ int compute_baseline_loss() {
 }
 
 int test() {
-    size_t tt_size = sizeof(tt);
-    printf("Transposition Table size: %zu MB\n", tt_size / 1000000);
+    bitboard_print(0xf8fcfcfcf8700000ULL);
     return 0;
 }
 

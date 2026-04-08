@@ -3,6 +3,7 @@ import math
 import sys
 import time
 import chess
+from func_timeout import func_set_timeout, FunctionTimedOut
 
 from .engines import Engine
 from . import chessdata
@@ -61,6 +62,7 @@ class Tournament:
         self.elo_is_available = False
         self.results = self.run()
 
+    @func_set_timeout(300)  # 5 minute timeout for a single game to prevent hanging
     def play_game(self, fen: str, is_white: bool) -> dict:
         results = {"score": 0, "time_2": 0, "time_1": 0, "avg_depth_1": 0, "avg_depth_2": 0}
         board = chess.Board(fen)
@@ -75,7 +77,7 @@ class Tournament:
         def move_number_limit_reached(n: int, eval: float) -> bool:
             if n < 150:
                 return False
-            return abs(eval) < 5.0  # Only stop if an engine is not winning by more than a queen
+            return abs(eval) < 5.0 or n >= 250  # Only stop if an engine is not winning by more than a queen
 
         while not board.is_game_over(claim_draw=True):
             if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
