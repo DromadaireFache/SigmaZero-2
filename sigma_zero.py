@@ -58,7 +58,7 @@ if __name__ == "__main__":
     p.add_argument("engine2", type=str, default="stockfish", help="Second engine to compete (default: stockfish)")
     p.add_argument("--millis", type=int, nargs="+", default=[10], help="Time per move in ms (default: 10)")
     p.add_argument("--elo0", type=float, default=0.0, help="Elo threshold for H0 (not worth shipping) (default: 0.0)")
-    p.add_argument("--elo1", type=float, default=3.0, help="Elo threshold for H1 (worth shipping) (default: 3.0)")
+    p.add_argument("--elo1", type=float, default=10.0, help="Elo threshold for H1 (worth shipping) (default: 10.0)")
     p.add_argument("--alpha", type=float, default=0.05, help="False positive rate (default: 0.05)")
     p.add_argument("--beta", type=float, default=0.05, help="False negative rate (default: 0.05)")
     p.add_argument("--max_games", type=int, default=1000, help="Maximum number of games to play (default: 1000)")

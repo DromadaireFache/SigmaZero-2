@@ -71,11 +71,11 @@ class Tournament:
                 print(self.engine1.version(), "v", self.engine2.version(), f"({self.score_to_beat})")
             else:
                 print(self.engine1.version(), "v", self.engine2.version())
-                
+
         def move_number_limit_reached(n: int, eval: float) -> bool:
             if n < 150:
                 return False
-            return abs(eval) < 5.0 # Only stop if an engine is not winning by more than a queen
+            return abs(eval) < 5.0  # Only stop if an engine is not winning by more than a queen
 
         while not board.is_game_over(claim_draw=True):
             if (board.turn == chess.WHITE and is_white) or (board.turn == chess.BLACK and not is_white):
@@ -97,7 +97,7 @@ class Tournament:
                     illegal_move(board, move_uci, result)
             except Exception:
                 illegal_move(board, move_uci, result)
-                
+
             if move_number_limit_reached(number_of_moves, result.get("eval", 0)):
                 break
 
@@ -257,7 +257,7 @@ class SprtTournament(Tournament):
         engine2: Engine,
         millis: int | tuple[int, int],
         elo0: float = 0.0,  # H0: not worth shipping (below this)
-        elo1: float = 3.0,  # H1: worth shipping (at least this)
+        elo1: float = 10.0,  # H1: worth shipping (at least this)
         alpha: float = 0.05,  # false positive rate
         beta: float = 0.05,  # false negative rate
         max_games: int = 1000,  # safety cap — at 10ms ≈ 30 min

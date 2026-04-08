@@ -167,8 +167,11 @@ Piece Chess_make_move(Chess* chess, Move* move) {
 
     // Update gamestate in hash
     chess->zhash ^= ZHASH_STATE[chess->gamestate];
-
     ZHashStack_push(&chess->zhstack, chess->zhash);
+
+    // The enemy attack map is now invalid since the position has changed, so mark it as such
+    chess->enemy_attack_map.is_valid = false;
+
     return target_piece;
 }
 
