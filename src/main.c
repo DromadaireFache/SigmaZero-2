@@ -278,7 +278,11 @@ int eval_command(Chess* chess, int depth) {
 }
 
 int king_safety_command(Chess* chess) {
-    printf("king_safety() -> %d\n", king_safety(chess));
+    int npm = Chess_non_pawn_material(chess);
+    printf("npm: %d\n", npm);
+    int endness = (24 - npm) * FULLMOVES_ENDGAME / (24 - 10);
+    endness = endness > FULLMOVES_ENDGAME ? FULLMOVES_ENDGAME : endness;
+    printf("king_safety(endness=%d) -> %d\n", endness, king_safety(chess, endness));
     return 0;
 }
 
