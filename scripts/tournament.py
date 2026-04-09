@@ -61,8 +61,13 @@ class Tournament:
         self.exit_on_interrupt = exit_on_interrupt
         self.elo_is_available = False
         self.results = self.run()
+        
+    def _game_timeout_seconds(self, fen, is_white):
+        # self.millis is a tuple (ms_engine1, ms_engine2)
+        base_ms = self.millis if isinstance(self.millis, int) else max(self.millis)
+        return max(1.0, base_ms)  # millis * 1000 moves
 
-    @func_set_timeout(300)  # 5 minute timeout for a single game to prevent hanging
+    @func_set_timeout(_game_timeout_seconds)  # 5 minute timeout for a single game to prevent hanging
     def play_game(self, fen: str, is_white: bool) -> dict:
         results = {"score": 0, "time_2": 0, "time_1": 0, "avg_depth_1": 0, "avg_depth_2": 0}
         board = chess.Board(fen)

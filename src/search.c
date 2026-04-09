@@ -356,7 +356,8 @@ void select_best_move(Move* moves, int* scores, int start, int n_moves) {
 }
 
 int minimax_captures_only(Chess* chess, int a, int b) {
-    int best_score = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
+    int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
+    int best_score = e;
 
     // Stand Pat
     if (best_score >= b) return best_score;
@@ -370,8 +371,16 @@ int minimax_captures_only(Chess* chess, int a, int b) {
         if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
         Move* move = &moves[i];
 
+        // Delta pruning: if the capture is not good enough, skip searching it
+        {
+            Piece capture = chess->board[move->to];
+            int capture_value = abs(Piece_value(capture));
+            if (e + capture_value + 200 <= a) continue;
+        }
+
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
+        uint8_t halfmoves = chess->halfmoves;
         Piece capture = Chess_make_move(chess, move);
 
         int score = -minimax_captures_only(chess, -b, -a);
@@ -379,6 +388,7 @@ int minimax_captures_only(Chess* chess, int a, int b) {
         Chess_unmake_move(chess, move, capture);
         chess->gamestate = gamestate;
         chess->zhash = hash;
+        chess->halfmoves = halfmoves;
 
         if (score > best_score) {
             best_score = score;
@@ -508,6 +518,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         gamestate_t gamestate = chess->gamestate;
         uint64_t hash = chess->zhash;
         int pawn_row_sum = chess->pawn_row_sum;
+        uint8_t halfmoves = chess->halfmoves;
         Piece capture = Chess_make_move(chess, move);
 
         int score;
@@ -544,6 +555,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
         chess->gamestate = gamestate;
         chess->zhash = hash;
         chess->pawn_row_sum = pawn_row_sum;
+        chess->halfmoves = halfmoves;
 
         if (score > best_score) {
             best_score = score;

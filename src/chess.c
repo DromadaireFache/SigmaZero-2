@@ -109,13 +109,6 @@ Piece Chess_make_move(Chess* chess, Move* move) {
 
     // Handle promotion and update pawn row sum number
     if (moving_piece == WHITE_PAWN) {
-        // chess->pawn_row_sum += index_row(move->to - move->from + 1);
-        // if (target_piece == BLACK_PAWN) chess->pawn_row_sum -= index_row(move->to) - 6;
-
-        // if (move->promotion != NO_PROMOTION) {
-        //     chess->pawn_row_sum -= index_row(move->to) - 1;
-        // }
-
         switch (move->promotion) {
             case PROMOTE_QUEEN:
                 moving_piece = WHITE_QUEEN;
@@ -133,13 +126,6 @@ Piece Chess_make_move(Chess* chess, Move* move) {
                 break;
         }
     } else if (moving_piece == BLACK_PAWN) {
-        // chess->pawn_row_sum += index_row(move->to - move->from - 1);
-        // if (target_piece == WHITE_PAWN) chess->pawn_row_sum -= index_row(move->to) - 1;
-
-        // if (move->promotion != NO_PROMOTION) {
-        //     chess->pawn_row_sum -= index_row(move->to) - 6;
-        // }
-
         switch (move->promotion) {
             case PROMOTE_QUEEN:
                 moving_piece = BLACK_QUEEN;
@@ -232,15 +218,6 @@ void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
                 Chess_add(chess, WHITE_PAWN, col + 24);
             }
         }
-    }
-
-    // Update halfmove clock
-    // Reset if a pawn moved or a capture was made
-    // TODO: this aint working
-    if (!Piece_is_pawn(moving_piece) && capture == EMPTY) {
-        chess->halfmoves--;
-    } else {
-        chess->halfmoves = 0;
     }
 
     // Update fullmove number
