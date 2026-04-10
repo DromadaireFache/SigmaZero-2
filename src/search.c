@@ -575,6 +575,14 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
                     chess->killer_moves[1][depth] = chess->killer_moves[0][depth];
                     chess->killer_moves[0][depth] = *move;
                 }
+
+                // Update history heuristic
+                int bonus = depth * depth;
+                Piece piece = chess->board[move->from];
+                int* entry = &chess->history[Piece_index(piece)][move->to];
+                *entry += bonus;
+                // TODO: implement gravity
+                if (*entry > 5000) *entry = 5000;
             }
             return TT_store(hash, best_score, depth, TT_LOWER, best_move);  // Failed high
         }
@@ -602,6 +610,7 @@ void* play_thread(void* arg) {
         Piece capture = task.capture;
         Move move = task.move;
         memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
+        Chess_age_history(chess);  // Apply aging to the history heuristic array
 
         if (task.depth > 1 && task.result[-1].reached) {  // aspiration window
             int window_alpha = ASP_WINDOW_ALPHA_INIT, window_beta = ASP_WINDOW_BETA_INIT;

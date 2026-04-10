@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include "consts.h"
 
@@ -212,5 +213,37 @@ static inline Piece Piece_from_char(char c) {
             return BLACK_KING;
         default:
             return EMPTY;
+    }
+}
+
+static inline int Piece_index(Piece piece) {
+    switch (piece) {
+        case WHITE_PAWN:
+            return 0;
+        case BLACK_PAWN:
+            return 1;
+        case WHITE_KNIGHT:
+            return 2;
+        case BLACK_KNIGHT:
+            return 3;
+        case WHITE_BISHOP:
+            return 4;
+        case BLACK_BISHOP:
+            return 5;
+        case WHITE_ROOK:
+            return 6;
+        case BLACK_ROOK:
+            return 7;
+        case WHITE_QUEEN:
+            return 8;
+        case BLACK_QUEEN:
+            return 9;
+        case WHITE_KING:
+            return 10;
+        case BLACK_KING:
+            return 11;
+        default:
+            fprintf(stderr, "Error in Piece_index\n");
+            exit(69);
     }
 }
