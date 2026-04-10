@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdlib.h>
 
 #include "chess.h"
 #include "movegen.h"
@@ -200,6 +201,18 @@ int eval(Chess* chess) {
 #ifdef DEBUG
     assert_consistency(chess);
 #endif
+
+    // Reduce eval towards 0 (draw) with increasing halfmoves in endgames
+    if (npm <= 12) {
+        int draw_score = chess->halfmoves * 2;
+        if (draw_score > abs(e)) {
+            // Say 4*halfmoves is 60 and eval is 40, its very likely a draw, so set eval to 0
+            e = 0;
+        } else {
+            // If eval is negative, increase it towards 0, if eval is positive, decrease it towards 0
+            e += (e > 0 ? -draw_score : draw_score);
+        }
+    }
 
     return e;
 }
