@@ -530,8 +530,9 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             bool reduction_condition = depth >= 2 && !in_check && capture == EMPTY;
             int r = reduction_condition ? compute_reduction(depth, i) : 0;
 
-            // Reduce less aggressively in endgames
-            if (chess->fullmoves >= FULLMOVES_ENDGAME && r > 1) r = r / 2;
+            // Reduce more in endgames
+            int npm = Chess_non_pawn_material(chess);
+            if (npm <= 10) r += 1;
 
             // Clamp reduction so we don't go below depth 1
             int reduced_depth = depth - 1 - r;
