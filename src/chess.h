@@ -499,9 +499,11 @@ static inline bool Chess_square_available(Chess* chess, int index, bool captures
 static inline int Chess_3fold_repetition(Chess* chess) {
     uint64_t hash = ZHashStack_peek(&chess->zhstack);
     int count = 1;
+    int range_end = chess->zhstack.sp - chess->halfmoves - 1;
+    if (range_end < 0) range_end = 0;
 
     // Loop through the stack backwards
-    for (int i = chess->zhstack.sp - 2; i >= 0; i--) {
+    for (int i = chess->zhstack.sp - 1; i >= range_end; i -= 2) {
         if (chess->zhstack.hashes[i] == hash) {
             count++;
             if (count >= 3) return 3;

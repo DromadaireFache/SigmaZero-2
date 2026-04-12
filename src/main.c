@@ -186,7 +186,7 @@ int moves(char* fen, int depth) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.10.4 (2026-04-07)\n");
+    printf("SigmaZero Chess Engine 2.10.7 (2026-04-07)\n");
     return 0;
 }
 
