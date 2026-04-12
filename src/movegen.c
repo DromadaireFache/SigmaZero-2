@@ -656,9 +656,6 @@ void Chess_score_move(Chess* chess, Move* move, int* score) {
         *score = (abs(Piece_value_at(aggressor, move->to)) -
                   abs(Piece_value_at(aggressor, move->from))) /
                  4;
-        
-        // Apply history heuristic
-        *score += chess->history[Piece_index(aggressor)][move->to];
     }
 }
 

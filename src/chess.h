@@ -76,8 +76,7 @@ typedef struct {
     Move killer_moves[2][64];  // Used for move ordering [id][depth]
     bool white_has_castled;
     bool black_has_castled;
-    BitboardMap bb;      // Bitboards to store the pieces
-    int history[12][64];  // history heuristic [piece index][to square]
+    BitboardMap bb;  // Bitboards to store the pieces
 } Chess;
 
 #define BITMASK(nbit) (1 << (nbit))
@@ -573,14 +572,6 @@ static inline int Chess_non_pawn_material(Chess* chess) {
            2 * bitboard_popcount(chess->bb.white_rooks | chess->bb.black_rooks) +
            1 * bitboard_popcount(chess->bb.white_bishops | chess->bb.black_bishops |
                                  chess->bb.white_knights | chess->bb.black_knights);
-}
-
-static inline void Chess_age_history(Chess* chess) {
-    for (int i = 0; i < 12; i++) {
-        for (int j = 0; j < 64; j++) {
-            chess->history[i][j] /= 2;
-        }
-    }
 }
 
 Piece Chess_make_move(Chess* chess, Move* move);
