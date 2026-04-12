@@ -601,7 +601,6 @@ void* play_thread(void* arg) {
         int depth = task.depth;
         Piece capture = task.capture;
         Move move = task.move;
-        memset(chess->killer_moves, 0, sizeof(chess->killer_moves));
 
         if (task.depth > 1 && task.result[-1].reached) {  // aspiration window
             int window_alpha = ASP_WINDOW_ALPHA_INIT, window_beta = ASP_WINDOW_BETA_INIT;
