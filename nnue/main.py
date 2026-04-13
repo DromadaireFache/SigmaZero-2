@@ -212,7 +212,12 @@ def download_hf_dataset(dataset_dir: str):
 
 
 def training_loop(
-    model: NNUE, train_set: HFDataset, val_set: HFDataset, epochs: int = 10, batch_size: int = 100000
+    model: NNUE,
+    train_set: HFDataset,
+    val_set: HFDataset,
+    epochs: int = 10,
+    batch_size: int = 100000,
+    workers: int = 2,
 ):
     criterion = SigmoidScaledMSELoss(k=3.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
@@ -220,9 +225,18 @@ def training_loop(
     train_losses = []
     val_losses = []
 
-    workers = 2  # Maximum that streaming dataset can handle
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, num_workers=workers)
-    val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size)
+    train_loader = torch.utils.data.DataLoader(
+        train_set,
+        batch_size=batch_size,
+        num_workers=workers,
+        persistent_workers=workers > 0,
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_set,
+        batch_size=batch_size,
+        num_workers=workers,
+        persistent_workers=workers > 0,
+    )
 
     for epoch in range(epochs):
         # Training
@@ -434,6 +448,12 @@ if __name__ == "__main__":
             action="store_true",
             help="Use network streaming even if local dataset exists",
         )
+        parser.add_argument(
+            "--workers",
+            type=int,
+            default=None,
+            help="DataLoader workers (default: 2 for streaming, 0 for local)",
+        )
         args = parser.parse_args(sys.argv[2:])
 
         if args.download_dataset:
@@ -449,6 +469,9 @@ if __name__ == "__main__":
         data_source = f"local ({args.dataset_dir})" if using_local else "HF streaming"
         print(f"Data source: {data_source}")
 
+        workers = args.workers if args.workers is not None else (0 if using_local else 2)
+        print(f"DataLoader workers: {workers}")
+
         train_set = HFDataset(
             split="train",
             max_samples=args.max_samples,
@@ -461,7 +484,7 @@ if __name__ == "__main__":
             dataset_dir=args.dataset_dir,
             prefer_local=not args.force_streaming,
         )
-        training_loop(nnue, train_set, val_set, epochs=args.epochs, batch_size=args.batch_size)
+        training_loop(nnue, train_set, val_set, epochs=args.epochs, batch_size=args.batch_size, workers=workers)
 
     elif command == "eval":
         parser = argparse.ArgumentParser(description="Evaluate the NNUE model on a chess position")
