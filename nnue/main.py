@@ -138,13 +138,18 @@ class HFDataset(torch.utils.data.IterableDataset):
         self.dataset_dir = dataset_dir
         self.prefer_local = prefer_local
         self.using_local = self.prefer_local and os.path.isdir(self.dataset_dir)
+        self._dataset = None
 
-        if self.using_local:
-            self.dataset = load_from_disk(self.dataset_dir, keep_in_memory=False)
-        else:
-            self.dataset = load_dataset(
-                HF_DATASET_NAME, split="train", streaming=True, token=os.getenv("HF_TOKEN", None)
-            )
+    def _get_dataset(self):
+        # Lazy-open the backing dataset inside each worker process.
+        if self._dataset is None:
+            if self.using_local:
+                self._dataset = load_from_disk(self.dataset_dir, keep_in_memory=False)
+            else:
+                self._dataset = load_dataset(
+                    HF_DATASET_NAME, split="train", streaming=True, token=os.getenv("HF_TOKEN", None)
+                )
+        return self._dataset
 
     def _split_limit(self):
         if self.max_samples is None:
@@ -167,9 +172,10 @@ class HFDataset(torch.utils.data.IterableDataset):
         worker_id = info.id if info is not None else 0
         num_workers = info.num_workers if info is not None else 1
 
-        ds = self.dataset
+        ds = self._get_dataset()
         if self.using_local:
-            ds = ds.to_iterable_dataset(num_shards=1024)
+            shard_count = max(num_workers * 8, 64)
+            ds = ds.to_iterable_dataset(num_shards=shard_count)
 
         ds = ds.shuffle(seed=self.seed, buffer_size=100_000)
         ds = ds.shard(num_shards=num_workers, index=worker_id)
@@ -192,7 +198,7 @@ class HFDataset(torch.utils.data.IterableDataset):
                 continue
             fen = item["fen"]
             y = float(cp) / 100.0
-            yield fen_to_input(fen), torch.tensor(y, dtype=torch.float32)
+            yield fen_to_input(fen), y
 
             produced += 1
             if limit is not None and produced >= limit:
@@ -225,18 +231,17 @@ def training_loop(
     train_losses = []
     val_losses = []
 
-    train_loader = torch.utils.data.DataLoader(
-        train_set,
-        batch_size=batch_size,
-        num_workers=workers,
-        persistent_workers=workers > 0,
-    )
-    val_loader = torch.utils.data.DataLoader(
-        val_set,
-        batch_size=batch_size,
-        num_workers=workers,
-        persistent_workers=workers > 0,
-    )
+    loader_kwargs = {
+        "batch_size": batch_size,
+        "num_workers": workers,
+        "persistent_workers": workers > 0,
+        "pin_memory": device.type == "cuda",
+    }
+    if workers > 0:
+        loader_kwargs["prefetch_factor"] = 4
+
+    train_loader = torch.utils.data.DataLoader(train_set, **loader_kwargs)
+    val_loader = torch.utils.data.DataLoader(val_set, **loader_kwargs)
 
     for epoch in range(epochs):
         # Training
@@ -469,7 +474,12 @@ if __name__ == "__main__":
         data_source = f"local ({args.dataset_dir})" if using_local else "HF streaming"
         print(f"Data source: {data_source}")
 
-        workers = args.workers if args.workers is not None else (0 if using_local else 2)
+        if args.workers is not None:
+            workers = args.workers
+        elif using_local:
+            workers = os.cpu_count()
+        else:
+            workers = 2
         print(f"DataLoader workers: {workers}")
 
         train_set = HFDataset(
