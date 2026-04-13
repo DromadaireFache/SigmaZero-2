@@ -115,34 +115,55 @@ def fen_to_input(fen: str) -> torch.Tensor:
     return torch.from_numpy(_fen_bytes_to_array(fen_bytes))
 
 
-class TrainDataset(torch.utils.data.IterableDataset):
-    def __init__(self, max_samples=None, seed=0):
+class HFDataset(torch.utils.data.IterableDataset):
+    def __init__(self, split: str, max_samples=None, seed=0, val_fraction: float = 0.2):
+        if split not in ("train", "val"):
+            raise ValueError("split must be 'train' or 'val'")
+        self.split = split
         self.max_samples = max_samples
         self.seed = seed
+        self.val_fraction = val_fraction
         self.dataset = load_dataset(
             "Lichess/chess-position-evaluations", split="train", streaming=True, token=os.getenv("HF_TOKEN", None)
         )
 
+    def _split_limit(self):
+        if self.max_samples is None:
+            return None
+        val_size = int(self.max_samples * self.val_fraction)
+        train_size = self.max_samples - val_size
+        return train_size if self.split == "train" else val_size
+
     def __len__(self):
-        return self.max_samples if self.max_samples is not None else 342059879
+        total = 342059879
+        if self.max_samples is not None:
+            split_limit = self._split_limit()
+            return split_limit if split_limit is not None else total
+        if self.split == "train":
+            return int(total * (1.0 - self.val_fraction))
+        return int(total * self.val_fraction)
 
     def __iter__(self):
         info = torch.utils.data.get_worker_info()
         worker_id = info.id if info is not None else 0
         num_workers = info.num_workers if info is not None else 1
 
-        ds = self.dataset
+        ds = self.dataset.shuffle(seed=self.seed, buffer_size=100_000)
         ds = ds.shard(num_shards=num_workers, index=worker_id)
-        ds = ds.shuffle(seed=self.seed + worker_id, buffer_size=100_000)
 
         limit = None
-        if self.max_samples is not None:
-            base = self.max_samples // num_workers
-            rem = self.max_samples % num_workers
+        split_limit = self._split_limit()
+        if split_limit is not None:
+            base = split_limit // num_workers
+            rem = split_limit % num_workers
             limit = base + (1 if worker_id < rem else 0)
 
         produced = 0
-        for item in ds:
+        val_every = max(int(round(1.0 / self.val_fraction)), 1)
+        for idx, item in enumerate(ds):
+            is_val = (idx % val_every) == 0
+            if (self.split == "val") != is_val:
+                continue
             cp = item["cp"]
             if cp is None:
                 continue
@@ -155,52 +176,14 @@ class TrainDataset(torch.utils.data.IterableDataset):
                 break
 
 
-class ValDataset(torch.utils.data.Dataset):
-    def __init__(self, max_samples: int = None):
-        self.positions = []
-        self.evaluations = []
-        with open("data/chessData.csv", "r") as f:
-            for line in tqdm(f, desc="Loading validation dataset"):
-                fen, eval_str = line.strip().split(",")
-
-                try:
-                    evaluation = float(eval_str) / 100.0  # Convert centipawns to pawns
-                except ValueError:
-                    continue  # Skip lines with invalid evaluation values
-
-                self.positions.append(fen_to_input(fen))
-                self.evaluations.append(evaluation)
-                if max_samples and len(self.positions) >= max_samples:
-                    break
-
-        print(f"Loaded {len(self.positions)} positions from data/chessData.csv")
-
-    def __len__(self):
-        return len(self.positions)
-
-    def __getitem__(self, idx):
-        input_vector = self.positions[idx]
-        evaluation = self.evaluations[idx]
-        return input_vector, evaluation
-
-
-def get_baseline_loss() -> float:
-    sigma_zero_loss = sigma_zero.latest.command(["baseline_loss"], JSON=False)
-    return float(sigma_zero_loss.strip())
-
-
 def training_loop(
-    model: NNUE, train_set: TrainDataset, val_set: ValDataset, epochs: int = 10, batch_size: int = 100000
+    model: NNUE, train_set: HFDataset, val_set: HFDataset, epochs: int = 10, batch_size: int = 100000
 ):
     criterion = SigmoidScaledMSELoss(k=3.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=10)
     train_losses = []
     val_losses = []
-
-    # Get a baseline for loss using the current static evaluation of SigmaZero engine
-    baseline_loss = get_baseline_loss()
-    print(f"Baseline validation loss using SigmaZero static evaluation: {baseline_loss:.4f}")
 
     workers = 2  # Maximum that streaming dataset can handle
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, num_workers=workers)
@@ -226,12 +209,14 @@ def training_loop(
         # Validation
         model.eval()
         val_loss = 0
+        val_seen = 0
         with torch.no_grad():
             for inputs, targets in tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} - Validation"):
                 outputs = model(inputs.to(device))
                 loss = criterion(outputs.squeeze(), targets.float().to(device))
                 val_loss += loss.item() * inputs.size(0)
-        avg_val_loss = val_loss / len(val_loader.dataset)
+            val_seen += inputs.size(0)
+        avg_val_loss = val_loss / max(val_seen, 1)
         val_losses.append(avg_val_loss)
         scheduler.step(avg_val_loss)
         print(f"Epoch {epoch+1}/{epochs} - Validation Loss: {avg_val_loss:.4f}")
@@ -241,7 +226,6 @@ def training_loop(
 
     plt.plot(range(1, epochs + 1), train_losses, label="Training Loss")
     plt.plot(range(1, epochs + 1), val_losses, label="Validation Loss")
-    plt.axhline(y=baseline_loss, color="r", linestyle="--", label="SigmaZero Baseline Loss")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title("Training and Validation Loss")
@@ -371,8 +355,8 @@ if __name__ == "__main__":
             print("Loaded existing model from nnue.pth")
         print("NNUE parameters:", sum(p.numel() for p in nnue.parameters()))
 
-        train_set = TrainDataset(max_samples=args.max_samples)
-        val_set = ValDataset(max_samples=args.max_samples // 4 if args.max_samples else None)
+        train_set = HFDataset(split="train", max_samples=args.max_samples)
+        val_set = HFDataset(split="val", max_samples=args.max_samples)
         training_loop(nnue, train_set, val_set, epochs=args.epochs, batch_size=args.batch_size)
 
     elif command == "eval":
