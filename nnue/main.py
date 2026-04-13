@@ -10,7 +10,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import argparse
 import sys
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from numba import njit
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,6 +33,9 @@ PIECE_TO_PLANE[ord("q")] = 8
 PIECE_TO_PLANE[ord("Q")] = 9
 PIECE_TO_PLANE[ord("k")] = 10
 PIECE_TO_PLANE[ord("K")] = 11
+
+HF_DATASET_NAME = "Lichess/chess-position-evaluations"
+DEFAULT_HF_DATASET_DIR = "data/hf_chess_position_evaluations"
 
 
 device = (
@@ -117,16 +120,31 @@ def fen_to_input(fen: str) -> torch.Tensor:
 
 
 class HFDataset(torch.utils.data.IterableDataset):
-    def __init__(self, split: str, max_samples=None, seed=0, val_fraction: float = 0.2):
+    def __init__(
+        self,
+        split: str,
+        max_samples=None,
+        seed=0,
+        val_fraction: float = 0.2,
+        dataset_dir: str = DEFAULT_HF_DATASET_DIR,
+        prefer_local: bool = True,
+    ):
         if split not in ("train", "val"):
             raise ValueError("split must be 'train' or 'val'")
         self.split = split
         self.max_samples = max_samples
         self.seed = seed
         self.val_fraction = val_fraction
-        self.dataset = load_dataset(
-            "Lichess/chess-position-evaluations", split="train", streaming=True, token=os.getenv("HF_TOKEN", None)
-        )
+        self.dataset_dir = dataset_dir
+        self.prefer_local = prefer_local
+        self.using_local = self.prefer_local and os.path.isdir(self.dataset_dir)
+
+        if self.using_local:
+            self.dataset = load_from_disk(self.dataset_dir, keep_in_memory=False)
+        else:
+            self.dataset = load_dataset(
+                HF_DATASET_NAME, split="train", streaming=True, token=os.getenv("HF_TOKEN", None)
+            )
 
     def _split_limit(self):
         if self.max_samples is None:
@@ -149,7 +167,11 @@ class HFDataset(torch.utils.data.IterableDataset):
         worker_id = info.id if info is not None else 0
         num_workers = info.num_workers if info is not None else 1
 
-        ds = self.dataset.shuffle(seed=self.seed, buffer_size=100_000)
+        ds = self.dataset
+        if self.using_local:
+            ds = ds.to_iterable_dataset(num_shards=1024)
+
+        ds = ds.shuffle(seed=self.seed, buffer_size=100_000)
         ds = ds.shard(num_shards=num_workers, index=worker_id)
 
         limit = None
@@ -175,6 +197,18 @@ class HFDataset(torch.utils.data.IterableDataset):
             produced += 1
             if limit is not None and produced >= limit:
                 break
+
+
+def download_hf_dataset(dataset_dir: str):
+    if os.path.isdir(dataset_dir):
+        print(f"Local dataset already exists at {dataset_dir}")
+        return
+
+    print(f"Downloading {HF_DATASET_NAME} to {dataset_dir}...")
+    dataset = load_dataset(HF_DATASET_NAME, split="train", streaming=False, token=os.getenv("HF_TOKEN", None))
+    os.makedirs(os.path.dirname(dataset_dir) or ".", exist_ok=True)
+    dataset.save_to_disk(dataset_dir)
+    print(f"Saved local dataset to {dataset_dir}")
 
 
 def training_loop(
@@ -384,7 +418,26 @@ if __name__ == "__main__":
         parser.add_argument("--max-samples", type=int, default=None, help="Max number of samples")
         parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
         parser.add_argument("--batch-size", type=int, default=4096, help="Training batch size")
+        parser.add_argument(
+            "--download-dataset",
+            action="store_true",
+            help="Download and save the full HF dataset locally before training",
+        )
+        parser.add_argument(
+            "--dataset-dir",
+            type=str,
+            default=DEFAULT_HF_DATASET_DIR,
+            help="Local dataset path used for downloaded HF data",
+        )
+        parser.add_argument(
+            "--force-streaming",
+            action="store_true",
+            help="Use network streaming even if local dataset exists",
+        )
         args = parser.parse_args(sys.argv[2:])
+
+        if args.download_dataset:
+            download_hf_dataset(args.dataset_dir)
 
         nnue = NNUE().to(device)
         if os.path.exists("nnue.pth"):
@@ -392,8 +445,22 @@ if __name__ == "__main__":
             print("Loaded existing model from nnue.pth")
         print("NNUE parameters:", sum(p.numel() for p in nnue.parameters()))
 
-        train_set = HFDataset(split="train", max_samples=args.max_samples)
-        val_set = HFDataset(split="val", max_samples=args.max_samples)
+        using_local = (not args.force_streaming) and os.path.isdir(args.dataset_dir)
+        data_source = f"local ({args.dataset_dir})" if using_local else "HF streaming"
+        print(f"Data source: {data_source}")
+
+        train_set = HFDataset(
+            split="train",
+            max_samples=args.max_samples,
+            dataset_dir=args.dataset_dir,
+            prefer_local=not args.force_streaming,
+        )
+        val_set = HFDataset(
+            split="val",
+            max_samples=args.max_samples,
+            dataset_dir=args.dataset_dir,
+            prefer_local=not args.force_streaming,
+        )
         training_loop(nnue, train_set, val_set, epochs=args.epochs, batch_size=args.batch_size)
 
     elif command == "eval":
