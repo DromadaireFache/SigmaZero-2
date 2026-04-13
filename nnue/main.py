@@ -1,6 +1,7 @@
 import os
 import struct
 import typing
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -194,17 +195,53 @@ def training_loop(
         model.train()
         total_loss = 0
         seen = 0
-        for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} - Training"):
+        train_iter = iter(train_loader)
+        train_pbar = tqdm(total=len(train_loader), desc=f"Epoch {epoch+1}/{epochs} - Training")
+        step = 0
+        fetch_total = 0.0
+        norm_total = 0.0
+        step_total = 0.0
+        while True:
+            fetch_start = time.perf_counter()
+            try:
+                inputs, targets = next(train_iter)
+            except StopIteration:
+                break
+            fetch_time = time.perf_counter() - fetch_start
+
+            norm_start = time.perf_counter()
+            inputs = inputs.to(device)
+            targets = targets.float().to(device)
+            norm_time = time.perf_counter() - norm_start
+
+            step_start = time.perf_counter()
             optimizer.zero_grad()
-            outputs = model(inputs.to(device))
-            loss = criterion(outputs.squeeze(), targets.float().to(device))
+            outputs = model(inputs)
+            loss = criterion(outputs.squeeze(), targets)
             loss.backward()
             optimizer.step()
+            step_time = time.perf_counter() - step_start
+
             total_loss += loss.item() * inputs.size(0)
             seen += inputs.size(0)
+            step += 1
+            fetch_total += fetch_time
+            norm_total += norm_time
+            step_total += step_time
+            train_pbar.update(1)
+        train_pbar.close()
         avg_loss = total_loss / seen
         train_losses.append(avg_loss)
-        print(f"Epoch {epoch+1}/{epochs} - Training Loss: {avg_loss:.4f}")
+        avg_fetch = fetch_total / max(step, 1)
+        avg_norm = norm_total / max(step, 1)
+        avg_step = step_total / max(step, 1)
+        print(
+            "Epoch "
+            f"{epoch+1}/{epochs} - Training Loss: {avg_loss:.4f} "
+            f"(fetch {fetch_total:.2f}s avg {avg_fetch:.3f}s, "
+            f"normalize {norm_total:.2f}s avg {avg_norm:.3f}s, "
+            f"step {step_total:.2f}s avg {avg_step:.3f}s)"
+        )
 
         # Validation
         model.eval()
@@ -215,7 +252,7 @@ def training_loop(
                 outputs = model(inputs.to(device))
                 loss = criterion(outputs.squeeze(), targets.float().to(device))
                 val_loss += loss.item() * inputs.size(0)
-            val_seen += inputs.size(0)
+                val_seen += inputs.size(0)
         avg_val_loss = val_loss / max(val_seen, 1)
         val_losses.append(avg_val_loss)
         scheduler.step(avg_val_loss)
