@@ -14,6 +14,7 @@ import sys
 from datasets import load_dataset
 from numba import njit
 import pyarrow as pa
+import pyarrow.dataset as pa_dataset
 import pyarrow.ipc as ipc
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -122,6 +123,29 @@ def fen_to_input(fen: str) -> torch.Tensor:
     return torch.from_numpy(_fen_bytes_to_array(fen_bytes))
 
 
+def _local_arrow_files(dataset_dir: str) -> list[str]:
+    return sorted(glob.glob(os.path.join(dataset_dir, "**/*.arrow"), recursive=True))
+
+
+def _count_arrow_rows(file_paths: list[str]) -> int:
+    if not file_paths:
+        return 0
+    total_rows = 0
+    for file_path in file_paths:
+        with pa.memory_map(file_path, "r") as source:
+            reader = ipc.open_stream(source)
+            for record_batch in reader:
+                total_rows += record_batch.num_rows
+    return total_rows
+
+
+def _iter_arrow_record_batches(file_path: str):
+    with pa.memory_map(file_path, "r") as source:
+        reader = ipc.open_stream(source)
+        for record_batch in reader:
+            yield record_batch
+
+
 class HFDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
@@ -130,7 +154,6 @@ class HFDataset(torch.utils.data.IterableDataset):
         seed=0,
         val_fraction: float = 0.2,
         dataset_dir: str = DEFAULT_HF_DATASET_DIR,
-        prefer_local: bool = True,
     ):
         if split not in ("train", "val"):
             raise ValueError("split must be 'train' or 'val'")
@@ -139,27 +162,18 @@ class HFDataset(torch.utils.data.IterableDataset):
         self.seed = seed
         self.val_fraction = val_fraction
         self.dataset_dir = dataset_dir
-        self.prefer_local = prefer_local
-        self._dataset = None
+        self.cache_files = _local_arrow_files(self.dataset_dir)
 
-        if self.prefer_local and os.path.isdir(self.dataset_dir):
-            self.using_local = True
-            self.cache_files = sorted(glob.glob(os.path.join(self.dataset_dir, "**/*.arrow"), recursive=True))
-        else:
-            self.using_local = False
-            self.cache_files = []
+        if not self.cache_files:
+            raise FileNotFoundError(f"No local Arrow files found in {self.dataset_dir}")
 
-    def _get_dataset(self):
-        if self._dataset is None:
-            if self.using_local:
-                # Stream directly from all local Arrow files.
-                # Do not pre-partition files per worker here: HF iterable datasets already
-                # split work across DataLoader workers, and double-sharding undercounts rows.
-                self._dataset = load_dataset("arrow", data_files=self.cache_files, split="train", streaming=True)
-            else:
-                self._dataset = load_dataset(HF_DATASET_NAME, split="train", streaming=True)
-
-        return self._dataset
+        self.split_every = max(int(round(1.0 / self.val_fraction)), 1)
+        self.split_files = [
+            file_path
+            for file_index, file_path in enumerate(self.cache_files)
+            if (file_index % self.split_every == 0) == (self.split == "val")
+        ]
+        self.total_rows = _count_arrow_rows(self.split_files)
 
     def _split_limit(self):
         if self.max_samples is None:
@@ -169,71 +183,70 @@ class HFDataset(torch.utils.data.IterableDataset):
         return train_size if self.split == "train" else val_size
 
     def __len__(self):
-        total = 342059879
+        total = self.total_rows
 
         if self.max_samples is not None:
             split_limit = self._split_limit()
             return split_limit if split_limit is not None else total
-        if self.split == "train":
-            return int(total * (1.0 - self.val_fraction))
-        return int(total * self.val_fraction)
+        return total
 
     def __iter__(self):
         info = torch.utils.data.get_worker_info()
         worker_id = info.id if info is not None else 0
         num_workers = info.num_workers if info is not None else 1
-        active_workers = min(num_workers, len(self.cache_files)) if self.using_local else num_workers
-
-        ds = self._get_dataset()
+        worker_files = self.split_files[worker_id::num_workers]
+        if not worker_files:
+            return
 
         limit = None
         split_limit = self._split_limit()
         if split_limit is not None:
+            active_workers = min(num_workers, len(self.split_files))
             base = split_limit // active_workers
             rem = split_limit % active_workers
             limit = base + (1 if worker_id < rem else 0)
 
         produced = 0
-        val_every = max(int(round(1.0 / self.val_fraction)), 1)
         pending_fetch = 0.0
         pending_norm = 0.0
-        idx = 0
-        ds_iter = iter(ds)
-        while True:
-            fetch_start = time.perf_counter()
-            try:
-                item = next(ds_iter)
-            except StopIteration:
-                break
-            fetch_time = time.perf_counter() - fetch_start
-            pending_fetch += fetch_time
+        for file_path in worker_files:
+            file_fetch_start = time.perf_counter()
+            for record_batch in _iter_arrow_record_batches(file_path):
+                fetch_time = time.perf_counter() - file_fetch_start
+                pending_fetch += fetch_time
 
-            if not self.using_local and num_workers > 1 and (idx % num_workers) != worker_id:
-                idx += 1
-                continue
+                parse_start = time.perf_counter()
+                cp_index = record_batch.schema.get_field_index("cp")
+                fen_index = record_batch.schema.get_field_index("fen")
+                if cp_index < 0 or fen_index < 0:
+                    raise ValueError(f"Arrow batch schema missing required fields: {record_batch.schema}")
+                cp_values = record_batch.column(cp_index).to_pylist()
+                fen_values = record_batch.column(fen_index).to_pylist()
+                batch_inputs = []
+                batch_targets = []
 
-            norm_start = time.perf_counter()
-            is_val = (idx % val_every) == 0
-            idx += 1
-            if (self.split == "val") != is_val:
-                pending_norm += time.perf_counter() - norm_start
-                continue
-            cp = item["cp"]
-            if cp is None:
-                pending_norm += time.perf_counter() - norm_start
-                continue
-            fen = item["fen"]
-            y = float(cp) / 100.0
-            x = fen_to_input(fen)
-            pending_norm += time.perf_counter() - norm_start
+                for cp, fen in zip(cp_values, fen_values):
+                    if cp is None:
+                        continue
+                    batch_inputs.append(fen_to_input(fen))
+                    batch_targets.append(float(cp) / 100.0)
 
-            yield x, y, np.float32(pending_fetch), np.float32(pending_norm)
-            pending_fetch = 0.0
-            pending_norm = 0.0
+                pending_norm += time.perf_counter() - parse_start
+                file_fetch_start = time.perf_counter()
 
-            produced += 1
-            if limit is not None and produced >= limit:
-                break
+                if not batch_inputs:
+                    continue
+
+                inputs = torch.stack(batch_inputs)
+                targets = torch.tensor(batch_targets, dtype=torch.float32)
+
+                yield inputs, targets, np.float32(pending_fetch), np.float32(pending_norm)
+                pending_fetch = 0.0
+                pending_norm = 0.0
+
+                produced += inputs.size(0)
+                if limit is not None and produced >= limit:
+                    return
 
 
 def download_hf_dataset(dataset_dir: str, force: bool = False):
@@ -242,18 +255,23 @@ def download_hf_dataset(dataset_dir: str, force: bool = False):
             print(f"Removing existing local dataset at {dataset_dir} before re-download")
             shutil.rmtree(dataset_dir)
         else:
-            print(f"Local dataset already exists at {dataset_dir}")
-            return
-
-    if os.path.isdir(dataset_dir):
-        print(f"Local dataset already exists at {dataset_dir}")
-        return
+            arrow_files = _local_arrow_files(dataset_dir)
+            if arrow_files:
+                print(f"Local dataset already exists at {dataset_dir}")
+                return
+            print(f"Local dataset directory exists but contains no Arrow files: {dataset_dir}")
+            shutil.rmtree(dataset_dir)
 
     print(f"Downloading {HF_DATASET_NAME} to {dataset_dir}...")
     dataset = load_dataset(HF_DATASET_NAME, split="train", streaming=False, token=os.getenv("HF_TOKEN", None))
     os.makedirs(os.path.dirname(dataset_dir) or ".", exist_ok=True)
     dataset.save_to_disk(dataset_dir)
     print(f"Saved local dataset to {dataset_dir}")
+
+
+def ensure_local_dataset(dataset_dir: str):
+    if not _local_arrow_files(dataset_dir):
+        download_hf_dataset(dataset_dir)
 
 
 def training_loop(
@@ -272,7 +290,7 @@ def training_loop(
     val_losses = []
 
     loader_kwargs = {
-        "batch_size": batch_size,
+        "batch_size": None,
         "num_workers": workers,
         "persistent_workers": workers > 0,
         "pin_memory": device.type == "cuda",
@@ -290,7 +308,7 @@ def training_loop(
         total_loss = 0
         seen = 0
         train_iter = iter(train_loader)
-        train_pbar = tqdm(total=len(train_loader), desc=f"Epoch {epoch+1}/{epochs} - Training")
+        train_pbar = tqdm(total=len(train_loader.dataset), desc=f"Epoch {epoch+1}/{epochs} - Training")
         step = 0
         ds_fetch_total = 0.0
         ds_norm_total = 0.0
@@ -303,8 +321,8 @@ def training_loop(
             except StopIteration:
                 break
             wait_time = time.perf_counter() - wait_start
-            raw_ds_fetch = float(ds_fetch_times.sum().item())
-            raw_ds_norm = float(ds_norm_times.sum().item())
+            raw_ds_fetch = float(ds_fetch_times)
+            raw_ds_norm = float(ds_norm_times)
             raw_ds_total = raw_ds_fetch + raw_ds_norm
             if raw_ds_total > 0.0:
                 ds_fetch_total += wait_time * (raw_ds_fetch / raw_ds_total)
@@ -312,25 +330,31 @@ def training_loop(
             else:
                 ds_fetch_total += wait_time
 
-            transfer_start = time.perf_counter()
-            inputs = inputs.to(device)
-            targets = targets.float().to(device)
-            transfer_time = time.perf_counter() - transfer_start
+            batch_size_actual = inputs.size(0)
+            for start in range(0, batch_size_actual, batch_size):
+                end = min(start + batch_size, batch_size_actual)
+                input_chunk = inputs[start:end]
+                target_chunk = targets[start:end]
 
-            step_start = time.perf_counter()
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs.squeeze(), targets)
-            loss.backward()
-            optimizer.step()
-            step_time = time.perf_counter() - step_start
+                transfer_start = time.perf_counter()
+                input_chunk = input_chunk.to(device)
+                target_chunk = target_chunk.float().to(device)
+                transfer_time = time.perf_counter() - transfer_start
 
-            total_loss += loss.item() * inputs.size(0)
-            seen += inputs.size(0)
-            step += 1
-            transfer_total += transfer_time
-            step_total += step_time
-            train_pbar.update(1)
+                step_start = time.perf_counter()
+                optimizer.zero_grad()
+                outputs = model(input_chunk)
+                loss = criterion(outputs.squeeze(), target_chunk)
+                loss.backward()
+                optimizer.step()
+                step_time = time.perf_counter() - step_start
+
+                total_loss += loss.item() * input_chunk.size(0)
+                seen += input_chunk.size(0)
+                step += 1
+                transfer_total += transfer_time
+                step_total += step_time
+                train_pbar.update(input_chunk.size(0))
         train_pbar.close()
         avg_loss = total_loss / seen
         train_losses.append(avg_loss)
@@ -353,7 +377,7 @@ def training_loop(
         val_transfer_total = 0.0
         with torch.no_grad():
             val_iter = iter(val_loader)
-            val_pbar = tqdm(total=len(val_loader), desc=f"Epoch {epoch+1}/{epochs} - Validation")
+            val_pbar = tqdm(total=len(val_loader.dataset), desc=f"Epoch {epoch+1}/{epochs} - Validation")
             while True:
                 wait_start = time.perf_counter()
                 try:
@@ -362,8 +386,8 @@ def training_loop(
                     break
                 wait_time = time.perf_counter() - wait_start
                 val_steps += 1
-                raw_ds_fetch = float(ds_fetch_times.sum().item())
-                raw_ds_norm = float(ds_norm_times.sum().item())
+                raw_ds_fetch = float(ds_fetch_times)
+                raw_ds_norm = float(ds_norm_times)
                 raw_ds_total = raw_ds_fetch + raw_ds_norm
                 if raw_ds_total > 0.0:
                     val_ds_fetch_total += wait_time * (raw_ds_fetch / raw_ds_total)
@@ -371,16 +395,22 @@ def training_loop(
                 else:
                     val_ds_fetch_total += wait_time
 
-                transfer_start = time.perf_counter()
-                inputs = inputs.to(device)
-                targets = targets.float().to(device)
-                val_transfer_total += time.perf_counter() - transfer_start
+                batch_size_actual = inputs.size(0)
+                for start in range(0, batch_size_actual, batch_size):
+                    end = min(start + batch_size, batch_size_actual)
+                    input_chunk = inputs[start:end]
+                    target_chunk = targets[start:end]
 
-                outputs = model(inputs)
-                loss = criterion(outputs.squeeze(), targets)
-                val_loss += loss.item() * inputs.size(0)
-                val_seen += inputs.size(0)
-                val_pbar.update(1)
+                    transfer_start = time.perf_counter()
+                    input_chunk = input_chunk.to(device)
+                    target_chunk = target_chunk.float().to(device)
+                    val_transfer_total += time.perf_counter() - transfer_start
+
+                    outputs = model(input_chunk)
+                    loss = criterion(outputs.squeeze(), target_chunk)
+                    val_loss += loss.item() * input_chunk.size(0)
+                    val_seen += input_chunk.size(0)
+                    val_pbar.update(input_chunk.size(0))
             val_pbar.close()
         avg_val_loss = val_loss / max(val_seen, 1)
         val_losses.append(avg_val_loss)
@@ -520,38 +550,20 @@ if __name__ == "__main__":
         parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
         parser.add_argument("--batch-size", type=int, default=4096, help="Training batch size")
         parser.add_argument(
-            "--download-dataset",
-            action="store_true",
-            help="Download and save the full HF dataset locally before training",
-        )
-        parser.add_argument(
-            "--redownload-dataset",
-            action="store_true",
-            help="Force re-download by deleting existing local dataset directory",
-        )
-        parser.add_argument(
             "--dataset-dir",
             type=str,
             default=DEFAULT_HF_DATASET_DIR,
             help="Local dataset path used for downloaded HF data",
         )
         parser.add_argument(
-            "--force-streaming",
-            action="store_true",
-            help="Use network streaming even if local dataset exists",
-        )
-        parser.add_argument(
             "--workers",
             type=int,
             default=None,
-            help="DataLoader workers (default: 2 for streaming, 0 for local)",
+            help="DataLoader workers (default: 0 for local Arrow batches)",
         )
         args = parser.parse_args(sys.argv[2:])
 
-        if args.redownload_dataset:
-            download_hf_dataset(args.dataset_dir, force=True)
-        elif args.download_dataset:
-            download_hf_dataset(args.dataset_dir, force=False)
+        ensure_local_dataset(args.dataset_dir)
 
         nnue = NNUE().to(device)
         if os.path.exists("nnue.pth"):
@@ -559,29 +571,21 @@ if __name__ == "__main__":
             print("Loaded existing model from nnue.pth")
         print("NNUE parameters:", sum(p.numel() for p in nnue.parameters()))
 
-        using_local = (not args.force_streaming) and os.path.isdir(args.dataset_dir)
-        data_source = f"local ({args.dataset_dir})" if using_local else "HF streaming"
-        print(f"Data source: {data_source}")
-
         if args.workers is not None:
             workers = args.workers
-        elif using_local:
-            workers = os.cpu_count() or 0
         else:
-            workers = 2
+            workers = 0
         print(f"DataLoader workers: {workers}")
 
         train_set = HFDataset(
             split="train",
             max_samples=args.max_samples,
             dataset_dir=args.dataset_dir,
-            prefer_local=not args.force_streaming,
         )
         val_set = HFDataset(
             split="val",
             max_samples=args.max_samples,
             dataset_dir=args.dataset_dir,
-            prefer_local=not args.force_streaming,
         )
         training_loop(nnue, train_set, val_set, epochs=args.epochs, batch_size=args.batch_size, workers=workers)
 
