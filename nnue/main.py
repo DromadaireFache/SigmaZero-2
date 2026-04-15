@@ -1,3 +1,4 @@
+import glob
 import os
 import struct
 import typing
@@ -137,18 +138,23 @@ class HFDataset(torch.utils.data.IterableDataset):
         self.val_fraction = val_fraction
         self.dataset_dir = dataset_dir
         self.prefer_local = prefer_local
-        self.using_local = self.prefer_local and os.path.isdir(self.dataset_dir)
         self._dataset = None
 
-    def _get_dataset(self):
-        # Lazy-open the backing dataset inside each worker process.
+        if self.prefer_local and os.path.isdir(self.dataset_dir):
+            self.using_local = True
+            self.cache_files = sorted(glob.glob(os.path.join(self.dataset_dir, "**/*.arrow"), recursive=True))
+            print(f"Found {len(self.cache_files)} shards", flush=True)
+        else:
+            self.using_local = False
+            self.cache_files = []
+
+    def _get_dataset(self, worker_id=0, num_workers=1):
         if self._dataset is None:
             if self.using_local:
-                self._dataset = load_from_disk(self.dataset_dir, keep_in_memory=False)
+                worker_files = [f for i, f in enumerate(self.cache_files) if i % num_workers == worker_id]
+                self._dataset = load_dataset("arrow", data_files=worker_files, split="train", streaming=True)
             else:
-                self._dataset = load_dataset(
-                    HF_DATASET_NAME, split="train", streaming=True, token=os.getenv("HF_TOKEN", None)
-                )
+                self._dataset = load_dataset(HF_DATASET_NAME, split="train", streaming=True)
         return self._dataset
 
     def _split_limit(self):
@@ -171,14 +177,7 @@ class HFDataset(torch.utils.data.IterableDataset):
         info = torch.utils.data.get_worker_info()
         worker_id = info.id if info is not None else 0
         num_workers = info.num_workers if info is not None else 1
-
-        ds = self._get_dataset()
-        if self.using_local:
-            shard_count = max(num_workers * 8, 64)
-            ds = ds.to_iterable_dataset(num_shards=shard_count)
-
-        ds = ds.shuffle(seed=self.seed, buffer_size=100_000)
-        ds = ds.shard(num_shards=num_workers, index=worker_id)
+        ds = self._get_dataset(worker_id, num_workers)
 
         limit = None
         split_limit = self._split_limit()
@@ -189,16 +188,37 @@ class HFDataset(torch.utils.data.IterableDataset):
 
         produced = 0
         val_every = max(int(round(1.0 / self.val_fraction)), 1)
-        for idx, item in enumerate(ds):
+        pending_fetch = 0.0
+        pending_norm = 0.0
+        idx = 0
+        ds_iter = iter(ds)
+        while True:
+            fetch_start = time.perf_counter()
+            try:
+                item = next(ds_iter)
+            except StopIteration:
+                break
+            fetch_time = time.perf_counter() - fetch_start
+            pending_fetch += fetch_time
+
+            norm_start = time.perf_counter()
             is_val = (idx % val_every) == 0
+            idx += 1
             if (self.split == "val") != is_val:
+                pending_norm += time.perf_counter() - norm_start
                 continue
             cp = item["cp"]
             if cp is None:
+                pending_norm += time.perf_counter() - norm_start
                 continue
             fen = item["fen"]
             y = float(cp) / 100.0
-            yield fen_to_input(fen), y
+            x = fen_to_input(fen)
+            pending_norm += time.perf_counter() - norm_start
+
+            yield x, y, np.float32(pending_fetch), np.float32(pending_norm)
+            pending_fetch = 0.0
+            pending_norm = 0.0
 
             produced += 1
             if limit is not None and produced >= limit:
@@ -225,6 +245,7 @@ def training_loop(
     batch_size: int = 100000,
     workers: int = 2,
 ):
+    print("Starting training...")
     criterion = SigmoidScaledMSELoss(k=3.0)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=10)
@@ -242,6 +263,7 @@ def training_loop(
 
     train_loader = torch.utils.data.DataLoader(train_set, **loader_kwargs)
     val_loader = torch.utils.data.DataLoader(val_set, **loader_kwargs)
+    print(f"Train samples: {len(train_loader.dataset)}, Val samples: {len(val_loader.dataset)}")
 
     for epoch in range(epochs):
         # Training
@@ -251,21 +273,30 @@ def training_loop(
         train_iter = iter(train_loader)
         train_pbar = tqdm(total=len(train_loader), desc=f"Epoch {epoch+1}/{epochs} - Training")
         step = 0
-        fetch_total = 0.0
-        norm_total = 0.0
+        ds_fetch_total = 0.0
+        ds_norm_total = 0.0
+        transfer_total = 0.0
         step_total = 0.0
         while True:
-            fetch_start = time.perf_counter()
+            wait_start = time.perf_counter()
             try:
-                inputs, targets = next(train_iter)
+                inputs, targets, ds_fetch_times, ds_norm_times = next(train_iter)
             except StopIteration:
                 break
-            fetch_time = time.perf_counter() - fetch_start
+            wait_time = time.perf_counter() - wait_start
+            raw_ds_fetch = float(ds_fetch_times.sum().item())
+            raw_ds_norm = float(ds_norm_times.sum().item())
+            raw_ds_total = raw_ds_fetch + raw_ds_norm
+            if raw_ds_total > 0.0:
+                ds_fetch_total += wait_time * (raw_ds_fetch / raw_ds_total)
+                ds_norm_total += wait_time * (raw_ds_norm / raw_ds_total)
+            else:
+                ds_fetch_total += wait_time
 
-            norm_start = time.perf_counter()
+            transfer_start = time.perf_counter()
             inputs = inputs.to(device)
             targets = targets.float().to(device)
-            norm_time = time.perf_counter() - norm_start
+            transfer_time = time.perf_counter() - transfer_start
 
             step_start = time.perf_counter()
             optimizer.zero_grad()
@@ -278,38 +309,69 @@ def training_loop(
             total_loss += loss.item() * inputs.size(0)
             seen += inputs.size(0)
             step += 1
-            fetch_total += fetch_time
-            norm_total += norm_time
+            transfer_total += transfer_time
             step_total += step_time
             train_pbar.update(1)
         train_pbar.close()
         avg_loss = total_loss / seen
         train_losses.append(avg_loss)
-        avg_fetch = fetch_total / max(step, 1)
-        avg_norm = norm_total / max(step, 1)
-        avg_step = step_total / max(step, 1)
         print(
             "Epoch "
             f"{epoch+1}/{epochs} - Training Loss: {avg_loss:.4f} "
-            f"(fetch {fetch_total:.2f}s avg {avg_fetch:.3f}s, "
-            f"normalize {norm_total:.2f}s avg {avg_norm:.3f}s, "
-            f"step {step_total:.2f}s avg {avg_step:.3f}s)"
+            f"(ds_fetch {ds_fetch_total:.2f}s, "
+            f"ds_normalize {ds_norm_total:.2f}s, "
+            f"to_device {transfer_total:.2f}s, "
+            f"step {step_total:.2f}s)"
         )
 
         # Validation
         model.eval()
         val_loss = 0
         val_seen = 0
+        val_steps = 0
+        val_ds_fetch_total = 0.0
+        val_ds_norm_total = 0.0
+        val_transfer_total = 0.0
         with torch.no_grad():
-            for inputs, targets in tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} - Validation"):
-                outputs = model(inputs.to(device))
-                loss = criterion(outputs.squeeze(), targets.float().to(device))
+            val_iter = iter(val_loader)
+            val_pbar = tqdm(total=len(val_loader), desc=f"Epoch {epoch+1}/{epochs} - Validation")
+            while True:
+                wait_start = time.perf_counter()
+                try:
+                    inputs, targets, ds_fetch_times, ds_norm_times = next(val_iter)
+                except StopIteration:
+                    break
+                wait_time = time.perf_counter() - wait_start
+                val_steps += 1
+                raw_ds_fetch = float(ds_fetch_times.sum().item())
+                raw_ds_norm = float(ds_norm_times.sum().item())
+                raw_ds_total = raw_ds_fetch + raw_ds_norm
+                if raw_ds_total > 0.0:
+                    val_ds_fetch_total += wait_time * (raw_ds_fetch / raw_ds_total)
+                    val_ds_norm_total += wait_time * (raw_ds_norm / raw_ds_total)
+                else:
+                    val_ds_fetch_total += wait_time
+
+                transfer_start = time.perf_counter()
+                inputs = inputs.to(device)
+                targets = targets.float().to(device)
+                val_transfer_total += time.perf_counter() - transfer_start
+
+                outputs = model(inputs)
+                loss = criterion(outputs.squeeze(), targets)
                 val_loss += loss.item() * inputs.size(0)
                 val_seen += inputs.size(0)
+                val_pbar.update(1)
+            val_pbar.close()
         avg_val_loss = val_loss / max(val_seen, 1)
         val_losses.append(avg_val_loss)
         scheduler.step(avg_val_loss)
-        print(f"Epoch {epoch+1}/{epochs} - Validation Loss: {avg_val_loss:.4f}")
+        print(
+            f"Epoch {epoch+1}/{epochs} - Validation Loss: {avg_val_loss:.4f} "
+            f"(ds_fetch {val_ds_fetch_total:.2f}s, "
+            f"ds_normalize {val_ds_norm_total:.2f}s, "
+            f"to_device {val_transfer_total:.2f}s)"
+        )
 
         # Save model checkpoint
         torch.save(model.state_dict(), f"nnue.pth")
@@ -477,7 +539,7 @@ if __name__ == "__main__":
         if args.workers is not None:
             workers = args.workers
         elif using_local:
-            workers = os.cpu_count()
+            workers = os.cpu_count() or 0
         else:
             workers = 2
         print(f"DataLoader workers: {workers}")
