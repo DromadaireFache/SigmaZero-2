@@ -1,6 +1,6 @@
 import glob
 import os
-import struct
+import shutil
 import typing
 import time
 import numpy as np
@@ -11,8 +11,10 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import argparse
 import sys
-from datasets import load_dataset, load_from_disk
+from datasets import load_dataset
 from numba import njit
+import pyarrow as pa
+import pyarrow.ipc as ipc
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -143,18 +145,20 @@ class HFDataset(torch.utils.data.IterableDataset):
         if self.prefer_local and os.path.isdir(self.dataset_dir):
             self.using_local = True
             self.cache_files = sorted(glob.glob(os.path.join(self.dataset_dir, "**/*.arrow"), recursive=True))
-            print(f"Found {len(self.cache_files)} shards", flush=True)
         else:
             self.using_local = False
             self.cache_files = []
 
-    def _get_dataset(self, worker_id=0, num_workers=1):
+    def _get_dataset(self):
         if self._dataset is None:
             if self.using_local:
-                worker_files = [f for i, f in enumerate(self.cache_files) if i % num_workers == worker_id]
-                self._dataset = load_dataset("arrow", data_files=worker_files, split="train", streaming=True)
+                # Stream directly from all local Arrow files.
+                # Do not pre-partition files per worker here: HF iterable datasets already
+                # split work across DataLoader workers, and double-sharding undercounts rows.
+                self._dataset = load_dataset("arrow", data_files=self.cache_files, split="train", streaming=True)
             else:
                 self._dataset = load_dataset(HF_DATASET_NAME, split="train", streaming=True)
+
         return self._dataset
 
     def _split_limit(self):
@@ -166,6 +170,7 @@ class HFDataset(torch.utils.data.IterableDataset):
 
     def __len__(self):
         total = 342059879
+
         if self.max_samples is not None:
             split_limit = self._split_limit()
             return split_limit if split_limit is not None else total
@@ -177,13 +182,15 @@ class HFDataset(torch.utils.data.IterableDataset):
         info = torch.utils.data.get_worker_info()
         worker_id = info.id if info is not None else 0
         num_workers = info.num_workers if info is not None else 1
-        ds = self._get_dataset(worker_id, num_workers)
+        active_workers = min(num_workers, len(self.cache_files)) if self.using_local else num_workers
+
+        ds = self._get_dataset()
 
         limit = None
         split_limit = self._split_limit()
         if split_limit is not None:
-            base = split_limit // num_workers
-            rem = split_limit % num_workers
+            base = split_limit // active_workers
+            rem = split_limit % active_workers
             limit = base + (1 if worker_id < rem else 0)
 
         produced = 0
@@ -200,6 +207,10 @@ class HFDataset(torch.utils.data.IterableDataset):
                 break
             fetch_time = time.perf_counter() - fetch_start
             pending_fetch += fetch_time
+
+            if not self.using_local and num_workers > 1 and (idx % num_workers) != worker_id:
+                idx += 1
+                continue
 
             norm_start = time.perf_counter()
             is_val = (idx % val_every) == 0
@@ -225,7 +236,15 @@ class HFDataset(torch.utils.data.IterableDataset):
                 break
 
 
-def download_hf_dataset(dataset_dir: str):
+def download_hf_dataset(dataset_dir: str, force: bool = False):
+    if os.path.isdir(dataset_dir):
+        if force:
+            print(f"Removing existing local dataset at {dataset_dir} before re-download")
+            shutil.rmtree(dataset_dir)
+        else:
+            print(f"Local dataset already exists at {dataset_dir}")
+            return
+
     if os.path.isdir(dataset_dir):
         print(f"Local dataset already exists at {dataset_dir}")
         return
@@ -383,6 +402,7 @@ def training_loop(
     plt.title("Training and Validation Loss")
     plt.legend()
     plt.show()
+    plt.savefig("training_plot.png")
 
 
 def load_model(model_path: str) -> NNUE:
@@ -505,6 +525,11 @@ if __name__ == "__main__":
             help="Download and save the full HF dataset locally before training",
         )
         parser.add_argument(
+            "--redownload-dataset",
+            action="store_true",
+            help="Force re-download by deleting existing local dataset directory",
+        )
+        parser.add_argument(
             "--dataset-dir",
             type=str,
             default=DEFAULT_HF_DATASET_DIR,
@@ -523,8 +548,10 @@ if __name__ == "__main__":
         )
         args = parser.parse_args(sys.argv[2:])
 
-        if args.download_dataset:
-            download_hf_dataset(args.dataset_dir)
+        if args.redownload_dataset:
+            download_hf_dataset(args.dataset_dir, force=True)
+        elif args.download_dataset:
+            download_hf_dataset(args.dataset_dir, force=False)
 
         nnue = NNUE().to(device)
         if os.path.exists("nnue.pth"):
