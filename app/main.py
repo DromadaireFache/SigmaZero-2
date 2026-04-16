@@ -6,8 +6,8 @@ import chess
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sigma_zero
-import scripts.nn_engine as nn_engine
-import nnue.main as nnue
+
+engines = sigma_zero.Engines()
 
 board = chess.Board()
 white_captures = []
@@ -29,9 +29,6 @@ class PreviousState:
 
 move_index = 0
 previous_states = [PreviousState.current()]
-
-evaluator = nn_engine.load_model("NN_evaluator.pth") if os.path.exists("NN_evaluator.pth") else None
-nnue_model = nnue.load_model("nnue.pth") if os.path.exists("nnue.pth") else None
 
 
 def capture_diff() -> int:
@@ -118,7 +115,7 @@ class Api:
         from_square = chess.square(from_col, 7 - from_row)
         to_square = chess.square(to_col, 7 - to_row)
         move = chess.Move(from_square, to_square)
-        
+
         # auto-promote to queen for simplicity
         if board.piece_at(from_square) and board.piece_at(from_square).piece_type == chess.PAWN:
             if (board.piece_at(from_square).color == chess.WHITE and to_row == 0) or (
@@ -178,22 +175,21 @@ class Api:
         return False
 
     def bot_move(self, millis: int, version: str, tries: int = 0) -> bool:
-        if version.lower() == "latest":
-            result = sigma_zero.latest.play(board, millis)
-        elif version.lower() == "nn":
-            result = nn_engine.play(board, millis, evaluator)
-        elif version.lower() == "nnue":
-            result = nnue.play(board, millis, nnue_model)
-        elif version.lower() == "python":
-            result = nnue.python_play(board, millis)
-        elif version.lower() == "stockfish":
-            result = sigma_zero.stockfish.play(board, millis)
-        elif version in sigma_zero.old:
-            result = sigma_zero.old[version].play(board, millis)
+        version = version.lower()
+        if version == "latest":
+            result = engines.latest.play(board, millis)
+        elif version == "pyengine":
+            result = engines.py_engine.play(board, millis)
+        elif version == "stockfish":
+            result = engines.stockfish.play(board, millis)
+        elif version in engines.old:
+            result = engines.old[version].play(board, millis)
+        elif version in engines.chess_nns:
+            result = engines.chess_nns[version].play(board, millis)
         else:
             print(f"Unknown bot version: {version}")
             sys.exit(1)
-            
+
         move_uci = result.get("move", "<unknown>")
         try:
             move = chess.Move.from_uci(move_uci)
@@ -213,25 +209,26 @@ class Api:
             if tries < 3:
                 return self.bot_move(millis, version, tries + 1)
             sys.exit(1)
-        
+
         return {
             "depth": result.get("depth", 0),
             "eval": result.get("eval", 0),
             "move": result.get("move", 0),
         }
-    
+
     def get_bot_versions(self) -> list[str]:
-        return list(sigma_zero.old.keys())
+        # Sort the versions by name, but ensure "latest" is always first
+        versions = sorted(engines.keys(), key=lambda v: (v != "latest", v))
+        return [version.title() for version in versions]
 
 
 api = Api()
 
+
 def start(url: str = "index.html"):
-    window = webview.create_window(
-        "SigmaZero V2 Chess Engine", url, js_api=api, width=900, height=690, resizable=False
-    )
+    window = webview.create_window("SigmaZero V2 Chess Engine", url, js_api=api, width=900, height=690, resizable=False)
     webview.start()
-    
+
 
 if __name__ == "__main__":
     start()

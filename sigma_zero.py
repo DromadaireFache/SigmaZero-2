@@ -1,25 +1,41 @@
 #!/usr/bin/env python3
 import os
 import sys
-import chess
-import pandas as pd
-from tqdm import tqdm
 import argparse
 import shutil
 
 from scripts.engines import UCIEngine, OldEngine, SigmaZeroEngine
 from scripts.tournament import Tournament, SprtTournament
 from scripts import metrics
+from nnue.main import PyEngine, ChessNNEngine
+from nnue.archs import get_all_archs
 import app.main as app
 
 
-latest = SigmaZeroEngine()
-old = {v: OldEngine(v) for v in os.listdir("versions") if os.path.isdir(os.path.join("versions", v))}
-stockfish = UCIEngine("stockfish")
-engines = {"latest": latest, "stockfish": stockfish, **old}
+class Engines:
+    def __init__(self):
+        self.latest = SigmaZeroEngine()
+        self.old = {v: OldEngine(v) for v in os.listdir("versions") if os.path.isdir(os.path.join("versions", v))}
+        self.stockfish = UCIEngine("stockfish")
+        self.py_engine = PyEngine()
+        self.chess_nns = {f"chessnn-{name}": ChessNNEngine(model) for name, model in get_all_archs().items()}
+        self.engines = {"latest": self.latest, "stockfish": self.stockfish, **self.old, "pyengine": self.py_engine, **self.chess_nns}
+        
+    def __getitem__(self, key):
+        return self.engines[key]
+    
+    def __contains__(self, key):
+        return key in self.engines
+    
+    def get(self, key, default=None):
+        return self.engines.get(key, default)
+    
+    def keys(self):
+        return self.engines.keys()
 
 
-def get_engines(arg1, arg2):
+def engine_from_arg_pair(arg1, arg2):
+    engines = Engines()
     engine1 = engines.get(arg1)
     engine2 = engines.get(arg2)
     if engine1 is None or engine2 is None:
@@ -51,7 +67,7 @@ if __name__ == "__main__":
     p.add_argument("engine", type=str, default="latest", help="Engine to track metrics for (default: latest)")
     p.add_argument("metrics", type=str, nargs="+", choices=metrics.available_metrics, help=f"List of metrics to track")
     p.add_argument("--duration", type=int, default=60, help="Duration to track metrics in seconds (default: 60)")
-    
+
     # Subcommand for running a SPRT tournament
     p = subparsers.add_parser("sprt", help="Run a SPRT tournament between engines")
     p.add_argument("engine1", type=str, default="latest", help="First engine to compete (default: latest)")
@@ -66,7 +82,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.command == "tournament":
-        engine1, engine2 = get_engines(args.engine1, args.engine2)
+        engine1, engine2 = engine_from_arg_pair(args.engine1, args.engine2)
         if len(args.millis) > 2:
             parser.error("Too many time controls specified. Provide at most two values for --millis.")
         elif len(args.millis) == 1:
@@ -80,7 +96,7 @@ if __name__ == "__main__":
 
     elif args.command == "archive":
         version: str = args.version
-        if version in old or version == "latest":
+        if version in Engines().keys():
             parser.error(f"Version '{version}' already exists. Please choose a different version name.")
         archive_path = os.path.join("versions", version)
         os.makedirs(archive_path, exist_ok=False)
@@ -88,13 +104,13 @@ if __name__ == "__main__":
         shutil.copy("Makefile", os.path.join(archive_path, "Makefile"))
 
     elif args.command == "metrics":
-        engine = engines.get(args.engine)
+        engine = Engines().get(args.engine)
         if not isinstance(engine, SigmaZeroEngine):
             parser.error("Metrics tracking is only supported for SigmaZero engine.")
         metrics.report(engine, args.metrics, duration=args.duration)
-        
+
     elif args.command == "sprt":
-        engine1, engine2 = get_engines(args.engine1, args.engine2)
+        engine1, engine2 = engine_from_arg_pair(args.engine1, args.engine2)
         if len(args.millis) > 2:
             parser.error("Too many time controls specified. Provide at most two values for --millis.")
         elif len(args.millis) == 1:
@@ -110,7 +126,7 @@ if __name__ == "__main__":
             alpha=args.alpha,
             beta=args.beta,
             max_games=args.max_games,
-            exit_on_interrupt=True
+            exit_on_interrupt=True,
         )
 
     else:

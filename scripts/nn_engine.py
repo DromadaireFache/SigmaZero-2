@@ -861,10 +861,10 @@ class SearchEngine:
                         best_score = iter_best_score
 
             elapsed = time.perf_counter() - start
-            print(
-                f"Time elapsed: {elapsed:.3f}s  Depth reached: {completed_depth}  "
-                f"Nodes searched: {self.nodes:,} (+q {self.qnodes:,})  Eval: {best_score:.4f}"
-            )
+            # print(
+            #     f"Time elapsed: {elapsed:.3f}s  Depth reached: {completed_depth}  "
+            #     f"Nodes searched: {self.nodes:,} (+q {self.qnodes:,})  Eval: {best_score:.4f}"
+            # )
             return {
                 "move": best_move.uci(),
                 "eval": round(best_score, 4),
