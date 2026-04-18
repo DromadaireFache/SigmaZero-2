@@ -7,6 +7,7 @@
 #include "movegen.h"
 #include "search.h"
 #include "tt.h"
+#include "nnue.h"
 
 // Play a move given a FEN string
 // Returns 0 on success, 1 on error
@@ -419,7 +420,7 @@ int compute_baseline_loss() {
 }
 
 int test() {
-    bitboard_print(0xf8fcfcfcf8700000ULL);
+    test_nnue();
     return 0;
 }
 

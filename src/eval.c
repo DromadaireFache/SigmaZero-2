@@ -3,6 +3,7 @@
 
 #include "chess.h"
 #include "movegen.h"
+#include "nnue.h"
 
 int king_mobility(Chess* chess, bool is_white, int king_i, bool only_attacks) {
     bitboard_t friendly_bb = is_white ? chess->bb_white : chess->bb_black;
@@ -162,6 +163,7 @@ int bishop_pawn_penalty(bitboard_t bishops, bitboard_t pawns) {
     return penalty;
 }
 
+/*
 int eval(Chess* chess) {
     // npm is a measure from 0-24, 0 being kings/pawns and 24 is full board. This will now be used
     // to interpolate between opening and endgame positions instead of using fullmoves, but to be
@@ -215,4 +217,24 @@ int eval(Chess* chess) {
     }
 
     return e;
+}
+    */
+
+// New NNUE evaluation function
+int eval(Chess* chess) {
+    return forward((const uint64_t[13]){
+        chess->bb.black_pawns,
+        chess->bb.white_pawns,
+        chess->bb.black_knights,
+        chess->bb.white_knights,
+        chess->bb.black_bishops,
+        chess->bb.white_bishops,
+        chess->bb.black_rooks,
+        chess->bb.white_rooks,
+        chess->bb.black_queens,
+        chess->bb.white_queens,
+        chess->bb.black_kings,
+        chess->bb.white_kings,
+        !chess->turn,  // Turn is flipped in NNUE, white is 1, black is 0
+    });
 }

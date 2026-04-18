@@ -1,47 +1,59 @@
 from .archs.chessnn import ChessNN
 import numpy as np
-import typing
+from typing import TextIO
 
 
-# Not sure if this will be useful since I plan to use torch.jit.script
-def quantize(model: ChessNN):
-    state = model.state_dict()
-    QA, QB = 255, 64
-
-    fc1_w = state["fc1.weight"].numpy() * QA
-    fc2_w = state["fc2.weight"].numpy() * QB
-    fc3_w = state["fc3.weight"].numpy() * QB
-    fc1_b = state["fc1.bias"].numpy() * QA
-    fc2_b = state["fc2.bias"].numpy() * QB
-    fc3_b = state["fc3.bias"].numpy() * QB
-
-    print(f"L0 weights range: [{fc1_w.min():.1f}, {fc1_w.max():.1f}] (int16 range: ±32767)")
-    print(f"L1 weights range: [{fc2_w.min():.1f}, {fc2_w.max():.1f}] (int8 range: ±127)")
-    print(f"L2 weights range: [{fc3_w.min():.1f}, {fc3_w.max():.1f}] (int8 range: ±127)")
-
-    def write_array(f: typing.TextIO, name: str, array: np.ndarray, dtype: str, max_val: int):
+def write_array(f: TextIO, name: str, array: np.ndarray, max_val: int):
+    if len(array.shape) == 1:
+        decl = f"const int16_t {name}[{len(array)}]"
+    else:
+        decl = f"const int16_t {name}[{len(array)}][{array.shape[1]}]"
+    f.write(f"{decl} = {{")
+    for i in range(len(array)):
         if len(array.shape) == 1:
-            f.write(f"const {dtype} {name}[{len(array)}] = {{")
+            w = int(array[i])
+            assert -max_val <= w <= max_val, f"Value {w} at index {i} exceeds int16 range after quantization"
+            f.write(f"{w}, " if i < len(array) - 1 else f"{w}")
         else:
-            f.write(f"const {dtype} {name}[{len(array)}][{array.shape[1]}] = {{\n")
-        for i in range(len(array)):
-            if len(array.shape) == 1:
-                w = int(np.clip(array[i], -max_val, max_val))
-                f.write(f"{w}, " if i < len(array) - 1 else f"{w}")
-            else:
-                f.write("    {")
-                for j in range(array.shape[1]):
-                    w = int(np.clip(array[i, j], -max_val, max_val))
-                    f.write(f"{w}, " if j < array.shape[1] - 1 else f"{w}")
-                f.write("},\n")
-        f.write("};\n\n")
+            f.write("{")
+            for j in range(array.shape[1]):
+                w = int(array[i, j])
+                assert -max_val <= w <= max_val, f"Value {w} at index {i} exceeds int16 range after quantization"
+                f.write(f"{w}, " if j < array.shape[1] - 1 else f"{w}")
+            f.write("}, " if i < len(array) - 1 else "}")
+    f.write("};\n")
 
-    with open("src/nnue/params.c", "w") as f:
+    extern_decl = f"extern {decl};"
+    return extern_decl
+
+def quantize(model: ChessNN):
+    int16_max = 32767
+    state = model.state_dict()
+    factors = {}
+    extern_decls = []
+
+    with open("nnue/params.c", "w") as f:
         f.write("#include <stdint.h>\n\n")
-        f.write(f"const int QA = {QA}, QB = {QB};\n\n")
-        write_array(f, "fc1_weights", fc1_w, "int16_t", 32767)
-        write_array(f, "fc2_weights", fc2_w, "int8_t", 127)
-        write_array(f, "fc3_weights", fc3_w, "int8_t", 127)
-        write_array(f, "fc1_biases", fc1_b, "int16_t", 32767)
-        write_array(f, "fc2_biases", fc2_b, "int8_t", 127)
-        write_array(f, "fc3_biases", fc3_b, "int8_t", 127)
+        
+        # Write the quantized parameters to C arrays
+        for name, param in state.items():
+            array = param.cpu().numpy()
+            layer = name.split(".")[0]  # e.g. "fc1", "fc2", "fc3"
+            name = name.replace(".", "_")  # Replace dots with underscores for C variable names
+            max_value = np.max(np.abs(array))
+            
+            if layer not in factors:
+                factor = int(int16_max // 16 // max_value) if max_value > 0 else 1
+                assert int16_max >= factor > 0, f"Quantization factor {factor} for layer {layer} is out of int16 range"
+                factors[layer] = factor
+            
+            extern_decl = write_array(f, name, array * factors[layer], int16_max)  # Clamp to int16 range
+            extern_decls.append(extern_decl)
+    
+    print("Quantization complete. Parameters written to nnue/params.c")
+    print("Add the following quantization factors and extern declarations:")
+
+    for layer, factor in factors.items():
+        print(f"const int {layer}_k = {factor};")
+    for decl in extern_decls:
+        print(decl)

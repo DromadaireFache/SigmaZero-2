@@ -7,7 +7,7 @@ BUILD_DIR=.build
 DEBUG_MODE ?= full
 DEBUG_ALLOWED_MODES := full symbols asan ubsan tsan lsan define
 EXCLUDED=consts_backup.h
-EXTRA_SRCS=magicbb/moves.c
+EXTRA_SRCS=magicbb/moves.c nnue/params.c
 UNAME_S := $(shell uname -s)
 MATH_LIB :=
 

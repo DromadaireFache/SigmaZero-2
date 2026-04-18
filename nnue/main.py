@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nnue import archs
 from nnue.archs.chessnn import ChessNN
 from nnue.data import HFDataset, ensure_local_dataset, DEFAULT_HF_DATASET_DIR
+from nnue.quantizer import quantize
 from scripts import nn_engine
 from scripts.engines import Engine
 from scripts.optimizers import best_consts
@@ -217,21 +218,28 @@ class ChessNNEngine(Engine):
         engine = ChessNNSearch(board, self.model, millis)
         return engine.search()
         # return self.play_depth_1(board, millis)
-    
+
     def play_depth_1(self, board: chess.Board, millis: int) -> dict:
         """Evaluate all legal moves at depth 1 and return the best move."""
         best_move = None
-        best_eval = -float('inf') if board.turn == chess.WHITE else float('inf')
+        best_eval = -float("inf") if board.turn == chess.WHITE else float("inf")
         for move in board.legal_moves:
             board.push(move)
             if board.is_checkmate():
                 move_eval = 10000.0 if board.turn == chess.BLACK else -10000.0
-            elif board.is_stalemate() or board.is_insufficient_material() or board.can_claim_fifty_moves() or board.can_claim_threefold_repetition():
+            elif (
+                board.is_stalemate()
+                or board.is_insufficient_material()
+                or board.can_claim_fifty_moves()
+                or board.can_claim_threefold_repetition()
+            ):
                 move_eval = 0.0
             else:
                 move_eval = self.model.evaluate(board)
             board.pop()
-            if (board.turn == chess.WHITE and move_eval > best_eval) or (board.turn == chess.BLACK and move_eval < best_eval):
+            if (board.turn == chess.WHITE and move_eval > best_eval) or (
+                board.turn == chess.BLACK and move_eval < best_eval
+            ):
                 best_eval = move_eval
                 best_move = move
         return {"move": best_move.uci(), "eval": round(best_eval, 2)}
@@ -279,8 +287,8 @@ class PyEngine(Engine):
 
 if __name__ == "__main__":
     # Use 'spawn' start method for multiprocessing to avoid CUDA re-initialization in forked subprocesses.
-    torch.multiprocessing.set_start_method('spawn', force=True)
-    
+    torch.multiprocessing.set_start_method("spawn", force=True)
+
     print(f"Using device: {device}")
 
     commands = ["train", "eval", "quantize"]
@@ -363,16 +371,31 @@ if __name__ == "__main__":
         for move, eval in best_moves[:3]:
             print(f"  Move: {move}, Evaluation: {eval:.4f} pawns")
 
-    # elif command == "quantize":
-    #     model = Arch1()
-    #     if os.path.exists("nnue.pth"):
-    #         model.load_state_dict(torch.load("nnue.pth", map_location=device))
-    #         print("Loaded existing model from nnue.pth")
-    #     else:
-    #         print("No trained model found. Please train the model first.")
-    #         sys.exit(1)
+    elif command == "quantize":
+        parser = argparse.ArgumentParser(description="Quantize a ChessNN model and export parameters to C")
+        parser.add_argument("chess_nn", type=str, help="ChessNN architecture to quantize (e.g. 'arch1')")
+        args = parser.parse_args(sys.argv[2:])
 
-    #     quantize(model)
+        chess_nn = archs.get_arch(args.chess_nn)
+        chess_nn.load_model(allow_missing=False)
+        quantize(chess_nn)
+
+        fens = [
+            "rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",  # white up a queen
+            "rnbqkbn1/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQq - 0 1",  # white up a rook
+            "rnbqk1nr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",  # white up a bishop
+            "rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",  # white up a knight
+            "rnbqkbnr/ppppppp1/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",  # white up a pawn
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1",  # black up a queen
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBN1 w Qkq - 0 1",  # black up a rook
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK1NR w KQkq - 0 1",  # black up a bishop
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKB1R w KQkq - 0 1",  # black up a knight
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPP1/RNBQKBNR w KQkq - 0 1",  # black up a pawn
+        ]
+        for fen in fens:
+            board = chess.Board(fen)
+            evaluation = chess_nn.evaluate(board)
+            print(f"{args.chess_nn} Evaluation for FEN '{fen}': {evaluation:.4f} pawns")
 
     else:
         print(f"Unknown command: {command}")

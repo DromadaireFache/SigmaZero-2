@@ -182,8 +182,8 @@ class Api:
             result = engines.py_engine.play(board, millis)
         elif version == "stockfish":
             result = engines.stockfish.play(board, millis)
-        elif version in engines.old:
-            result = engines.old[version].play(board, millis)
+        elif version.upper() in engines.old:
+            result = engines.old[version.upper()].play(board, millis)
         elif version in engines.chess_nns:
             result = engines.chess_nns[version].play(board, millis)
         else:
