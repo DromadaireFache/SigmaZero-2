@@ -4,15 +4,14 @@
 
 Training results for different architectures over 3 epochs and 250M samples.
 
-|                                         | Parameters | Train 1 | Val 1  | Train 2 | Val 2  | Train 3 | Val 3  |
-|-----------------------------------------|------------|---------|--------|---------|--------|---------|--------|
-| [Arch1](#arch1)                         | 213633     | 0.0201  | 0.0222 | 0.0197  | 0.0220 | 0.0197  | 0.0222 |
-| [Arch1-Small](#arch1-small)             | 102721     | 0.0203  | 0.0218 | 0.0199  | 0.0217 | 0.0199  | 0.0218 |
-| [Arch1-Large](#arch1-large)             | 460033     | 0.0199  | 0.0224 | 0.0196  | 0.0221 | 0.0196  | 0.0223 |
-| [Arch1-Tiny](#arch1-tiny)               | 12897      | 0.0219  | 0.0224 | 0.0217  | 0.0224 | 0.0216  | 0.0224 |
-| [Arch1 (lr=1e-4)](#arch1)               | 213633     | 0.0187  | 0.0187 | 0.0175  | 0.0181 | 0.0172  | 0.0179 |
-| [Arch1-Small (lr=1e-4)](#arch1-small)   | 102721     | 0.0194  | 0.0190 | 0.0182  | 0.0186 | 0.0180  | 0.0183 |
+|                                         | Parameters | Train 10 | Val 10  | Train 20 | Val 20  | Train 30 | Val 30  |
+|-----------------------------------------|------------|----------|---------|----------|---------|----------|---------|
+| [Arch1](#arch1)                         | 213633     | 0.0170   | 0.0170  | 0.0167   | 0.0167  | 0.0167   | 0.0166  |
+| [Arch1-Small](#arch1-small)             | 102721     |
+| [Arch1-Large](#arch1-large)             | 460033     |
+| [Arch1-Tiny](#arch1-tiny)               | 12897      |
 | [Arch2](#arch2)                         | 1083905    |
+| [ResNet](#resnet)                       | 3558913    | 0.0145   | 0.0160  | 0.0144   | 0.0159  | 0.0130   | 0.0140  |
 
 ## Arch1
 
@@ -106,4 +105,35 @@ class NNUE(nn.Module):
         x = self.drop3(x)
         x = self.fc4(x)
         return x
+```
+
+## ResNet
+
+```python
+class ResBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.fc1 = nn.Linear(dim, dim)
+        self.fc2 = nn.Linear(dim, dim)
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim)
+
+    def forward(self, x):
+        residual = x
+        x = torch.clamp(self.fc1(self.norm1(x)), 0, 1)
+        x = self.fc2(self.norm2(x))
+        return x + residual
+
+
+class ChessResNet(ClassicArch):
+    def __init__(self):
+        super().__init__("nnue/models/resnet.pth")
+        self.input_proj = nn.Linear(769, 512)
+        self.blocks = nn.Sequential(*[ResBlock(512) for _ in range(6)])
+        self.output = nn.Linear(512, 1)
+
+    def forward(self, x):
+        x = torch.clamp(self.input_proj(x), 0, 1)
+        x = self.blocks(x)
+        return self.output(x)
 ```

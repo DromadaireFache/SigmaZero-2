@@ -1,11 +1,16 @@
 import sys
 
-from .classic import Arch1, Arch2
+import torch
+
+from .classic import Arch1, Arch2, Arch3
+from .resnet import ChessResNet
 from .chessnn import ChessNN
 
 architectures: dict[str, type[ChessNN]] = {
     "arch1": Arch1,
     "arch2": Arch2,
+    "arch3": Arch3,
+    "resnet": ChessResNet,
 }
 
 def get_arch(chess_nn_name: str) -> ChessNN:

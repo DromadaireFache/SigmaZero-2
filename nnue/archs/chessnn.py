@@ -15,8 +15,16 @@ class ChessNN(nn.Module, ABC):
             state_dict = torch.load(self.model_path, map_location=device)
             self.load_state_dict(state_dict)
             self.eval()
-        elif not allow_missing:
-            raise FileNotFoundError(f"Model file not found: {self.model_path}")
+            if allow_missing:
+                print(f"Loading model from checkpoint: {self.model_path}")
+        else:
+            if allow_missing:
+                print(f"No model file found at {self.model_path}. Starting with a new model.")
+            else:
+                raise FileNotFoundError(f"Model file not found: {self.model_path}")
+        
+    def save_model(self):
+        torch.save(self.state_dict(), self.model_path)
 
     @abstractmethod
     def forward(self, x):

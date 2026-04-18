@@ -112,3 +112,48 @@ class Arch2(ClassicArch):
         x = self.drop3(x)
         x = self.fc4(x)
         return x
+    
+    
+class Arch3(ClassicArch):
+    def __init__(self, dropout_p: float = 0.10):
+        super(Arch3, self).__init__("nnue/models/arch3.pth")
+        self.fc1 = nn.Linear(769, 256)
+        self.fc2 = nn.Linear(256, 1024)
+        self.fc3 = nn.Linear(1024, 128)
+        self.fc4 = nn.Linear(128, 1)
+        self.drop1 = nn.Dropout(dropout_p)
+        self.drop2 = nn.Dropout(dropout_p)
+        self.drop3 = nn.Dropout(dropout_p)
+
+    def forward(self, x):
+        x = torch.clamp(torch.relu(self.fc1(x)), 0, 1)
+        x = self.drop1(x)
+        x = torch.clamp(torch.relu(self.fc2(x)), 0, 1)
+        x = self.drop2(x)
+        x = torch.clamp(torch.relu(self.fc3(x)), 0, 1)
+        x = self.drop3(x)
+        x = self.fc4(x)
+        return x
+
+
+if __name__ == "__main__":
+    # Benchmark the fen_to_input function.
+    import time
+    import sys
+    
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    from scripts.chessdata import Dataloader
+    
+    # Warm up the JIT compiler.
+    for fen in Dataloader(100).fens():
+        _ = _fen_bytes_to_array(np.frombuffer(fen.encode("ascii"), dtype=np.uint8))
+    
+    fens = Dataloader(1e5).fens()
+    start_time = time.perf_counter()
+    
+    for fen in fens:
+        _ = _fen_bytes_to_array(np.frombuffer(fen.encode("ascii"), dtype=np.uint8))
+    
+    end_time = time.perf_counter()
+    print(f"Processed 100k FENs in {end_time - start_time:.2f} seconds")

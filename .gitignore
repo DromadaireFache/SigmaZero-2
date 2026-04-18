@@ -23,3 +23,4 @@ profile*
 *.d
 *.pkl
 lichess-positions.csv
+*.png

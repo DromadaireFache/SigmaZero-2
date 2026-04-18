@@ -7,6 +7,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import numpy as np
 from datasets import load_dataset
+from tqdm import tqdm
 
 from .archs.chessnn import ChessNN
 
@@ -22,7 +23,7 @@ def _count_arrow_rows(file_paths: list[str]) -> int:
     if not file_paths:
         return 0
     total_rows = 0
-    for file_path in file_paths:
+    for file_path in tqdm(file_paths, desc="Counting rows", unit="file"):
         with pa.memory_map(file_path, "r") as source:
             reader = ipc.open_stream(source)
             for record_batch in reader:
@@ -67,7 +68,7 @@ class HFDataset(torch.utils.data.IterableDataset):
             if (file_index % self.split_every == 0) == (self.split == "val")
         ]
 
-        if max_samples is not None and max_samples < 1e6:
+        if max_samples is None:
             self.total_rows = _count_arrow_rows(self.split_files)
         else:
             self.total_rows = max_samples

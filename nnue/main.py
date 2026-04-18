@@ -188,7 +188,7 @@ def training_loop(
         )
 
         # Save model checkpoint
-        torch.save(model.state_dict(), f"nnue.pth")
+        model.save_model()
 
     plt.plot(range(1, epochs + 1), train_losses, label="Training Loss")
     plt.plot(range(1, epochs + 1), val_losses, label="Validation Loss")
@@ -216,6 +216,25 @@ class ChessNNEngine(Engine):
         """Run a simple minimax search with alpha-beta pruning."""
         engine = ChessNNSearch(board, self.model, millis)
         return engine.search()
+        # return self.play_depth_1(board, millis)
+    
+    def play_depth_1(self, board: chess.Board, millis: int) -> dict:
+        """Evaluate all legal moves at depth 1 and return the best move."""
+        best_move = None
+        best_eval = -float('inf') if board.turn == chess.WHITE else float('inf')
+        for move in board.legal_moves:
+            board.push(move)
+            if board.is_checkmate():
+                move_eval = 10000.0 if board.turn == chess.BLACK else -10000.0
+            elif board.is_stalemate() or board.is_insufficient_material() or board.can_claim_fifty_moves() or board.can_claim_threefold_repetition():
+                move_eval = 0.0
+            else:
+                move_eval = self.model.evaluate(board)
+            board.pop()
+            if (board.turn == chess.WHITE and move_eval > best_eval) or (board.turn == chess.BLACK and move_eval < best_eval):
+                best_eval = move_eval
+                best_move = move
+        return {"move": best_move.uci(), "eval": round(best_eval, 2)}
 
     def version(self) -> str:
         return f"ChessNN-{self.model.__class__.__name__}"
@@ -259,6 +278,9 @@ class PyEngine(Engine):
 
 
 if __name__ == "__main__":
+    # Use 'spawn' start method for multiprocessing to avoid CUDA re-initialization in forked subprocesses.
+    torch.multiprocessing.set_start_method('spawn', force=True)
+    
     print(f"Using device: {device}")
 
     commands = ["train", "eval", "quantize"]
@@ -303,11 +325,13 @@ if __name__ == "__main__":
         print(f"DataLoader workers: {workers}")
 
         train_set = HFDataset(
+            chess_nn,
             split="train",
             max_samples=args.max_samples,
             dataset_dir=args.dataset_dir,
         )
         val_set = HFDataset(
+            chess_nn,
             split="val",
             max_samples=args.max_samples,
             dataset_dir=args.dataset_dir,
