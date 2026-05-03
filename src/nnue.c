@@ -4,8 +4,8 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 // #define COUNT_MATH_OPS  // Uncomment to count number of math operations for testing purposes
 
@@ -20,7 +20,6 @@ int math_ops = 0;  // Count number of math operations for testing purposes
 
 /* Linear algebra functions (not efficient-update optimized yet) */
 
-// Depth: 4.67 ± 0.12
 void mat16_mul_bitvec(int m, const int16_t A[m][769], const uint64_t x[13], int16_t y[m]) {
     for (int i = 0; i < m; i++) {
         int32_t sum = 0;
@@ -38,7 +37,7 @@ void mat16_mul_bitvec(int m, const int16_t A[m][769], const uint64_t x[13], int1
     }
 }
 
-void mat16_mul_bitvec_efficient(int m, const int16_t A[m][769], const uint64_t x[13],
+void mat16_mul_bitvec_efficient(int m, const int16_t A[769][m], const uint64_t x[13],
                                 uint64_t prev_x[13], int16_t y[m]) {
     for (int j = 0; j < 13; j++) {
         uint64_t changed_bits = x[j] ^ prev_x[j];
@@ -46,7 +45,7 @@ void mat16_mul_bitvec_efficient(int m, const int16_t A[m][769], const uint64_t x
         for (int k = 0; k < 64 && changed_bits != 0; k++) {
             if (changed_bits & 1) {
                 for (int i = 0; i < m; i++) {
-                    int16_t delta = (x[j] & (1ULL << k)) ? A[i][j * 64 + k] : -A[i][j * 64 + k];
+                    int16_t delta = (x[j] & (1ULL << k)) ? A[j * 64 + k][i] : -A[j * 64 + k][i];
                     MATHOP(y[i] += delta);
                 }
             }
@@ -100,10 +99,10 @@ void print_vec16(const int16_t* x, int size) {
 /* Neural network functions */
 
 // Constants and parameters defined in params.c for Arch1 model
-const int fc1_k = 10046;
-const int fc2_k = 11775;
-const int fc3_k = 1923;
-extern const int16_t fc1_weight[256][769];
+const int fc1_k = 6872;
+const int fc2_k = 5463;
+const int fc3_k = 1338;
+extern const int16_t fc1_weight[769][256];
 extern const int16_t fc1_bias[256];
 extern const int16_t fc2_weight[64][256];
 extern const int16_t fc2_bias[64];
@@ -117,8 +116,8 @@ const int piece_to_plane[128] = {
 };
 
 void init_nnue(Chess* chess) {
-    memset(chess->nnue.x1, 0, sizeof(chess->nnue.x1));   // Fill input accumulator with 0
-    memcpy(chess->nnue.y1, fc1_bias, sizeof(fc1_bias));  // Start with bias values
+    memset(chess->nnue.input, 0, sizeof(chess->nnue.input));  // Fill input accumulator with 0
+    memcpy(chess->nnue.y1, fc1_bias, sizeof(fc1_bias));       // Start with bias values
 }
 
 int forward(Chess* chess) {
@@ -140,12 +139,14 @@ int forward(Chess* chess) {
 
     int16_t x1[256], x2[64], output[1];
     // mat16_mul_bitvec(256, fc1_weight, input, x1);
-    mat16_mul_bitvec_efficient(256, fc1_weight, input, chess->nnue.x1, chess->nnue.y1);
+    mat16_mul_bitvec_efficient(256, fc1_weight, input, chess->nnue.input, chess->nnue.y1);
     // vec16_add(256, x1, fc1_bias, x1);
     clamp16(256, chess->nnue.y1, x1, 0, fc1_k);
+
     mat16_mul(64, 256, fc2_weight, x1, x2, fc1_k);
     vec16_add(64, x2, fc2_bias, x2);
     clamp16(64, x2, x2, 0, fc2_k);
+
     mat16_mul(1, 64, fc3_weight, x2, output, fc2_k);
     vec16_add(1, output, fc3_bias, output);
     return (int)output[0] * 100 / fc3_k;
@@ -178,20 +179,25 @@ void test_nnue() {
     }
 
     // Testing efficient updates
+    // Without efficient updates Depth: 4.67 ± 0.12 (25515)
+    // Efficient updates on first layer Depth: 8.24 ± 0.10 (17696)
+    // Memory layout optimization Depth: 9.45 ± 0.15
 
-    char *starting = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    char *e4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+    char* starting = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    char* e4e5 = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2";
 
     Chess* chess = Chess_from_fen(starting);
     printf("Starting eval: %d\n", forward(chess));
 
-    math_ops = 0;
     Chess_user_move(chess, "e2e4");
+    forward(chess);
+    math_ops = 0;
+    Chess_user_move(chess, "e7e5");
     printf("Efficient update eval: %d\n", forward(chess));
     printf("Number of math operations: %d\n", math_ops);
     free(chess);
-    
-    chess = Chess_from_fen(e4);
+
+    chess = Chess_from_fen(e4e5);
     math_ops = 0;
     printf("Normal forward eval: %d\n", forward(chess));
     printf("Number of math operations: %d\n", math_ops);

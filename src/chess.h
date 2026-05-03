@@ -58,7 +58,7 @@ typedef struct {
 } BitboardMap;
 
 typedef struct {
-    uint64_t x1[13];
+    uint64_t input[13];
     int16_t y1[256];
 } NNUEAcc;
 

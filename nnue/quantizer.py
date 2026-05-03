@@ -42,6 +42,11 @@ def quantize(model: ChessNN):
             name = name.replace(".", "_")  # Replace dots with underscores for C variable names
             max_value = np.max(np.abs(array))
             
+            # Transpose the weights of the first fully connected layer for better memory access patterns in C
+            if len(array.shape) == 2 and len(array[0]) == 769:
+                print(f"Transposing weights of layer {layer} for better memory access patterns in C")
+                array = array.T
+            
             if layer not in factors:
                 factor = int(int16_max // 16 // max_value) if max_value > 0 else 1
                 assert int16_max >= factor > 0, f"Quantization factor {factor} for layer {layer} is out of int16 range"
