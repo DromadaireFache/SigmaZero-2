@@ -2,7 +2,7 @@ import sys
 
 import torch
 
-from .classic import Arch1, Arch2, Arch3
+from .classic import Arch1, Arch2, Arch3, Tiny
 from .resnet import ChessResNet
 from .chessnn import ChessNN
 
@@ -10,6 +10,7 @@ architectures: dict[str, type[ChessNN]] = {
     "arch1": Arch1,
     "arch2": Arch2,
     "arch3": Arch3,
+    "tiny": Tiny,
     "resnet": ChessResNet,
 }
 

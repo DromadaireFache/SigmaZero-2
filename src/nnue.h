@@ -1,5 +1,7 @@
 #pragma once
 #include <stdint.h>
+#include "chess.h"
 
 void test_nnue();
-int forward(const uint64_t input[13]);
+void init_nnue(Chess* chess);
+int forward(Chess* chess);

@@ -356,16 +356,24 @@ void select_best_move(Move* moves, int* scores, int start, int n_moves) {
 }
 
 int minimax_captures_only(Chess* chess, int a, int b) {
+    // Look for existing eval in transposition table
+    uint64_t hash = chess->zhash;
+    int tt_eval;
+    if (TT_get(hash, &tt_eval, -1, a, b)) { // depth -1 for quiescence search
+        return tt_eval;
+    }
+
     int e = chess->turn == TURN_WHITE ? eval(chess) : -eval(chess);
     int best_score = e;
 
     // Stand Pat
-    if (best_score >= b) return best_score;
+    if (best_score >= b) return TT_store(hash, best_score, -1, TT_LOWER, (Move){0});  // Failed high
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
     size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, true);
+    int original_a = a;
 
     for (int i = 0; i < n_moves; i++) {
         if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
@@ -394,9 +402,13 @@ int minimax_captures_only(Chess* chess, int a, int b) {
             best_score = score;
             if (score > a) a = score;
         }
-        if (score >= b) return best_score;
+        if (score >= b) return TT_store(hash, best_score, -1, TT_LOWER, (Move){0});  // Failed high
     }
-    return best_score;
+    
+    if (best_score <= original_a) {
+        return TT_store(hash, best_score, -1, TT_UPPER, (Move){0});  // Failed low
+    }
+    return TT_store(hash, best_score, -1, TT_EXACT, (Move){0});
 }
 
 static inline int compute_reduction(int depth, int i) {
@@ -532,7 +544,7 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
 
             // Reduce more in endgames
             int npm = Chess_non_pawn_material(chess);
-            if (npm <= 10) r += 1;
+            if (npm <= 10) r /= 2;
 
             // Clamp reduction so we don't go below depth 1
             int reduced_depth = depth - 1 - r;

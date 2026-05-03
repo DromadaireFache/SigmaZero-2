@@ -57,6 +57,11 @@ typedef struct {
         white_rooks, black_rooks, white_queens, black_queens, white_kings, black_kings;
 } BitboardMap;
 
+typedef struct {
+    uint64_t x1[13];
+    int16_t y1[256];
+} NNUEAcc;
+
 // The chessboard
 typedef struct {
     Piece board[64];        // Array of pieces, index 0 is a1, index 63 is h8
@@ -77,6 +82,7 @@ typedef struct {
     bool white_has_castled;
     bool black_has_castled;
     BitboardMap bb;  // Bitboards to store the pieces
+    NNUEAcc nnue;    // Accumulator for NNUE efficient updates
 } Chess;
 
 #define BITMASK(nbit) (1 << (nbit))

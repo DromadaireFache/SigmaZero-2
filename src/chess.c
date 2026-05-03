@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "move.h"
+#include "nnue.h"
 #include "piece.h"
 
 // Returns the piece that was captured, or EMPTY if no capture
@@ -177,7 +178,8 @@ void Chess_unmake_move(Chess* chess, Move* move, Piece capture) {
             break;
     }
 
-    // Add the captured piece back to the board (this will also remove the piece from the 'to' square)
+    // Add the captured piece back to the board (this will also remove the piece from the 'to'
+    // square)
     Chess_add(chess, capture, move->to);
 
     // Put the moving piece back to its original square
@@ -356,9 +358,11 @@ Chess* Chess_from_fen(char* fen) {
     fprintf(stderr, "FEN Parsing error: " details ": %s\n", fen); \
     return NULL
 
+    fen = strdup(fen);
     Chess* board = malloc(sizeof(Chess));  // empty board
     memset(board, 0, sizeof(Chess));
     Chess_empty_board(board);
+    init_nnue(board);  // initialize NNUE accumulators
 
     // Split FEN into fields
     char* fields[6];
@@ -449,6 +453,7 @@ Chess* Chess_from_fen(char* fen) {
     board->zhash = Chess_zhash(board);
     board->white_has_castled = false;
     board->black_has_castled = false;
+    free(fen);
     return board;
 }
 

@@ -222,19 +222,5 @@ int eval(Chess* chess) {
 
 // New NNUE evaluation function
 int eval(Chess* chess) {
-    return forward((const uint64_t[13]){
-        chess->bb.black_pawns,
-        chess->bb.white_pawns,
-        chess->bb.black_knights,
-        chess->bb.white_knights,
-        chess->bb.black_bishops,
-        chess->bb.white_bishops,
-        chess->bb.black_rooks,
-        chess->bb.white_rooks,
-        chess->bb.black_queens,
-        chess->bb.white_queens,
-        chess->bb.black_kings,
-        chess->bb.white_kings,
-        !chess->turn,  // Turn is flipped in NNUE, white is 1, black is 0
-    });
+    return forward(chess);
 }

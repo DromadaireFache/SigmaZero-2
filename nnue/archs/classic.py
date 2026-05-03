@@ -134,6 +134,24 @@ class Arch3(ClassicArch):
         x = self.drop3(x)
         x = self.fc4(x)
         return x
+    
+    
+class Tiny(ClassicArch):
+    def __init__(self, dropout_p: float = 0.10):
+        super(Tiny, self).__init__("nnue/models/tiny.pth")
+        self.fc1 = nn.Linear(769, 32)
+        self.fc2 = nn.Linear(32, 64)
+        self.fc3 = nn.Linear(64, 1)
+        self.drop1 = nn.Dropout(dropout_p)
+        self.drop2 = nn.Dropout(dropout_p)
+
+    def forward(self, x):
+        x = torch.clamp(torch.relu(self.fc1(x)), 0, 1)
+        x = self.drop1(x)
+        x = torch.clamp(torch.relu(self.fc2(x)), 0, 1)
+        x = self.drop2(x)
+        x = self.fc3(x)
+        return x
 
 
 if __name__ == "__main__":

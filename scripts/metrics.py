@@ -84,7 +84,7 @@ def report_depth(engine: SigmaZeroEngine, duration: int = 60):
     while progress:
         fen = next(fens)
         postype = chessdata.get_postype(fen)
-        result = engine.play(fen, 1000)
+        result = engine.play(fen, 100)
 
         if "depth" in result and result["depth"] > 0:
             depths.append(result["depth"])
