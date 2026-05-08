@@ -2,12 +2,14 @@ import glob
 import os
 import shutil
 import time
+from typing import Optional
 import torch
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm
+from numba import njit
 
 from .archs.chessnn import ChessNN
 
@@ -36,6 +38,18 @@ def _iter_arrow_record_batches(file_path: str):
         reader = ipc.open_stream(source)
         for record_batch in reader:
             yield record_batch
+            
+
+@njit
+def parse_eval(cp: Optional[int], mate: Optional[int]) -> Optional[int]:
+    if mate is not None:
+        # Convert mate-in-N to a large eval that decays with distance
+        # mate-in-1 = 9900cp, mate-in-10 = 9000cp, etc.
+        sign = 1 if mate > 0 else -1
+        cp = sign * (10000 - abs(mate) * 100)
+    elif cp is None:
+        return None
+    return cp
 
 
 class HFDataset(torch.utils.data.IterableDataset):
@@ -115,19 +129,22 @@ class HFDataset(torch.utils.data.IterableDataset):
 
                 parse_start = time.perf_counter()
                 cp_index = record_batch.schema.get_field_index("cp")
+                mate_index = record_batch.schema.get_field_index("mate")
                 fen_index = record_batch.schema.get_field_index("fen")
-                if cp_index < 0 or fen_index < 0:
+                if cp_index < 0 or mate_index < 0 or fen_index < 0:
                     raise ValueError(f"Arrow batch schema missing required fields: {record_batch.schema}")
                 cp_values = record_batch.column(cp_index).to_pylist()
+                mate_values = record_batch.column(mate_index).to_pylist()
                 fen_values = record_batch.column(fen_index).to_pylist()
                 batch_inputs = []
                 batch_targets = []
 
-                for cp, fen in zip(cp_values, fen_values):
-                    if cp is None:
+                for cp, mate, fen in zip(cp_values, mate_values, fen_values):
+                    parsed_eval = parse_eval(cp, mate)
+                    if parsed_eval is None:
                         continue
                     batch_inputs.append(self.chess_nn.fen_to_input(fen))
-                    batch_targets.append(float(cp) / 100.0)
+                    batch_targets.append(parsed_eval / 100.0)
 
                 pending_norm += time.perf_counter() - parse_start
                 file_fetch_start = time.perf_counter()
