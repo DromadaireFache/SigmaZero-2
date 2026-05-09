@@ -1,7 +1,8 @@
 CC=gcc
 CFLAGS=-Wall -Werror -Wno-unused-function -MMD -MP -O3 -march=native -mtune=native
-TARGET=engine
-DEBUG_TARGET=$(TARGET)_debug
+EXE :=
+TARGET=engine$(EXE)
+DEBUG_TARGET=$(TARGET)_debug$(EXE)
 SRC_DIR=src
 BUILD_DIR=.build
 DEBUG_MODE ?= full
@@ -10,6 +11,18 @@ EXCLUDED=consts_backup.h
 EXTRA_SRCS=magicbb/moves.c nnue/params.c
 UNAME_S := $(shell uname -s)
 MATH_LIB :=
+RM_RF := rm -rf
+MKDIR_P := mkdir -p
+TOUCH_GITIGNORE := echo '*' > $(BUILD_DIR)/.gitignore
+
+ifeq ($(OS),Windows_NT)
+EXE := .exe
+TARGET=engine$(EXE)
+DEBUG_TARGET=$(TARGET)_debug$(EXE)
+RM_RF := powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue"
+MKDIR_P := powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path"
+TOUCH_GITIGNORE := powershell -NoProfile -Command "Set-Content -Path $(BUILD_DIR)/.gitignore -Value '*'"
+endif
 
 ifeq ($(UNAME_S),Linux)
 MATH_LIB := -lm
@@ -79,24 +92,24 @@ $(DEBUG_TARGET): $(DEBUG_OBJS)
 
 # Compile *.c -> .build/*.o
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
-	mkdir -p $(dir $@)
+	$(MKDIR_P) "$(dir $@)"
 	$(CC) $(CFLAGS) -MF $(patsubst %.o,%.d,$@) -c $< -o $@
 
 # Compile *.c -> .build/debug/<mode>/*.o
 $(DEBUG_BUILD_DIR)/%.o: %.c | $(DEBUG_BUILD_DIR)
-	mkdir -p $(dir $@)
+	$(MKDIR_P) "$(dir $@)"
 	$(CC) $(DEBUG_CFLAGS) -MF $(patsubst %.o,%.d,$@) -c $< -o $@
 
 # Ensure build dir exists
 $(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
-	echo '*' > $(BUILD_DIR)/.gitignore
+	$(MKDIR_P) "$(BUILD_DIR)"
+	$(TOUCH_GITIGNORE)
 
 $(DEBUG_BUILD_DIR):
-	mkdir -p $(DEBUG_BUILD_DIR)
+	$(MKDIR_P) "$(DEBUG_BUILD_DIR)"
 
 .PHONY: clean debug help
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET) $(DEBUG_TARGET) magicbb_generator
+	$(RM_RF) "$(BUILD_DIR)" "$(TARGET)" "$(DEBUG_TARGET)" magicbb_generator
 
 -include $(DEPS) $(DEBUG_DEPS)

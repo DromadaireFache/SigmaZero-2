@@ -34,6 +34,7 @@ extern atomic_size_t nodes_searched;
 #endif
 
 #ifdef _WIN32
+#include <time.h>
 #define TIME_TYPE clock_t
 #define TIME_NOW() clock()
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
