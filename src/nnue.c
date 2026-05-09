@@ -68,6 +68,16 @@ void print_vec16(const int16_t* x, int size) {
 
 /* Neural network functions */
 
+#define MODEL_ARCH1
+
+// Convert piece type to index (0-11)
+const int piece_to_plane[128] = {
+    ['p'] = 0, ['P'] = 1, ['n'] = 2, ['N'] = 3, ['b'] = 4,  ['B'] = 5,
+    ['r'] = 6, ['R'] = 7, ['q'] = 8, ['Q'] = 9, ['k'] = 10, ['K'] = 11,
+};
+
+#ifdef MODEL_ARCH1
+
 // Constants and parameters defined in params.c for Arch1 model
 const int fc1_k = 6872;
 const int fc2_k = 5463;
@@ -78,12 +88,6 @@ extern const int16_t fc2_weight[64][256];
 extern const int16_t fc2_bias[64];
 extern const int16_t fc3_weight[1][64];
 extern const int16_t fc3_bias[1];
-
-// Convert piece type to index (0-11)
-const int piece_to_plane[128] = {
-    ['p'] = 0, ['P'] = 1, ['n'] = 2, ['N'] = 3, ['b'] = 4,  ['B'] = 5,
-    ['r'] = 6, ['R'] = 7, ['q'] = 8, ['Q'] = 9, ['k'] = 10, ['K'] = 11,
-};
 
 void init_nnue(Chess* chess) {
     memset(chess->nnue.input, 0, sizeof(chess->nnue.input));  // Fill input accumulator with 0
@@ -119,6 +123,62 @@ int forward(Chess* chess) {
     vec16_add(1, output, fc3_bias, output);
     return (int)output[0] * 100 / fc3_k;
 }
+
+#elif defined MODEL_ARCH2
+
+const int fc1_k = 7444;
+const int fc2_k = 6146;
+const int fc3_k = 18325;
+const int fc4_k = 3384;
+extern const int16_t fc1_weight[769][1024];
+extern const int16_t fc1_bias[1024];
+extern const int16_t fc2_weight[256][1024];
+extern const int16_t fc2_bias[256];
+extern const int16_t fc3_weight[128][256];
+extern const int16_t fc3_bias[128];
+extern const int16_t fc4_weight[1][128];
+extern const int16_t fc4_bias[1];
+
+void init_nnue(Chess* chess) {
+    memset(chess->nnue.input, 0, sizeof(chess->nnue.input));  // Fill input accumulator with 0
+    memcpy(chess->nnue.y1, fc1_bias, sizeof(fc1_bias));       // Start with bias values
+}
+
+int forward(Chess* chess) {
+    uint64_t input[13] = {
+        chess->bb.black_pawns,
+        chess->bb.white_pawns,
+        chess->bb.black_knights,
+        chess->bb.white_knights,
+        chess->bb.black_bishops,
+        chess->bb.white_bishops,
+        chess->bb.black_rooks,
+        chess->bb.white_rooks,
+        chess->bb.black_queens,
+        chess->bb.white_queens,
+        chess->bb.black_kings,
+        chess->bb.white_kings,
+        !chess->turn,  // Turn is flipped in NNUE, white is 1, black is 0
+    };
+
+    int16_t x1[1024], x2[256], x3[128], output[1];
+    mat16_mul_bitvec_efficient(1024, fc1_weight, input, chess->nnue.input, chess->nnue.y1);
+    clamp16(1024, chess->nnue.y1, x1, 0, fc1_k);
+
+    mat16_mul(256, 1024, fc2_weight, x1, x2, fc1_k);
+    vec16_add(256, x2, fc2_bias, x2);
+    clamp16(256, x2, x2, 0, fc2_k);
+
+    mat16_mul(128, 256, fc3_weight, x2, x3, fc2_k);
+    vec16_add(128, x3, fc3_bias, x3);
+    clamp16(128, x3, x3, 0, fc3_k);
+
+    mat16_mul(1, 128, fc4_weight, x3, output, fc3_k);
+    vec16_add(1, output, fc4_bias, output);
+    return (int)output[0] * 100 / fc4_k;
+}
+
+#endif
 
 /* Test function */
 

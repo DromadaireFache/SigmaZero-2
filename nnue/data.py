@@ -1,4 +1,5 @@
 import glob
+import math
 import os
 import shutil
 import time
@@ -41,15 +42,15 @@ def _iter_arrow_record_batches(file_path: str):
             
 
 @njit
-def parse_eval(cp: Optional[int], mate: Optional[int]) -> Optional[int]:
+def parse_eval(cp: Optional[int], mate: Optional[int]) -> Optional[float]:
     if mate is not None:
         # Convert mate-in-N to a large eval that decays with distance
-        # mate-in-1 = 9900cp, mate-in-10 = 9000cp, etc.
+        # mate-in-1 -> 2400cp, mate-in-10 -> 1770cp, mate-in-30 -> 1200cp, ...
         sign = 1 if mate > 0 else -1
-        cp = sign * (10000 - abs(mate) * 100)
+        cp = sign * (10 + 15 * math.exp(-abs(mate) / 15)) * 100
     elif cp is None:
         return None
-    return cp
+    return max(min(cp / 100.0, 25.0), -25.0)
 
 
 class HFDataset(torch.utils.data.IterableDataset):
@@ -144,7 +145,7 @@ class HFDataset(torch.utils.data.IterableDataset):
                     if parsed_eval is None:
                         continue
                     batch_inputs.append(self.chess_nn.fen_to_input(fen))
-                    batch_targets.append(parsed_eval / 100.0)
+                    batch_targets.append(parsed_eval)
 
                 pending_norm += time.perf_counter() - parse_start
                 file_fetch_start = time.perf_counter()
