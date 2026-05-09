@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdatomic.h>
+#include <time.h>
 
 #include "chess.h"
 
@@ -34,8 +35,8 @@ extern atomic_size_t nodes_searched;
 #endif
 
 #ifdef _WIN32
-#include <time.h>
 #define TIME_TYPE clock_t
+#define TIME_MAX INT32_MAX
 #define TIME_NOW() clock()
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / CLOCKS_PER_SEC)
 #define TIME_TO_S(t) ((double)(t) / CLOCKS_PER_SEC)
@@ -49,7 +50,6 @@ static inline int cpu_count(void) {
 
 #else
 #include <unistd.h>
-#include <time.h>
 static inline int cpu_count(void) {
     long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
     return (nprocs > 0) ? nprocs : 1;
@@ -64,6 +64,7 @@ __attribute__((always_inline)) static inline uint64_t now_nanos() {
     return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 }
 #define TIME_TYPE uint64_t
+#define TIME_MAX UINT64_MAX
 #define TIME_NOW() now_nanos()
 #define TIME_DIFF_S(end, start) ((double)((end) - (start)) / 1000000000.0)
 #define TIME_TO_S(t) ((double)(t) / 1000000000.0)

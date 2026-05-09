@@ -233,13 +233,13 @@ int eval_command(Chess* chess, int depth) {
             int window_alpha = ASP_WINDOW_ALPHA_INIT, window_beta = ASP_WINDOW_BETA_INIT;
 
             if (d == 0) {
-                score = -minimax(chess, UINT64_MAX, d, -INF, INF, EMPTY, 0);
+                score = -minimax(chess, TIME_MAX, d, -INF, INF, EMPTY, 0);
             } else {
                 int prev_score = score;
                 while (1) {
                     int alpha = prev_score - window_alpha;
                     int beta = prev_score + window_beta;
-                    score = -minimax(chess, UINT64_MAX, d, -beta, -alpha, EMPTY, 0);
+                    score = -minimax(chess, TIME_MAX, d, -beta, -alpha, EMPTY, 0);
                     if (score <= alpha) {
                         if (window_alpha > 100) {
                             window_alpha = INF;
@@ -317,7 +317,7 @@ int minmax_command(int depth) {
         fen[strcspn(fen, "\r\n")] = 0;
         Chess* chess = Chess_from_fen(fen);
         if (chess == NULL) continue;
-        minimax(chess, UINT64_MAX, depth, -INF, INF, EMPTY, 0);
+        minimax(chess, TIME_MAX, depth, -INF, INF, EMPTY, 0);
         fens++;
         if (TIME_DIFF_S(TIME_NOW(), start) > 60) break;
     }
@@ -365,7 +365,7 @@ int compute_eval_loss() {
         Chess* chess = Chess_from_fen(fen);
         if (chess == NULL) continue;  // failed to parse FEN
         // int sigmazero_eval = eval(chess);
-        int sigmazero_eval = minimax(chess, UINT64_MAX, 3, -INF, INF, EMPTY, 0);
+        int sigmazero_eval = minimax(chess, TIME_MAX, 3, -INF, INF, EMPTY, 0);
 
         // clamp error
         int diff = sigmazero_eval - stockfish_eval;
