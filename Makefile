@@ -1,16 +1,22 @@
 CC=gcc
-CFLAGS=-Wall -Werror -Wno-unused-function -MMD -MP -O3 -march=native -mtune=native
+BASE_CFLAGS=-Wall -Werror -Wno-unused-function -MMD -MP -O3 -march=native -mtune=native
+CFLAGS=$(BASE_CFLAGS) $(PROFILE_USE_FLAGS)
 EXE :=
 TARGET=engine$(EXE)
 DEBUG_TARGET=$(TARGET)_debug$(EXE)
 SRC_DIR=src
 BUILD_DIR=.build
+PROFILE_RAW=$(BUILD_DIR)/profile.profraw
+PROFILE_DATA=$(BUILD_DIR)/profile.profdata
+PROFILE_USE_FLAGS=$(if $(wildcard $(PROFILE_DATA)),-fprofile-instr-use=$(PROFILE_DATA))
+PROFILE_GENERATE_FLAGS=-fprofile-instr-generate=$(PROFILE_RAW)
 DEBUG_MODE ?= full
 DEBUG_ALLOWED_MODES := full symbols asan ubsan tsan lsan define
 EXCLUDED=consts_backup.h
 EXTRA_SRCS=magicbb/moves.c nnue/params.c
 UNAME_S := $(shell uname -s)
 MATH_LIB :=
+LLVM_PROFDATA := llvm-profdata
 RM_RF := rm -rf
 MKDIR_P := mkdir -p
 TOUCH_GITIGNORE := echo '*' > $(BUILD_DIR)/.gitignore
@@ -26,6 +32,10 @@ endif
 
 ifeq ($(UNAME_S),Linux)
 MATH_LIB := -lm
+endif
+
+ifeq ($(UNAME_S),Darwin)
+LLVM_PROFDATA := xcrun llvm-profdata
 endif
 
 SRCS := $(filter-out $(addprefix $(SRC_DIR)/,$(EXCLUDED)),$(wildcard $(SRC_DIR)/*.c))
@@ -66,6 +76,14 @@ DEBUG_CFLAGS += $(ADDITIONAL_FLAGS)
 
 all: $(TARGET)
 debug: $(DEBUG_TARGET)
+profile:
+	$(RM_RF) "$(BUILD_DIR)" "$(TARGET)"
+	$(MKDIR_P) "$(BUILD_DIR)"
+	$(MAKE) CFLAGS="$(BASE_CFLAGS) $(PROFILE_GENERATE_FLAGS)" PROFILE_USE_FLAGS= all
+	LLVM_PROFILE_FILE="$(PROFILE_RAW)" ./$(TARGET) play "r1b2rk1/1p2bppp/p1nppn2/q7/2P1P3/N1N5/PP2BPPP/R1BQ1RK1 w - - 0 30" 10000
+	$(LLVM_PROFDATA) merge -o "$(PROFILE_DATA)" "$(PROFILE_RAW)"
+	$(RM_RF) $(OBJS) $(DEPS) "$(TARGET)"
+	$(MAKE) all
 help:
 	@echo "Usage:"
 	@echo "  make                  Build release binary ($(TARGET))"
@@ -73,6 +91,7 @@ help:
 	@echo "  make debug            Build debug binary ($(DEBUG_TARGET)) with mode 'full'"
 	@echo "  make debug <mode>     Build debug binary with mode: $(DEBUG_ALLOWED_MODES)"
 	@echo "  make debug DEBUG_MODE=<mode>"
+	@echo "  make profile          Generate and use release PGO data"
 	@echo "  make clean            Remove build artifacts"
 	@echo ""
 	@echo "Debug modes:"
@@ -108,7 +127,7 @@ $(BUILD_DIR):
 $(DEBUG_BUILD_DIR):
 	$(MKDIR_P) "$(DEBUG_BUILD_DIR)"
 
-.PHONY: clean debug help
+.PHONY: clean debug help profile
 clean:
 	$(RM_RF) "$(BUILD_DIR)" "$(TARGET)" "$(DEBUG_TARGET)" magicbb_generator
 
