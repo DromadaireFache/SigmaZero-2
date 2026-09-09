@@ -1,0 +1,12 @@
+chess==1.11.2
+datasets==4.8.5
+func_timeout==4.3.5
+matplotlib==3.10.9
+numba==0.65.1
+numpy==2.4.4
+pyarrow==24.0.0
+pytest==9.0.3
+pywebview==6.2.1
+torch==2.11.0
+tqdm==4.67.3
+zstandard==0.25.0

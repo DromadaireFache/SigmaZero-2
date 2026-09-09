@@ -79,9 +79,9 @@ const int piece_to_plane[128] = {
 #ifdef MODEL_ARCH1
 
 // Constants and parameters defined in params.c for Arch1 model
-const int fc1_k = 6872;
-const int fc2_k = 5463;
-const int fc3_k = 1338;
+const int fc1_k = 6498;
+const int fc2_k = 5061;
+const int fc3_k = 1135;
 extern const int16_t fc1_weight[769][256];
 extern const int16_t fc1_bias[256];
 extern const int16_t fc2_weight[64][256];
