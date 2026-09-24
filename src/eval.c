@@ -163,7 +163,10 @@ int bishop_pawn_penalty(bitboard_t bishops, bitboard_t pawns) {
     return penalty;
 }
 
-/*
+// #define CLASSIC_EVAL
+
+#ifdef CLASSIC_EVAL
+
 int eval(Chess* chess) {
     // npm is a measure from 0-24, 0 being kings/pawns and 24 is full board. This will now be used
     // to interpolate between opening and endgame positions instead of using fullmoves, but to be
@@ -218,9 +221,12 @@ int eval(Chess* chess) {
 
     return e;
 }
-    */
 
-// New NNUE evaluation function
+#else
+
+// NNUE evaluation function
 int eval(Chess* chess) {
     return forward(chess);
 }
+
+#endif
