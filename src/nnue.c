@@ -79,19 +79,19 @@ const int piece_to_plane[128] = {
 #ifdef MODEL_ARCH1
 
 // Constants and parameters defined in params.c for Arch1 model
-const int fc1_k = 6498;
-const int fc2_k = 5061;
-const int fc3_k = 1135;
-extern const int16_t fc1_weight[769][256];
-extern const int16_t fc1_bias[256];
-extern const int16_t fc2_weight[64][256];
-extern const int16_t fc2_bias[64];
-extern const int16_t fc3_weight[1][64];
-extern const int16_t fc3_bias[1];
+extern const int16_t arch1_fc1_weight[769][256];
+extern const int16_t arch1_fc1_bias[256];
+extern const int16_t arch1_fc2_weight[64][256];
+extern const int16_t arch1_fc2_bias[64];
+extern const int16_t arch1_fc3_weight[1][64];
+extern const int16_t arch1_fc3_bias[1];
+extern const int arch1_fc1_k;
+extern const int arch1_fc2_k;
+extern const int arch1_fc3_k;
 
 void init_nnue(Chess* chess) {
     memset(chess->nnue.input, 0, sizeof(chess->nnue.input));  // Fill input accumulator with 0
-    memcpy(chess->nnue.y1, fc1_bias, sizeof(fc1_bias));       // Start with bias values
+    memcpy(chess->nnue.y1, arch1_fc1_bias, sizeof(arch1_fc1_bias));       // Start with bias values
 }
 
 int forward(Chess* chess) {
@@ -112,36 +112,36 @@ int forward(Chess* chess) {
     };
 
     int16_t x1[256], x2[64], output[1];
-    mat16_mul_bitvec_efficient(256, fc1_weight, input, chess->nnue.input, chess->nnue.y1);
-    clamp16(256, chess->nnue.y1, x1, 0, fc1_k);
+    mat16_mul_bitvec_efficient(256, arch1_fc1_weight, input, chess->nnue.input, chess->nnue.y1);
+    clamp16(256, chess->nnue.y1, x1, 0, arch1_fc1_k);
 
-    mat16_mul(64, 256, fc2_weight, x1, x2, fc1_k);
-    vec16_add(64, x2, fc2_bias, x2);
-    clamp16(64, x2, x2, 0, fc2_k);
+    mat16_mul(64, 256, arch1_fc2_weight, x1, x2, arch1_fc1_k);
+    vec16_add(64, x2, arch1_fc2_bias, x2);
+    clamp16(64, x2, x2, 0, arch1_fc2_k);
 
-    mat16_mul(1, 64, fc3_weight, x2, output, fc2_k);
-    vec16_add(1, output, fc3_bias, output);
-    return (int)output[0] * 100 / fc3_k;
+    mat16_mul(1, 64, arch1_fc3_weight, x2, output, arch1_fc2_k);
+    vec16_add(1, output, arch1_fc3_bias, output);
+    return (int)output[0] * 100 / arch1_fc3_k;
 }
 
 #elif defined MODEL_ARCH2
 
-const int fc1_k = 7444;
-const int fc2_k = 6146;
-const int fc3_k = 18325;
-const int fc4_k = 3384;
-extern const int16_t fc1_weight[769][1024];
-extern const int16_t fc1_bias[1024];
-extern const int16_t fc2_weight[256][1024];
-extern const int16_t fc2_bias[256];
-extern const int16_t fc3_weight[128][256];
-extern const int16_t fc3_bias[128];
-extern const int16_t fc4_weight[1][128];
-extern const int16_t fc4_bias[1];
+extern const int16_t arch2_fc1_weight[769][1024];
+extern const int16_t arch2_fc1_bias[1024];
+extern const int16_t arch2_fc2_weight[256][1024];
+extern const int16_t arch2_fc2_bias[256];
+extern const int16_t arch2_fc3_weight[128][256];
+extern const int16_t arch2_fc3_bias[128];
+extern const int16_t arch2_fc4_weight[1][128];
+extern const int16_t arch2_fc4_bias[1];
+extern const int arch2_fc1_k;
+extern const int arch2_fc2_k;
+extern const int arch2_fc3_k;
+extern const int arch2_fc4_k;
 
 void init_nnue(Chess* chess) {
     memset(chess->nnue.input, 0, sizeof(chess->nnue.input));  // Fill input accumulator with 0
-    memcpy(chess->nnue.y1, fc1_bias, sizeof(fc1_bias));       // Start with bias values
+    memcpy(chess->nnue.y1, arch2_fc1_bias, sizeof(arch2_fc1_bias));       // Start with bias values
 }
 
 int forward(Chess* chess) {
@@ -162,20 +162,20 @@ int forward(Chess* chess) {
     };
 
     int16_t x1[1024], x2[256], x3[128], output[1];
-    mat16_mul_bitvec_efficient(1024, fc1_weight, input, chess->nnue.input, chess->nnue.y1);
-    clamp16(1024, chess->nnue.y1, x1, 0, fc1_k);
+    mat16_mul_bitvec_efficient(1024, arch2_fc1_weight, input, chess->nnue.input, chess->nnue.y1);
+    clamp16(1024, chess->nnue.y1, x1, 0, arch2_fc1_k);
 
-    mat16_mul(256, 1024, fc2_weight, x1, x2, fc1_k);
-    vec16_add(256, x2, fc2_bias, x2);
-    clamp16(256, x2, x2, 0, fc2_k);
+    mat16_mul(256, 1024, arch2_fc2_weight, x1, x2, arch2_fc1_k);
+    vec16_add(256, x2, arch2_fc2_bias, x2);
+    clamp16(256, x2, x2, 0, arch2_fc2_k);
 
-    mat16_mul(128, 256, fc3_weight, x2, x3, fc2_k);
-    vec16_add(128, x3, fc3_bias, x3);
-    clamp16(128, x3, x3, 0, fc3_k);
+    mat16_mul(128, 256, arch2_fc3_weight, x2, x3, arch2_fc2_k);
+    vec16_add(128, x3, arch2_fc3_bias, x3);
+    clamp16(128, x3, x3, 0, arch2_fc3_k);
 
-    mat16_mul(1, 128, fc4_weight, x3, output, fc3_k);
-    vec16_add(1, output, fc4_bias, output);
-    return (int)output[0] * 100 / fc4_k;
+    mat16_mul(1, 128, arch2_fc4_weight, x3, output, arch2_fc3_k);
+    vec16_add(1, output, arch2_fc4_bias, output);
+    return (int)output[0] * 100 / arch2_fc4_k;
 }
 
 #endif

@@ -13,7 +13,7 @@ PROFILE_GENERATE_FLAGS=-fprofile-instr-generate=$(PROFILE_RAW)
 DEBUG_MODE ?= full
 DEBUG_ALLOWED_MODES := full symbols asan ubsan tsan lsan define
 EXCLUDED=consts_backup.h
-EXTRA_SRCS=magicbb/moves.c nnue/params.c
+EXTRA_SRCS := $(wildcard magicbb/moves.c nnue/params/*.c)
 UNAME_S := $(shell uname -s)
 MATH_LIB :=
 LLVM_PROFDATA := llvm-profdata

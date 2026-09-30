@@ -59,7 +59,7 @@ typedef struct {
 
 typedef struct {
     uint64_t input[13];
-    int16_t y1[256];
+    int16_t y1[1024];
 } NNUEAcc;
 
 // The chessboard

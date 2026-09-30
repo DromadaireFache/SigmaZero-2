@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from .archs.chessnn import ChessNN
 import numpy as np
 from typing import TextIO
@@ -31,15 +33,18 @@ def quantize(model: ChessNN):
     state = model.state_dict()
     factors = {}
     extern_decls = []
+    
+    stem = Path(model.model_path).stem
+    Path("nnue/params").mkdir(parents=True, exist_ok=True)
 
-    with open("nnue/params.c", "w") as f:
+    with open(f"nnue/params/{stem}.c", "w") as f:
         f.write("#include <stdint.h>\n\n")
         
         # Write the quantized parameters to C arrays
         for name, param in state.items():
             array = param.cpu().numpy()
             layer = name.split(".")[0]  # e.g. "fc1", "fc2", "fc3"
-            name = name.replace(".", "_")  # Replace dots with underscores for C variable names
+            name = stem + "_" + name.replace(".", "_")  # Replace dots with underscores for C variable names
             max_value = np.max(np.abs(array))
             
             # Transpose the weights of the first fully connected layer for better memory access patterns in C
@@ -55,10 +60,13 @@ def quantize(model: ChessNN):
             extern_decl = write_array(f, name, array * factors[layer], int16_max)  # Clamp to int16 range
             extern_decls.append(extern_decl)
     
+        for layer, factor in factors.items():
+            f.write(f"const int {stem}_{layer}_k = {factor};\n")
+            
     print("Quantization complete. Parameters written to nnue/params.c")
     print("Add the following quantization factors and extern declarations:")
 
-    for layer, factor in factors.items():
-        print(f"const int {layer}_k = {factor};")
     for decl in extern_decls:
         print(decl)
+    for layer, factor in factors.items():
+        print(f"extern const int {stem}_{layer}_k;")
