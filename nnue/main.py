@@ -374,11 +374,12 @@ if __name__ == "__main__":
     elif command == "quantize":
         parser = argparse.ArgumentParser(description="Quantize a ChessNN model and export parameters to C")
         parser.add_argument("chess_nn", type=str, help="ChessNN architecture to quantize (e.g. 'arch1')")
+        parser.add_argument("int_type", type=str, choices=["int8", "int16", "int32", "int64"], help="Integer type to use for quantization")
         args = parser.parse_args(sys.argv[2:])
 
         chess_nn = archs.get_arch(args.chess_nn)
         chess_nn.load_model(allow_missing=False)
-        quantize(chess_nn)
+        quantize(chess_nn, args.int_type)
 
         fens = [
             "rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",  # white up a queen

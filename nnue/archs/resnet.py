@@ -32,3 +32,11 @@ class ChessResNet(ClassicArch):
         x = torch.clamp(self.input_proj(x), 0, 1)
         x = self.blocks(x)
         return self.output(x)
+    
+    
+# Print parameters
+if __name__ == "__main__":
+    model = ChessResNet()
+    print(model)
+    print(model.state_dict().keys())
+    print(f"Number of parameters: {sum(p.numel() for p in model.parameters())}")

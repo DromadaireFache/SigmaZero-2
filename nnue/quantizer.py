@@ -3,22 +3,22 @@ import numpy as np
 from typing import TextIO
 
 
-def write_array(f: TextIO, name: str, array: np.ndarray, max_val: int):
+def write_array(f: TextIO, name: str, array: np.ndarray, max_val: int, int_type: str):
     if len(array.shape) == 1:
-        decl = f"const int16_t {name}[{len(array)}]"
+        decl = f"const {int_type} {name}[{len(array)}]"
     else:
-        decl = f"const int16_t {name}[{len(array)}][{array.shape[1]}]"
+        decl = f"const {int_type} {name}[{len(array)}][{array.shape[1]}]"
     f.write(f"{decl} = {{")
     for i in range(len(array)):
         if len(array.shape) == 1:
             w = int(array[i])
-            assert -max_val <= w <= max_val, f"Value {w} at index {i} exceeds int16 range after quantization"
+            assert -max_val <= w <= max_val, f"Value {w} at index {i} exceeds {int_type} range after quantization"
             f.write(f"{w}, " if i < len(array) - 1 else f"{w}")
         else:
             f.write("{")
             for j in range(array.shape[1]):
                 w = int(array[i, j])
-                assert -max_val <= w <= max_val, f"Value {w} at index {i} exceeds int16 range after quantization"
+                assert -max_val <= w <= max_val, f"Value {w} at index {i} exceeds {int_type} range after quantization"
                 f.write(f"{w}, " if j < array.shape[1] - 1 else f"{w}")
             f.write("}, " if i < len(array) - 1 else "}")
     f.write("};\n")
@@ -26,8 +26,10 @@ def write_array(f: TextIO, name: str, array: np.ndarray, max_val: int):
     extern_decl = f"extern {decl};"
     return extern_decl
 
-def quantize(model: ChessNN):
-    int16_max = 32767
+def quantize(model: ChessNN, int_type: str):
+    scalar_type = np.dtype(int_type)
+    int_max = np.iinfo(scalar_type).max
+    c_int_type = int_type + "_t"
     state = model.state_dict()
     factors = {}
     extern_decls = []
@@ -48,17 +50,18 @@ def quantize(model: ChessNN):
                 array = array.T
             
             if layer not in factors:
-                factor = int(int16_max // 16 // max_value) if max_value > 0 else 1
-                assert int16_max >= factor > 0, f"Quantization factor {factor} for layer {layer} is out of int16 range"
+                factor = int(int_max // max_value) if max_value > 0 else 1
+                assert factor > 0, f"Quantization factor {factor} for layer {layer} is invalid"
                 factors[layer] = factor
             
-            extern_decl = write_array(f, name, array * factors[layer], int16_max)  # Clamp to int16 range
+            quantized = np.rint(array * factors[layer]).astype(scalar_type)
+            extern_decl = write_array(f, name, quantized, int_max, c_int_type)
             extern_decls.append(extern_decl)
-    
+
     print("Quantization complete. Parameters written to nnue/params.c")
     print("Add the following quantization factors and extern declarations:")
 
     for layer, factor in factors.items():
-        print(f"const int {layer}_k = {factor};")
+        print(f"const value_t {layer}_k = {factor};")
     for decl in extern_decls:
         print(decl)

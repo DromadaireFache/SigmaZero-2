@@ -1,0 +1,6 @@
+# Ignore pytorch models
+*.pt -text -diff
+*.pth -text -diff
+
+# Ignore params.c
+nnue/params.c -text -diff

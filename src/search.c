@@ -5,6 +5,7 @@
 #include "chess.h"
 #include "eval.h"
 #include "movegen.h"
+#include "nnue.h"
 #include "pthread.h"
 #include "tt.h"
 
@@ -609,7 +610,9 @@ void* play_thread(void* arg) {
 
     while (1) {
         if (!task_pop(&task, endtime)) break;
-        if (task.depth >= 64) continue;
+        if (task.depth >= 64) {
+            continue;
+        }
         Chess* chess = &task.chess;
         int depth = task.depth;
         Piece capture = task.capture;
