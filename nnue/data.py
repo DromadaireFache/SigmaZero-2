@@ -53,12 +53,34 @@ def parse_eval(cp: Optional[int], mate: Optional[int]) -> Optional[float]:
     return max(min(cp / 100.0, 25.0), -25.0)
 
 
+MISSING_VALUE = np.iinfo(np.int64).min
+
+
+@njit
+def parse_eval_batch(cp_values: np.ndarray, mate_values: np.ndarray):
+    targets = np.empty(cp_values.shape[0], dtype=np.float32)
+    valid = np.ones(cp_values.shape[0], dtype=np.bool_)
+    for index in range(cp_values.shape[0]):
+        cp = cp_values[index]
+        mate = mate_values[index]
+        if mate != MISSING_VALUE:
+            sign = 1 if mate > 0 else -1
+            targets[index] = max(min(sign * (10 + 15 * math.exp(-abs(mate) / 15)) , 25.0), -25.0)
+        elif cp != MISSING_VALUE:
+            targets[index] = max(min(cp / 100.0, 25.0), -25.0)
+        else:
+            targets[index] = 0.0
+            valid[index] = False
+    return targets, valid
+
+
 class HFDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
         chess_nn: ChessNN,
         split: str,
         max_samples=None,
+        epoch_samples=None,
         seed=0,
         val_fraction: float = 0.2,
         dataset_dir: str = DEFAULT_HF_DATASET_DIR,
@@ -68,6 +90,7 @@ class HFDataset(torch.utils.data.IterableDataset):
         self.chess_nn = chess_nn
         self.split = split
         self.max_samples = max_samples
+        self.epoch_samples = epoch_samples
         self.seed = seed
         self.val_fraction = val_fraction
         self.dataset_dir = dataset_dir
@@ -89,6 +112,8 @@ class HFDataset(torch.utils.data.IterableDataset):
             self.total_rows = max_samples
 
     def _split_limit(self):
+        if self.epoch_samples is not None:
+            return self.epoch_samples
         if self.max_samples is None:
             return None
         val_size = int(self.max_samples * self.val_fraction)
@@ -98,6 +123,8 @@ class HFDataset(torch.utils.data.IterableDataset):
     def __len__(self):
         total = self.total_rows
 
+        if self.epoch_samples is not None:
+            return self.epoch_samples
         if self.max_samples is not None:
             split_limit = self._split_limit()
             return split_limit if split_limit is not None else total
@@ -107,7 +134,13 @@ class HFDataset(torch.utils.data.IterableDataset):
         info = torch.utils.data.get_worker_info()
         worker_id = info.id if info is not None else 0
         num_workers = info.num_workers if info is not None else 1
-        worker_files = self.split_files[worker_id::num_workers]
+        epoch = getattr(self, "_epoch", 0)
+        self._epoch = epoch + 1
+        file_order = list(self.split_files)
+        rng = np.random.default_rng(self.seed + epoch)
+        if self.epoch_samples is not None:
+            rng.shuffle(file_order)
+        worker_files = file_order[worker_id::num_workers]
         if not worker_files:
             return
 
@@ -137,24 +170,32 @@ class HFDataset(torch.utils.data.IterableDataset):
                 cp_values = record_batch.column(cp_index).to_pylist()
                 mate_values = record_batch.column(mate_index).to_pylist()
                 fen_values = record_batch.column(fen_index).to_pylist()
-                batch_inputs = []
-                batch_targets = []
+                cp_array = np.asarray(
+                    [MISSING_VALUE if value is None else value for value in cp_values], dtype=np.int64
+                )
+                mate_array = np.asarray(
+                    [MISSING_VALUE if value is None else value for value in mate_values], dtype=np.int64
+                )
+                targets, valid = parse_eval_batch(cp_array, mate_array)
+                valid_indices = np.flatnonzero(valid)
+                if self.epoch_samples is not None:
+                    rng.shuffle(valid_indices)
+                if limit is not None:
+                    remaining = limit - produced
+                    if remaining <= 0:
+                        return
+                    valid_indices = valid_indices[:remaining]
+                selected_fens = [fen_values[index] for index in valid_indices]
 
-                for cp, mate, fen in zip(cp_values, mate_values, fen_values):
-                    parsed_eval = parse_eval(cp, mate)
-                    if parsed_eval is None:
-                        continue
-                    batch_inputs.append(self.chess_nn.fen_to_input(fen))
-                    batch_targets.append(parsed_eval)
-
-                pending_norm += time.perf_counter() - parse_start
-                file_fetch_start = time.perf_counter()
-
-                if not batch_inputs:
+                if not selected_fens:
+                    pending_norm += time.perf_counter() - parse_start
+                    file_fetch_start = time.perf_counter()
                     continue
 
-                inputs = torch.stack(batch_inputs)
-                targets = torch.tensor(batch_targets, dtype=torch.float32)
+                inputs = torch.from_numpy(self.chess_nn.fens_to_input(selected_fens))
+                targets = torch.from_numpy(targets[valid_indices].copy())
+                pending_norm += time.perf_counter() - parse_start
+                file_fetch_start = time.perf_counter()
 
                 yield inputs, targets, np.float32(pending_fetch), np.float32(pending_norm)
                 pending_fetch = 0.0
