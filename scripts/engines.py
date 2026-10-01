@@ -126,7 +126,7 @@ class SigmaZeroEngine(Engine):
         else:
             return result.stdout.strip()
 
-    def play(self, board: chess.Board | str, millis: int, tries: int = 3) -> dict:
+    def play(self, board: chess.Board | str, millis: int, tries: int = 3) -> dict | None:
         if isinstance(board, str):
             board = chess.Board(board)
         history = get_position_history(board)
@@ -145,7 +145,7 @@ class SigmaZeroEngine(Engine):
             print("Play command failed after multiple attempts.")
             print("Error details:", result)
             print(f"fen: {board.fen()}, millis: {millis}, history: {history_str}")
-            sys.exit(1)
+        return None
 
     def version(self) -> str:
         return self.command(["version"], JSON=False)
