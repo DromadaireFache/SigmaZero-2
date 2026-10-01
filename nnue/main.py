@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nnue import archs
 from nnue.archs.chessnn import ChessNN
-from nnue.data import HFDataset, ensure_encoded_dataset, ensure_local_dataset, DEFAULT_HF_DATASET_DIR
+from nnue.data import HFDataset, ensure_local_dataset, DEFAULT_HF_DATASET_DIR
 from nnue.quantizer import quantize
 from scripts import nn_engine
 from scripts.engines import Engine
@@ -323,7 +323,6 @@ if __name__ == "__main__":
 
         chess_nn = archs.get_arch(args.chess_nn)
         chess_nn.load_model(allow_missing=True)
-        ensure_encoded_dataset(args.dataset_dir, chess_nn)
         chess_nn.to(device)
         print("Model parameters:", sum(p.numel() for p in chess_nn.parameters()))
 
