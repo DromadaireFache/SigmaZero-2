@@ -17,6 +17,7 @@ from .archs.chessnn import ChessNN
 
 HF_DATASET_NAME = "Lichess/chess-position-evaluations"
 DEFAULT_HF_DATASET_DIR = "data/hf_chess_position_evaluations"
+ENCODED_CACHE_DIR = "encoded"
 
 def _local_arrow_files(dataset_dir: str) -> list[str]:
     return sorted(glob.glob(os.path.join(dataset_dir, "**/*.arrow"), recursive=True))
@@ -39,6 +40,64 @@ def _iter_arrow_record_batches(file_path: str):
         reader = ipc.open_stream(source)
         for record_batch in reader:
             yield record_batch
+
+
+def _encoded_cache_paths(dataset_dir: str, file_index: int) -> tuple[str, str]:
+    cache_dir = os.path.join(dataset_dir, ENCODED_CACHE_DIR)
+    stem = f"{file_index:06d}"
+    return (
+        os.path.join(cache_dir, f"{stem}.inputs.npy"),
+        os.path.join(cache_dir, f"{stem}.targets.npy"),
+    )
+
+
+def ensure_encoded_dataset(dataset_dir: str, chess_nn: ChessNN):
+    """Pre-encode FENs once so training does not parse them every epoch."""
+    cache_files = _local_arrow_files(dataset_dir)
+    cache_dir = os.path.join(dataset_dir, ENCODED_CACHE_DIR)
+    os.makedirs(cache_dir, exist_ok=True)
+
+    for file_index, file_path in enumerate(tqdm(cache_files, desc="Encoding positions", unit="file")):
+        inputs_path, targets_path = _encoded_cache_paths(dataset_dir, file_index)
+        if os.path.exists(inputs_path) and os.path.exists(targets_path):
+            continue
+
+        valid_rows = 0
+        for record_batch in _iter_arrow_record_batches(file_path):
+            cp_values = record_batch.column(record_batch.schema.get_field_index("cp")).to_pylist()
+            mate_values = record_batch.column(record_batch.schema.get_field_index("mate")).to_pylist()
+            valid_rows += sum(parse_eval(cp, mate) is not None for cp, mate in zip(cp_values, mate_values))
+
+        temp_inputs_path = f"{inputs_path}.tmp"
+        temp_targets_path = f"{targets_path}.tmp"
+        encoded_inputs = np.lib.format.open_memmap(
+            temp_inputs_path, mode="w+", dtype=np.uint8, shape=(valid_rows, 769)
+        )
+        encoded_targets = np.lib.format.open_memmap(
+            temp_targets_path, mode="w+", dtype=np.float32, shape=(valid_rows,)
+        )
+
+        row_index = 0
+        for record_batch in _iter_arrow_record_batches(file_path):
+            cp_index = record_batch.schema.get_field_index("cp")
+            mate_index = record_batch.schema.get_field_index("mate")
+            fen_index = record_batch.schema.get_field_index("fen")
+            cp_values = record_batch.column(cp_index).to_pylist()
+            mate_values = record_batch.column(mate_index).to_pylist()
+            fen_values = record_batch.column(fen_index).to_pylist()
+            for cp, mate, fen in zip(cp_values, mate_values, fen_values):
+                parsed_eval = parse_eval(cp, mate)
+                if parsed_eval is None:
+                    continue
+                encoded_inputs[row_index] = chess_nn.fen_to_input(fen).numpy()
+                encoded_targets[row_index] = parsed_eval
+                row_index += 1
+
+        encoded_inputs.flush()
+        encoded_targets.flush()
+        del encoded_inputs, encoded_targets
+        os.replace(temp_inputs_path, inputs_path)
+        os.replace(temp_targets_path, targets_path)
             
 
 @njit
@@ -82,6 +141,7 @@ class HFDataset(torch.utils.data.IterableDataset):
             for file_index, file_path in enumerate(self.cache_files)
             if (file_index % self.split_every == 0) == (self.split == "val")
         ]
+        self.split_file_indices = [self.cache_files.index(file_path) for file_path in self.split_files]
 
         if max_samples is None:
             self.total_rows = _count_arrow_rows(self.split_files)
@@ -107,8 +167,8 @@ class HFDataset(torch.utils.data.IterableDataset):
         info = torch.utils.data.get_worker_info()
         worker_id = info.id if info is not None else 0
         num_workers = info.num_workers if info is not None else 1
-        worker_files = self.split_files[worker_id::num_workers]
-        if not worker_files:
+        worker_file_indices = self.split_file_indices[worker_id::num_workers]
+        if not worker_file_indices:
             return
 
         limit = None
@@ -120,49 +180,21 @@ class HFDataset(torch.utils.data.IterableDataset):
             limit = base + (1 if worker_id < rem else 0)
 
         produced = 0
-        pending_fetch = 0.0
-        pending_norm = 0.0
-        for file_path in worker_files:
-            file_fetch_start = time.perf_counter()
-            for record_batch in _iter_arrow_record_batches(file_path):
-                fetch_time = time.perf_counter() - file_fetch_start
-                pending_fetch += fetch_time
-
-                parse_start = time.perf_counter()
-                cp_index = record_batch.schema.get_field_index("cp")
-                mate_index = record_batch.schema.get_field_index("mate")
-                fen_index = record_batch.schema.get_field_index("fen")
-                if cp_index < 0 or mate_index < 0 or fen_index < 0:
-                    raise ValueError(f"Arrow batch schema missing required fields: {record_batch.schema}")
-                cp_values = record_batch.column(cp_index).to_pylist()
-                mate_values = record_batch.column(mate_index).to_pylist()
-                fen_values = record_batch.column(fen_index).to_pylist()
-                batch_inputs = []
-                batch_targets = []
-
-                for cp, mate, fen in zip(cp_values, mate_values, fen_values):
-                    parsed_eval = parse_eval(cp, mate)
-                    if parsed_eval is None:
-                        continue
-                    batch_inputs.append(self.chess_nn.fen_to_input(fen))
-                    batch_targets.append(parsed_eval)
-
-                pending_norm += time.perf_counter() - parse_start
-                file_fetch_start = time.perf_counter()
-
-                if not batch_inputs:
-                    continue
-
-                inputs = torch.stack(batch_inputs)
-                targets = torch.tensor(batch_targets, dtype=torch.float32)
-
-                yield inputs, targets, np.float32(pending_fetch), np.float32(pending_norm)
-                pending_fetch = 0.0
-                pending_norm = 0.0
-
-                produced += inputs.size(0)
-                if limit is not None and produced >= limit:
-                    return
+        for file_index in worker_file_indices:
+            inputs_path, targets_path = _encoded_cache_paths(self.dataset_dir, file_index)
+            inputs_array = np.load(inputs_path, mmap_mode="r")
+            targets_array = np.load(targets_path, mmap_mode="r")
+            remaining = None if limit is None else limit - produced
+            if remaining is not None and remaining <= 0:
+                return
+            end = len(inputs_array) if remaining is None else min(len(inputs_array), remaining)
+            inputs = torch.from_numpy(inputs_array[:end].copy()).to(dtype=torch.float32)
+            targets = torch.from_numpy(targets_array[:end].copy())
+            if end:
+                yield inputs, targets, np.float32(0.0), np.float32(0.0)
+                produced += end
+            if limit is not None and produced >= limit:
+                return
 
 
 def download_hf_dataset(dataset_dir: str, force: bool = False):
