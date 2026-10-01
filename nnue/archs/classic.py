@@ -73,13 +73,6 @@ class ClassicArch(ChessNN, ABC):
         fen_bytes = np.frombuffer(fen.encode("ascii"), dtype=np.uint8)
         return torch.from_numpy(_fen_bytes_to_array(fen_bytes))
 
-    def fens_to_input(self, fens: list[str]) -> np.ndarray:
-        inputs = np.empty((len(fens), 769), dtype=np.float32)
-        for index, fen in enumerate(fens):
-            fen_bytes = np.frombuffer(fen.encode("ascii"), dtype=np.uint8)
-            inputs[index] = _fen_bytes_to_array(fen_bytes)
-        return inputs
-
 
 class Arch1(ClassicArch):
     def __init__(self, dropout_p: float = 0.10):

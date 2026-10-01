@@ -303,12 +303,6 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser(description="Train a ChessNN model")
         parser.add_argument("chess_nn", type=str, help="ChessNN architecture to use (e.g. 'arch1')")
         parser.add_argument("--max-samples", type=int, default=None, help="Max number of samples")
-        parser.add_argument(
-            "--epoch-samples",
-            type=int,
-            default=None,
-            help="Random training samples per epoch (default: use the full training split)",
-        )
         parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
         parser.add_argument("--batch-size", type=int, default=4096, help="Training batch size")
         parser.add_argument(
@@ -342,7 +336,6 @@ if __name__ == "__main__":
             chess_nn,
             split="train",
             max_samples=args.max_samples,
-            epoch_samples=args.epoch_samples,
             dataset_dir=args.dataset_dir,
         )
         val_set = HFDataset(
