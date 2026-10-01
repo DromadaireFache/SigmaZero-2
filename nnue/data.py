@@ -2,12 +2,10 @@ import glob
 import math
 import os
 import shutil
-import time
 from typing import Optional
 import torch
 import pyarrow as pa
 import pyarrow.ipc as ipc
-import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm
 from numba import njit
@@ -120,15 +118,8 @@ class HFDataset(torch.utils.data.IterableDataset):
             limit = base + (1 if worker_id < rem else 0)
 
         produced = 0
-        pending_fetch = 0.0
-        pending_norm = 0.0
         for file_path in worker_files:
-            file_fetch_start = time.perf_counter()
             for record_batch in _iter_arrow_record_batches(file_path):
-                fetch_time = time.perf_counter() - file_fetch_start
-                pending_fetch += fetch_time
-
-                parse_start = time.perf_counter()
                 cp_index = record_batch.schema.get_field_index("cp")
                 mate_index = record_batch.schema.get_field_index("mate")
                 fen_index = record_batch.schema.get_field_index("fen")
@@ -147,18 +138,13 @@ class HFDataset(torch.utils.data.IterableDataset):
                     batch_inputs.append(self.chess_nn.fen_to_input(fen))
                     batch_targets.append(parsed_eval)
 
-                pending_norm += time.perf_counter() - parse_start
-                file_fetch_start = time.perf_counter()
-
                 if not batch_inputs:
                     continue
 
                 inputs = torch.stack(batch_inputs)
                 targets = torch.tensor(batch_targets, dtype=torch.float32)
 
-                yield inputs, targets, np.float32(pending_fetch), np.float32(pending_norm)
-                pending_fetch = 0.0
-                pending_norm = 0.0
+                yield inputs, targets
 
                 produced += inputs.size(0)
                 if limit is not None and produced >= limit:

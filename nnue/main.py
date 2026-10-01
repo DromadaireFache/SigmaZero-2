@@ -2,7 +2,6 @@ import glob
 import os
 import shutil
 import typing
-import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -75,26 +74,11 @@ def training_loop(
         seen = 0
         train_iter = iter(train_loader)
         train_pbar = tqdm(total=len(train_loader.dataset), desc=f"Epoch {epoch+1}/{epochs} - Training")
-        step = 0
-        ds_fetch_total = 0.0
-        ds_norm_total = 0.0
-        transfer_total = 0.0
-        step_total = 0.0
         while True:
-            wait_start = time.perf_counter()
             try:
-                inputs, targets, ds_fetch_times, ds_norm_times = next(train_iter)
+                inputs, targets = next(train_iter)
             except StopIteration:
                 break
-            wait_time = time.perf_counter() - wait_start
-            raw_ds_fetch = float(ds_fetch_times)
-            raw_ds_norm = float(ds_norm_times)
-            raw_ds_total = raw_ds_fetch + raw_ds_norm
-            if raw_ds_total > 0.0:
-                ds_fetch_total += wait_time * (raw_ds_fetch / raw_ds_total)
-                ds_norm_total += wait_time * (raw_ds_norm / raw_ds_total)
-            else:
-                ds_fetch_total += wait_time
 
             batch_size_actual = inputs.size(0)
             for start in range(0, batch_size_actual, batch_size):
@@ -102,64 +86,35 @@ def training_loop(
                 input_chunk = inputs[start:end]
                 target_chunk = targets[start:end]
 
-                transfer_start = time.perf_counter()
                 input_chunk = input_chunk.to(device)
                 target_chunk = target_chunk.float().to(device)
-                transfer_time = time.perf_counter() - transfer_start
 
-                step_start = time.perf_counter()
                 optimizer.zero_grad()
                 outputs = model(input_chunk)
                 loss = criterion(outputs.squeeze(), target_chunk)
                 loss.backward()
                 optimizer.step()
-                step_time = time.perf_counter() - step_start
 
                 total_loss += loss.item() * input_chunk.size(0)
                 seen += input_chunk.size(0)
-                step += 1
-                transfer_total += transfer_time
-                step_total += step_time
                 train_pbar.update(input_chunk.size(0))
         train_pbar.close()
         avg_loss = total_loss / seen
         train_losses.append(avg_loss)
-        print(
-            "Epoch "
-            f"{epoch+1}/{epochs} - Training Loss: {avg_loss:.4f} "
-            f"(ds_fetch {ds_fetch_total:.2f}s, "
-            f"ds_normalize {ds_norm_total:.2f}s, "
-            f"to_device {transfer_total:.2f}s, "
-            f"step {step_total:.2f}s)"
-        )
+        print(f"Epoch {epoch+1}/{epochs} - Training Loss: {avg_loss:.4f}")
 
         # Validation
         model.eval()
         val_loss = 0
         val_seen = 0
-        val_steps = 0
-        val_ds_fetch_total = 0.0
-        val_ds_norm_total = 0.0
-        val_transfer_total = 0.0
         with torch.no_grad():
             val_iter = iter(val_loader)
             val_pbar = tqdm(total=len(val_loader.dataset), desc=f"Epoch {epoch+1}/{epochs} - Validation")
             while True:
-                wait_start = time.perf_counter()
                 try:
-                    inputs, targets, ds_fetch_times, ds_norm_times = next(val_iter)
+                    inputs, targets = next(val_iter)
                 except StopIteration:
                     break
-                wait_time = time.perf_counter() - wait_start
-                val_steps += 1
-                raw_ds_fetch = float(ds_fetch_times)
-                raw_ds_norm = float(ds_norm_times)
-                raw_ds_total = raw_ds_fetch + raw_ds_norm
-                if raw_ds_total > 0.0:
-                    val_ds_fetch_total += wait_time * (raw_ds_fetch / raw_ds_total)
-                    val_ds_norm_total += wait_time * (raw_ds_norm / raw_ds_total)
-                else:
-                    val_ds_fetch_total += wait_time
 
                 batch_size_actual = inputs.size(0)
                 for start in range(0, batch_size_actual, batch_size):
@@ -167,10 +122,8 @@ def training_loop(
                     input_chunk = inputs[start:end]
                     target_chunk = targets[start:end]
 
-                    transfer_start = time.perf_counter()
                     input_chunk = input_chunk.to(device)
                     target_chunk = target_chunk.float().to(device)
-                    val_transfer_total += time.perf_counter() - transfer_start
 
                     outputs = model(input_chunk)
                     loss = criterion(outputs.squeeze(), target_chunk)
@@ -181,12 +134,7 @@ def training_loop(
         avg_val_loss = val_loss / max(val_seen, 1)
         val_losses.append(avg_val_loss)
         scheduler.step(avg_val_loss)
-        print(
-            f"Epoch {epoch+1}/{epochs} - Validation Loss: {avg_val_loss:.4f} "
-            f"(ds_fetch {val_ds_fetch_total:.2f}s, "
-            f"ds_normalize {val_ds_norm_total:.2f}s, "
-            f"to_device {val_transfer_total:.2f}s)"
-        )
+        print(f"Epoch {epoch+1}/{epochs} - Validation Loss: {avg_val_loss:.4f}")
 
         # Save model checkpoint
         model.save_model()
