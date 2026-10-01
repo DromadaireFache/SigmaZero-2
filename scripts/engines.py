@@ -178,18 +178,27 @@ class OldEngine(SigmaZeroEngine):
         self.make()
 
     def make(self):
-        if subprocess.run("make magicbb/moves.o", shell=True, capture_output=True).returncode != 0:
-            print("Compilation failed for magicbb/moves.o")
+        if subprocess.run("make -s .build/magicbb/moves.o", shell=True, capture_output=True).returncode != 0:
+            print("Compilation failed for .build/magicbb/moves.o")
             sys.exit(1)
             
-        def create_symlink(filename: str):
-            src_path = os.path.abspath(filename)
-            link_path = os.path.abspath(f"versions/{self.version_name}/{filename}")
-            if not os.path.exists(link_path):
+        def create_symlink(source_filename: str, link_filename: str = None):
+            src_path = os.path.abspath(source_filename)
+            link_filename = link_filename or source_filename
+            link_path = os.path.abspath(f"versions/{self.version_name}/{link_filename}")
+            if os.path.lexists(link_path):
+                if os.path.islink(link_path):
+                    if os.path.realpath(link_path) == src_path:
+                        return
+                    os.unlink(link_path)
+                else:
+                    return
+
+            if not os.path.lexists(link_path):
                 os.makedirs(os.path.dirname(link_path), exist_ok=True)
                 os.symlink(src_path, link_path)
         
-        create_symlink("magicbb/moves.o")
+        create_symlink(".build/magicbb/moves.o", "magicbb/moves.o")
         create_symlink("magicbb/moves.c")
         
         # Create a .gitignore file in the magicbb directory
