@@ -68,7 +68,7 @@ void print_vec16(const int16_t* x, int size) {
 
 /* Neural network functions */
 
-#define MODEL_RESNET
+#define MODEL_TINY
 
 // Convert piece type to index (0-11)
 const int piece_to_plane[128] = {
@@ -176,6 +176,53 @@ int forward(Chess* chess) {
     mat16_mul(1, 128, arch2_fc4_weight, x3, output, arch2_fc3_k);
     vec16_add(1, output, arch2_fc4_bias, output);
     return (int)output[0] * 100 / arch2_fc4_k;
+}
+
+#elif defined MODEL_TINY
+
+extern const int16_t tiny_fc1_weight[769][32];
+extern const int16_t tiny_fc1_bias[32];
+extern const int16_t tiny_fc2_weight[64][32];
+extern const int16_t tiny_fc2_bias[64];
+extern const int16_t tiny_fc3_weight[1][64];
+extern const int16_t tiny_fc3_bias[1];
+extern const int tiny_fc1_k;
+extern const int tiny_fc2_k;
+extern const int tiny_fc3_k;
+
+void init_nnue(Chess* chess) {
+    memset(chess->nnue.input, 0, sizeof(chess->nnue.input));  // Fill input accumulator with 0
+    memcpy(chess->nnue.y1, tiny_fc1_bias, sizeof(tiny_fc1_bias));  // Start with bias values
+}
+
+int forward(Chess* chess) {
+    uint64_t input[13] = {
+        chess->bb.black_pawns,
+        chess->bb.white_pawns,
+        chess->bb.black_knights,
+        chess->bb.white_knights,
+        chess->bb.black_bishops,
+        chess->bb.white_bishops,
+        chess->bb.black_rooks,
+        chess->bb.white_rooks,
+        chess->bb.black_queens,
+        chess->bb.white_queens,
+        chess->bb.black_kings,
+        chess->bb.white_kings,
+        !chess->turn,  // Turn is flipped in NNUE, white is 1, black is 0
+    };
+
+    int16_t x1[32], x2[64], output[1];
+    mat16_mul_bitvec_efficient(32, tiny_fc1_weight, input, chess->nnue.input, chess->nnue.y1);
+    vec16_clamp(32, chess->nnue.y1, x1, 0, tiny_fc1_k);
+
+    mat16_mul(64, 32, tiny_fc2_weight, x1, x2, tiny_fc1_k);
+    vec16_add(64, x2, tiny_fc2_bias, x2);
+    vec16_clamp(64, x2, x2, 0, tiny_fc2_k);
+
+    mat16_mul(1, 64, tiny_fc3_weight, x2, output, tiny_fc2_k);
+    vec16_add(1, output, tiny_fc3_bias, output);
+    return (int)output[0] * 100 / tiny_fc3_k;
 }
 
 #elif defined MODEL_RESNET
