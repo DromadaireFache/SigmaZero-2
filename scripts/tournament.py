@@ -323,6 +323,9 @@ class SprtTournament(Tournament):
                     except FunctionTimedOut:
                         print("Game timed out. Skipping to next game.")
                         continue
+                    except Exception as e:
+                        print(f"Game failed with exception: {e}. Skipping to next game.")
+                        continue
                     if not game:
                         print("Game failed. Skipping to next game.")
                         continue
