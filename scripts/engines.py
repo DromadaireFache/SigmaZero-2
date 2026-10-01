@@ -182,19 +182,30 @@ class OldEngine(SigmaZeroEngine):
             print("Compilation failed for magicbb/moves.o")
             sys.exit(1)
             
-        def link_moves(filename: str):
-            src_path = os.path.abspath(f"magicbb/{filename}")
-            link_path = os.path.abspath(f"versions/{self.version_name}/magicbb/{filename}")
+        def create_symlink(filename: str):
+            src_path = os.path.abspath(filename)
+            link_path = os.path.abspath(f"versions/{self.version_name}/{filename}")
             if not os.path.exists(link_path):
                 os.makedirs(os.path.dirname(link_path), exist_ok=True)
                 os.symlink(src_path, link_path)
         
-        link_moves("moves.o")
-        link_moves("moves.c")
+        create_symlink("magicbb/moves.o")
+        create_symlink("magicbb/moves.c")
         
+        # Create a .gitignore file in the magicbb directory
         gitignore = os.path.abspath(f"versions/{self.version_name}/magicbb/.gitignore")
         if not os.path.exists(gitignore):
             with open(gitignore, "w") as f:
+                f.write("*\n")
+                
+        for file in Path("nnue/params").rglob("*"):
+            if file.is_file():
+                create_symlink(str(file))
+        
+        # Create a .gitignore file in the nnue/params directory
+        gitignore_params = os.path.abspath(f"versions/{self.version_name}/nnue/params/.gitignore")
+        if not os.path.exists(gitignore_params):
+            with open(gitignore_params, "w") as f:
                 f.write("*\n")
         
         if subprocess.run(f"make -s -C versions/{self.version_name}", shell=True, capture_output=True).returncode != 0:
