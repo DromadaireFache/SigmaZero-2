@@ -68,7 +68,7 @@ void print_vec16(const int16_t* x, int size) {
 
 /* Neural network functions */
 
-#define MODEL_TINY
+#define MODEL_ARCH1
 
 // Convert piece type to index (0-11)
 const int piece_to_plane[128] = {
