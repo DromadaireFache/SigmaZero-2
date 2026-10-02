@@ -54,6 +54,7 @@ if __name__ == "__main__":
     p.add_argument("engine2", type=str, default="stockfish", help="Second engine to compete (default: stockfish)")
     p.add_argument("--millis", type=int, nargs="+", default=[10], help="Time per move in ms (default: 10)")
     p.add_argument("--games", type=int, default=500, help="Number of games to play (default: 500)")
+    p.add_argument("--fail-is-ok", action="store_true", help="If set, will skip games that fail instead of raising an exception")
 
     # Subcommand for running the app
     p = subparsers.add_parser("app", help="Run the pywebview app")
@@ -89,7 +90,7 @@ if __name__ == "__main__":
             millis = (args.millis[0], args.millis[0])
         else:
             millis = (args.millis[0], args.millis[1])
-        Tournament(engine1=engine1, engine2=engine2, millis=millis, n_games=args.games, exit_on_interrupt=True)
+        Tournament(engine1=engine1, engine2=engine2, millis=millis, n_games=args.games, exit_on_interrupt=True, fail_is_ok=args.fail_is_ok)
 
     elif args.command == "app":
         app.start("app/index.html")

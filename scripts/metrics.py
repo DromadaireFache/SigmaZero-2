@@ -2,8 +2,9 @@ from time import time
 from tqdm import TqdmWarning, tqdm
 import warnings
 
-from .engines import SigmaZeroEngine
+from .engines import SigmaZeroEngine, UCIEngine
 from . import chessdata
+from .tournament import Tournament
 
 warnings.filterwarnings("ignore", category=TqdmWarning)
 
@@ -32,15 +33,27 @@ class TimedProgress:
         return True
 
 
-def print_formatted_results(results: dict[str, tuple[float, float]]):
+def print_formatted_results(results: dict[str, int | float | tuple[float, float]]):
     print("\nMetric Results:")
-    for metric, (mean, se) in results.items():
-        if metric.lower() == "time":
-            print(f"{metric}: {mean:.2f}s ± {se:.2f}s")
-        elif mean >= 1e6:
-            print(f"{metric}: {mean/1e6:.2f}M ± {se/1e6:.2f}M")
+    for metric, result in results.items():
+        if isinstance(result, tuple):
+            mean, se = result
+            if metric.lower() == "time":
+                print(f"{metric}: {mean:.2f}s ± {se:.2f}s")
+            elif mean >= 1e6:
+                print(f"{metric}: {mean/1e6:.2f}M ± {se/1e6:.2f}M")
+            else:
+                print(f"{metric}: {mean:.2f} ± {se:.2f}")
+                
         else:
-            print(f"{metric}: {mean:.2f} ± {se:.2f}")
+            if metric.lower() == "time":
+                print(f"{metric}: {result:.2f}s")
+            elif result >= 1e6:
+                print(f"{metric}: {result/1e6:.2f}M")
+            elif isinstance(result, float):
+                print(f"{metric}: {result:.2f}")
+            else:
+                print(f"{metric}: {result}")
 
 
 def report_movegen(engine: SigmaZeroEngine, duration: int = 60):
@@ -133,12 +146,68 @@ def report_accuracy(engine: SigmaZeroEngine, duration: int = 60):
     )
 
 
+def report_checkmates(engine: SigmaZeroEngine, duration: int = 60):
+    """
+    Reports the number of moves the engine took to checkmate stockfish in winning endgames.
+    This function purely exists to fix the bug where the engine sometimes fails to find a checkmate in winning endgames.
+    """
+    fens = [
+        "8/8/3k4/8/8/3KR3/8/8 w - - 0 60",  # KR vs k
+        "8/8/3kr3/8/8/3K4/8/8 b - - 0 60",  # K vs kr
+        # "8/8/3k4/8/8/3KQ3/8/8 w - - 0 60",  # KQ vs k
+        # "8/8/3kq3/8/8/3K4/8/8 b - - 0 60",  # K vs kq
+        # "8/8/3k4/8/8/3KP3/8/8 w - - 0 60",  # KP vs k
+        # "8/8/3kp3/8/8/3K4/8/8 b - - 0 60",  # K vs kp
+        # "8/8/3k4/8/8/3KBB2/8/8 w - - 0 60",  # KBB vs k
+        # "8/8/3kbb2/8/8/3K4/8/8 b - - 0 60",  # K vs kbb
+        # "8/8/3k4/8/8/3KNN2/8/8 w - - 0 60",  # KNN vs k
+        # "8/8/3knn2/8/8/3K4/8/8 b - - 0 60",  # K vs knn
+        # "8/8/3k4/8/8/3KNB2/8/8 w - - 0 60",  # KNB vs k
+        # "8/8/3knb2/8/8/3K4/8/8 b - - 0 60",  # K vs knb
+    ]
+
+    n_draws = 0
+    n_wins = 0
+    moves_to_checkmate = []
+
+    tournament = Tournament(
+        engine1=engine,
+        engine2=UCIEngine("stockfish"),
+        millis=(100, 10), # Give stockfish 10ms per move to make it play instantly
+        n_games=0, # We supply the games one by one
+        auto_run=False,
+    )
+    
+    for fen in fens:
+        for _ in range(20): # Play each position 5 times to account for randomness
+            results = tournament.play_game(fen, is_white=fen.split()[1] == "w")
+            if results["score"] == 1:
+                n_wins += 1
+                moves_to_checkmate.append(results["n_moves"])
+                print(f"{fen.ljust(40)}  Checkmate in {results['n_moves']} moves")
+            elif results["score"] == 0:
+                n_draws += 1
+                print(f"{fen.ljust(40)}  Draw")
+            else:
+                print("Something went wrong with the game.")
+            print("")
+            
+    print_formatted_results(
+        {
+            "Checkmates Found": n_wins,
+            "Draws": n_draws,
+            "Moves to Checkmate": mean_and_se(moves_to_checkmate),
+        }
+    )
+
+
 available_metrics = {
     "movegen": report_movegen,
     "depth": report_depth,  # Placeholder for depth metric
     "nodes": lambda engine, duration: None,  # Placeholder for nodes metric
     "beta_cutoffs": lambda engine, duration: None,  # Placeholder for beta cutoffs metric
     "accuracy": report_accuracy,
+    "checkmates": report_checkmates,
 }
 
 

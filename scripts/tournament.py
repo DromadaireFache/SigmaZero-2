@@ -48,6 +48,8 @@ class Tournament:
         score_to_beat: int | None = None,
         required_score: int = -100,
         exit_on_interrupt: bool = False,
+        auto_run: bool = True,
+        fail_is_ok: bool = False
     ):
         self.engine1 = engine1
         self.engine2 = engine2
@@ -60,7 +62,8 @@ class Tournament:
         self.required_score = required_score
         self.exit_on_interrupt = exit_on_interrupt
         self.elo_is_available = False
-        self.results = self.run()
+        self.fail_is_ok = fail_is_ok  # If True, will skip games that fail instead of raising an exception
+        self.results = self.run() if auto_run else {}
         
     def _game_timeout_seconds(self, fen, is_white):
         # self.millis is a tuple (ms_engine1, ms_engine2)
@@ -69,7 +72,7 @@ class Tournament:
 
     @func_set_timeout(_game_timeout_seconds)  # 5 minute timeout for a single game to prevent hanging
     def play_game(self, fen: str, is_white: bool) -> dict:
-        results = {"score": 0, "time_2": 0, "time_1": 0, "avg_depth_1": 0, "avg_depth_2": 0}
+        results = {"score": 0, "time_2": 0, "time_1": 0, "avg_depth_1": 0, "avg_depth_2": 0, "n_moves": 0}
         board = chess.Board(fen)
         number_of_moves = 0
 
@@ -99,6 +102,7 @@ class Tournament:
                 move = chess.Move.from_uci(move_uci)
                 if move in board.legal_moves:
                     board.push(move)
+                    results["n_moves"] += 1
                     number_of_moves += 1
                 else:
                     illegal_move(board, move_uci, result)
@@ -140,6 +144,12 @@ class Tournament:
                 except FunctionTimedOut:
                     print("Game timed out. Skipping to next game.")
                     continue
+                except Exception as e:
+                    if self.fail_is_ok:
+                        print(f"Game failed with exception: {e}. Skipping to next game.")
+                        continue
+                    else:
+                        raise e
 
                 print("End FEN:", result.get("end_fen", "N/A"))
                 print(f"Time {result['time_1']:.2f}s / {result['time_2']:.2f}s")
