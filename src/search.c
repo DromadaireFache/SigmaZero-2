@@ -367,13 +367,24 @@ int minimax_captures_only(Chess* chess, int a, int b) {
     int best_score = e;
 
     // Stand Pat
-    if (best_score >= b) return TT_store(hash, best_score, -1, TT_LOWER, (Move){0});  // Failed high
+    if (best_score > b) return best_score; // Failed high
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
     int scores[MAX_LEGAL_MOVES];
     size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, true);
-    int original_a = a;
+
+    // Prioritize TT best move
+    size_t tt_i = hash & (TT_LENGTH - 1);
+    TTItem* tt_item = &tt[tt_i];
+    if (tt_item->key == hash) {
+        for (int i = 0; i < n_moves; i++) {
+            if (moves[i].from == tt_item->best_from && moves[i].to == tt_item->best_to) {
+                scores[i] += TT_MOVE_BONUS;
+                break;
+            }
+        }
+    }
 
     for (int i = 0; i < n_moves; i++) {
         if (i < SELECT_MOVE_CUTOFF) select_best_move(moves, scores, i, n_moves);
@@ -402,13 +413,10 @@ int minimax_captures_only(Chess* chess, int a, int b) {
             best_score = score;
             if (score > a) a = score;
         }
-        if (score >= b) return TT_store(hash, best_score, -1, TT_LOWER, (Move){0});  // Failed high
+        if (score >= b) return best_score;  // Failed high
     }
     
-    if (best_score <= original_a) {
-        return TT_store(hash, best_score, -1, TT_UPPER, (Move){0});  // Failed low
-    }
-    return TT_store(hash, best_score, -1, TT_EXACT, (Move){0});
+    return best_score;
 }
 
 static inline int compute_reduction(int depth, int i) {

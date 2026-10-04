@@ -3,7 +3,7 @@
 #include <stdlib.h>
 
 // Transposition table
-typedef enum { TT_EXACT, TT_LOWER, TT_UPPER } TTNodeType;
+typedef enum { TT_EMPTY, TT_EXACT, TT_LOWER, TT_UPPER } TTNodeType;
 
 typedef struct {
     uint64_t key;
