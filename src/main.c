@@ -16,6 +16,8 @@ int play(char* fen, int millis, char* game_history) {
     if (!chess) return 1;
     if (millis < 1) return 1;
 
+    TT_clear();
+
     if (game_history != NULL) {
         Chess_game_history(chess, game_history);
     }
@@ -187,7 +189,7 @@ int moves(char* fen, int depth) {
 }
 
 int version() {
-    printf("SigmaZero Chess Engine 2.11.0 (2026-09-30)\n");
+    printf("SigmaZero Chess Engine 2.11.2 (2026-10-04)\n");
     return 0;
 }
 

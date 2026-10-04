@@ -367,7 +367,7 @@ int minimax_captures_only(Chess* chess, int a, int b) {
     int best_score = e;
 
     // Stand Pat
-    if (best_score > b) return best_score;  // Failed high
+    if (best_score >= b) return best_score;  // Failed high
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
@@ -375,11 +375,10 @@ int minimax_captures_only(Chess* chess, int a, int b) {
     size_t n_moves = Chess_legal_moves_scored(chess, moves, scores, true);
 
     // Prioritize TT best move
-    size_t tt_i = hash & (TT_LENGTH - 1);
-    TTItem* tt_item = &tt[tt_i];
-    if (tt_item->key == hash) {
+    Move tt_move;
+    if (TT_get_best_move(hash, &tt_move)) {
         for (int i = 0; i < n_moves; i++) {
-            if (moves[i].from == tt_item->best_from && moves[i].to == tt_item->best_to) {
+            if (moves[i].from == tt_move.from && moves[i].to == tt_move.to) {
                 scores[i] += TT_MOVE_BONUS;
                 break;
             }
@@ -438,8 +437,9 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             depth++;
             extensions++;
         } else {
-            int e = minimax_captures_only(chess, a, b);
-            return TT_store(hash, e, depth, TT_EXACT, (Move){0});
+            // int e = minimax_captures_only(chess, a, b);
+            // return TT_store(hash, e, depth, TT_EXACT, (Move){0});
+            return minimax_captures_only(chess, a, b);
         }
     }
 
@@ -499,11 +499,10 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     }
 
     // Prioritize TT best move
-    size_t tt_i = hash & (TT_LENGTH - 1);
-    TTItem* tt_item = &tt[tt_i];
-    if (tt_item->key == hash) {
+    Move tt_move;
+    if (TT_get_best_move(hash, &tt_move)) {
         for (int i = 0; i < n_moves; i++) {
-            if (moves[i].from == tt_item->best_from && moves[i].to == tt_item->best_to) {
+            if (moves[i].from == tt_move.from && moves[i].to == tt_move.to) {
                 scores[i] += TT_MOVE_BONUS;
                 break;
             }
