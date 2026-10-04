@@ -359,7 +359,7 @@ int minimax_captures_only(Chess* chess, int a, int b) {
     // Look for existing eval in transposition table
     uint64_t hash = chess->zhash;
     int tt_eval;
-    if (TT_get(hash, &tt_eval, -1, a, b)) { // depth -1 for quiescence search
+    if (TT_get(hash, &tt_eval, -1, a, b)) {  // depth -1 for quiescence search
         return tt_eval;
     }
 
@@ -367,7 +367,7 @@ int minimax_captures_only(Chess* chess, int a, int b) {
     int best_score = e;
 
     // Stand Pat
-    if (best_score > b) return best_score; // Failed high
+    if (best_score > b) return best_score;  // Failed high
     if (best_score > a) a = best_score;
 
     Move moves[MAX_LEGAL_MOVES];
@@ -415,7 +415,7 @@ int minimax_captures_only(Chess* chess, int a, int b) {
         }
         if (score >= b) return best_score;  // Failed high
     }
-    
+
     return best_score;
 }
 
@@ -431,14 +431,8 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
     atomic_fetch_add(&nodes_searched, 1);
 #endif
 
-    // Look for existing eval in transposition table
-    uint64_t hash = chess->zhash;
-    int tt_eval;
-    if (TT_get(hash, &tt_eval, depth, a, b)) {
-        return tt_eval;
-    }
-
     // Extend search if in check, otherwise don't
+    uint64_t hash = chess->zhash;
     if (depth == 0) {
         if (extensions < MAX_EXTENSION && Chess_friendly_check(chess)) {
             depth++;
@@ -447,6 +441,12 @@ int minimax(Chess* chess, TIME_TYPE endtime, int depth, int a, int b, Piece last
             int e = minimax_captures_only(chess, a, b);
             return TT_store(hash, e, depth, TT_EXACT, (Move){0});
         }
+    }
+
+    // Look for existing eval in transposition table
+    int tt_eval;
+    if (TT_get(hash, &tt_eval, depth, a, b)) {
+        return tt_eval;
     }
 
     // Time cutoff
